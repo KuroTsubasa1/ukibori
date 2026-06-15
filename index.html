@@ -92,7 +92,95 @@ function computeOtsuThreshold(imageData) {
   return threshold;
 }
 window.computeOtsuThreshold = computeOtsuThreshold;
-// implementation grows over the following tasks
+
+const els = {
+  drop: document.getElementById('drop'),
+  file: document.getElementById('file'),
+  thresh: document.getElementById('thresh'),
+  threshVal: document.getElementById('threshVal'),
+  otsu: document.getElementById('otsu'),
+  invert: document.getElementById('invert'),
+  download: document.getElementById('download'),
+  output: document.getElementById('output'),
+  controls: document.getElementById('controls'),
+  status: document.getElementById('status'),
+};
+
+const offscreen = document.createElement('canvas');
+const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
+let originalData = null; // ImageData at full resolution
+
+function setStatus(msg, isError) {
+  els.status.textContent = msg;
+  els.status.className = isError ? 'error' : '';
+}
+
+function enableControls(on) {
+  els.controls.classList.toggle('disabled', !on);
+  [els.thresh, els.otsu, els.invert, els.download].forEach(e => { e.disabled = !on; });
+}
+
+function render() {
+  if (!originalData) return;
+  const out = els.output;
+  out.width = originalData.width;
+  out.height = originalData.height;
+  const ctx = out.getContext('2d');
+  const copy = new ImageData(
+    new Uint8ClampedArray(originalData.data),
+    originalData.width,
+    originalData.height
+  );
+  applyThreshold(copy, Number(els.thresh.value), els.invert.checked);
+  ctx.putImageData(copy, 0, 0);
+  out.classList.add('ready');
+}
+
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) {
+    setStatus('Bitte eine Bilddatei auswählen.', true);
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    offscreen.width = img.naturalWidth;
+    offscreen.height = img.naturalHeight;
+    offCtx.drawImage(img, 0, 0);
+    originalData = offCtx.getImageData(0, 0, offscreen.width, offscreen.height);
+    URL.revokeObjectURL(url);
+    enableControls(true);
+    setStatus(`Geladen: ${img.naturalWidth}×${img.naturalHeight}px`, false);
+    render();
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    setStatus('Bild konnte nicht geladen werden.', true);
+  };
+  img.src = url;
+}
+window.loadFile = loadFile; // exposed for verification
+
+// Additional exposures so the plan's browser_evaluate assertions can reach
+// otherwise script-scoped state.
+window.els = els;
+window.offscreen = offscreen;
+window.offCtx = offCtx;
+window.render = render;
+Object.defineProperty(window, 'originalData', {
+  get() { return originalData; },
+  set(v) { originalData = v; },
+});
+
+els.drop.addEventListener('click', () => els.file.click());
+els.file.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+['dragenter', 'dragover'].forEach(ev =>
+  els.drop.addEventListener(ev, e => { e.preventDefault(); els.drop.classList.add('dragover'); }));
+['dragleave', 'drop'].forEach(ev =>
+  els.drop.addEventListener(ev, e => { e.preventDefault(); els.drop.classList.remove('dragover'); }));
+els.drop.addEventListener('drop', e => {
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
 </script>
 </body>
 </html>
