@@ -18,6 +18,11 @@
 </main>
 <script>
 "use strict";
+// Perceived brightness of an RGB pixel (0..255).
+function rgbToLuminance(r, g, b) {
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+window.rgbToLuminance = rgbToLuminance; // exposed for verification
 // implementation grows over the following tasks
 </script>
 </body>
