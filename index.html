@@ -23,6 +23,21 @@ function rgbToLuminance(r, g, b) {
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 window.rgbToLuminance = rgbToLuminance; // exposed for verification
+
+// Mutates the given ImageData's pixels to pure black/white. Returns it.
+function applyThreshold(imageData, threshold, invert) {
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = rgbToLuminance(d[i], d[i + 1], d[i + 2]);
+    let white = lum >= threshold;
+    if (invert) white = !white;
+    const v = white ? 255 : 0;
+    d[i] = d[i + 1] = d[i + 2] = v;
+    d[i + 3] = 255;
+  }
+  return imageData;
+}
+window.applyThreshold = applyThreshold;
 // implementation grows over the following tasks
 </script>
 </body>
