@@ -5,40 +5,182 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Schwarz-Weiß-Konverter</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 0; background: #f4f4f4; color: #111; }
-  header { padding: 16px 20px; background: #111; color: #fff; }
-  header h1 { margin: 0; font-size: 18px; }
-  main { padding: 20px; max-width: 900px; margin: 0 auto; }
-  #drop { border: 2px dashed #999; border-radius: 8px; padding: 28px; text-align: center; background: #fff; }
-  #drop.dragover { border-color: #111; background: #eee; }
-  .link { color: #06c; cursor: pointer; text-decoration: underline; }
-  #controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin: 16px 0; }
-  #controls.disabled { opacity: 0.5; }
-  #output { max-width: 100%; height: auto; image-rendering: pixelated; border: 1px solid #ccc; background: #fff; display: none; }
-  #output.ready { display: block; }
-  button { padding: 6px 12px; cursor: pointer; }
-  .error { color: #b00; }
+  :root {
+    --bg: #f4f4f7;
+    --panel: #ffffff;
+    --ink: #16161a;
+    --muted: #6b6b76;
+    --line: #e3e3ea;
+    --accent: #4f46e5;
+    --accent-weak: #eef0fe;
+    --danger: #c0392b;
+    --radius: 14px;
+    --shadow: 0 1px 2px rgba(16,16,26,.04), 0 8px 24px rgba(16,16,26,.06);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.45;
+  }
+  .app-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .logo {
+    width: 38px; height: 38px;
+    display: grid; place-items: center;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #fff 0 50%, #16161a 50% 100%);
+    border: 1px solid var(--line);
+    font-size: 0;
+  }
+  .app-header h1 { margin: 0; font-size: 17px; letter-spacing: -.01em; }
+  .app-header .tagline { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
+
+  main { max-width: 1080px; margin: 0 auto; padding: 24px; display: grid; gap: 18px; }
+
+  /* Dropzone */
+  .dropzone {
+    border: 2px dashed #c4c4cf;
+    border-radius: var(--radius);
+    background: var(--panel);
+    padding: 30px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .dropzone:hover { border-color: var(--accent); }
+  .dropzone.dragover { border-color: var(--accent); background: var(--accent-weak); }
+  .dropzone .drop-icon { font-size: 26px; line-height: 1; }
+  .dropzone .drop-title { margin: 10px 0 2px; font-weight: 600; }
+  .dropzone .drop-sub { margin: 0; font-size: 13px; color: var(--muted); }
+  .link { color: var(--accent); cursor: pointer; font-weight: 600; }
+
+  /* Toolbar */
+  .toolbar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 18px 24px;
+    align-items: end;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+    transition: opacity .15s;
+  }
+  .toolbar.disabled { opacity: .5; pointer-events: none; }
+  .field { display: flex; flex-direction: column; gap: 8px; }
+  .field-head { display: flex; align-items: center; justify-content: space-between; }
+  .field-head label { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+  .badge {
+    font-variant-numeric: tabular-nums;
+    font-size: 12px; font-weight: 600;
+    background: var(--accent-weak); color: var(--accent);
+    padding: 2px 9px; border-radius: 999px; min-width: 34px; text-align: center;
+  }
+  input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+  .field-actions { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+  .btn {
+    font: inherit; font-size: 13px; font-weight: 600;
+    padding: 9px 14px; border-radius: 10px;
+    border: 1px solid var(--line); background: #fff; color: var(--ink);
+    cursor: pointer; transition: background .12s, border-color .12s, transform .05s;
+  }
+  .btn:hover { background: #f7f7fb; }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #4338ca; }
+
+  .toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; }
+  .toggle input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+  .status { margin: 0; font-size: 13px; color: var(--muted); }
+  .status.error { color: var(--danger); font-weight: 600; }
+
+  /* Preview */
+  .preview {
+    display: none;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px;
+    background-color: #fff;
+    background-image:
+      linear-gradient(45deg, #ececf2 25%, transparent 25%),
+      linear-gradient(-45deg, #ececf2 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #ececf2 75%),
+      linear-gradient(-45deg, transparent 75%, #ececf2 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+    text-align: center;
+    box-shadow: var(--shadow);
+  }
+  .preview.ready { display: block; }
+  #output {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    box-shadow: 0 2px 10px rgba(16,16,26,.18);
+    background: #fff;
+  }
 </style>
 </head>
 <body>
-<header><h1>Schwarz-Weiß-Konverter</h1></header>
+<header class="app-header">
+  <span class="logo" aria-hidden="true">◐</span>
+  <div>
+    <h1>Schwarz-Weiß-Konverter</h1>
+    <p class="tagline">Farbbild → reines Schwarz/Weiß · komplett lokal im Browser</p>
+  </div>
+</header>
+
 <main>
-  <div id="drop" tabindex="0">
-    <p>Bild hierher ziehen oder <span class="link">auswählen</span><input id="file" type="file" accept="image/*" hidden></p>
-  </div>
+  <section id="drop" class="dropzone" tabindex="0">
+    <div class="drop-icon" aria-hidden="true">⬆</div>
+    <p class="drop-title">Bild hierher ziehen</p>
+    <p class="drop-sub">oder <span class="link">Datei auswählen</span></p>
+    <input id="file" type="file" accept="image/*" hidden>
+  </section>
 
-  <div id="controls" class="disabled">
-    <label>Schwellwert: <span id="threshVal">128</span>
+  <section id="controls" class="toolbar disabled">
+    <div class="field">
+      <div class="field-head">
+        <label for="thresh">Schwellwert</label>
+        <span id="threshVal" class="badge">128</span>
+      </div>
       <input id="thresh" type="range" min="0" max="255" value="128" disabled>
-    </label>
-    <button id="otsu" disabled>Auto (Otsu)</button>
-    <label><input id="invert" type="checkbox" disabled> Invertieren</label>
-    <button id="download" disabled>PNG herunterladen</button>
-  </div>
+    </div>
 
-  <p id="status">Bereit. Lade ein Bild, um zu starten.</p>
-  <canvas id="output"></canvas>
+    <div class="field">
+      <div class="field-head">
+        <label for="island">Inseln entfernen (max. px)</label>
+        <span id="islandVal" class="badge">0</span>
+      </div>
+      <input id="island" type="range" min="0" max="2000" value="0" disabled>
+    </div>
+
+    <div class="field field-actions">
+      <button id="otsu" class="btn" disabled>Auto (Otsu)</button>
+      <label class="toggle"><input id="invert" type="checkbox" disabled> Invertieren</label>
+      <button id="download" class="btn btn-primary" disabled>PNG herunterladen</button>
+    </div>
+  </section>
+
+  <p id="status" class="status">Bereit. Lade ein Bild, um zu starten.</p>
+
+  <section id="preview" class="preview">
+    <canvas id="output"></canvas>
+  </section>
 </main>
+
 <script>
 "use strict";
 // Perceived brightness of an RGB pixel (0..255).
@@ -93,15 +235,59 @@ function computeOtsuThreshold(imageData) {
 }
 window.computeOtsuThreshold = computeOtsuThreshold;
 
+// Removes small color "islands" from an already-binary (0/255) ImageData.
+// Any 4-connected region of one color smaller than minSize pixels is recolored
+// to the opposite color, so it merges into the surrounding area. Works in both
+// directions (black specks in white and white specks in black). Mutates and
+// returns the ImageData. minSize <= 0 is a no-op.
+function removeSmallIslands(imageData, minSize) {
+  if (minSize <= 0) return imageData;
+  const { width, height, data } = imageData;
+  const n = width * height;
+  const visited = new Uint8Array(n);
+  const stack = new Int32Array(n);   // pixel indices to expand
+  const region = new Int32Array(n);  // pixel indices in the current region
+  for (let p = 0; p < n; p++) {
+    if (visited[p]) continue;
+    const color = data[p * 4]; // 0 or 255
+    let sp = 0, count = 0;
+    stack[sp++] = p;
+    visited[p] = 1;
+    while (sp > 0) {
+      const q = stack[--sp];
+      region[count++] = q;
+      const x = q % width;
+      const y = (q - x) / width;
+      if (x > 0)          { const r = q - 1;     if (!visited[r] && data[r * 4] === color) { visited[r] = 1; stack[sp++] = r; } }
+      if (x < width - 1)  { const r = q + 1;     if (!visited[r] && data[r * 4] === color) { visited[r] = 1; stack[sp++] = r; } }
+      if (y > 0)          { const r = q - width; if (!visited[r] && data[r * 4] === color) { visited[r] = 1; stack[sp++] = r; } }
+      if (y < height - 1) { const r = q + width; if (!visited[r] && data[r * 4] === color) { visited[r] = 1; stack[sp++] = r; } }
+    }
+    if (count < minSize) {
+      const opp = color === 0 ? 255 : 0;
+      for (let k = 0; k < count; k++) {
+        const idx = region[k] * 4;
+        data[idx] = data[idx + 1] = data[idx + 2] = opp;
+        data[idx + 3] = 255;
+      }
+    }
+  }
+  return imageData;
+}
+window.removeSmallIslands = removeSmallIslands;
+
 const els = {
   drop: document.getElementById('drop'),
   file: document.getElementById('file'),
   thresh: document.getElementById('thresh'),
   threshVal: document.getElementById('threshVal'),
+  island: document.getElementById('island'),
+  islandVal: document.getElementById('islandVal'),
   otsu: document.getElementById('otsu'),
   invert: document.getElementById('invert'),
   download: document.getElementById('download'),
   output: document.getElementById('output'),
+  preview: document.getElementById('preview'),
   controls: document.getElementById('controls'),
   status: document.getElementById('status'),
 };
@@ -112,12 +298,12 @@ let originalData = null; // ImageData at full resolution
 
 function setStatus(msg, isError) {
   els.status.textContent = msg;
-  els.status.className = isError ? 'error' : '';
+  els.status.className = isError ? 'status error' : 'status';
 }
 
 function enableControls(on) {
   els.controls.classList.toggle('disabled', !on);
-  [els.thresh, els.otsu, els.invert, els.download].forEach(e => { e.disabled = !on; });
+  [els.thresh, els.island, els.otsu, els.invert, els.download].forEach(e => { e.disabled = !on; });
 }
 
 function render() {
@@ -132,8 +318,9 @@ function render() {
     originalData.height
   );
   applyThreshold(copy, Number(els.thresh.value), els.invert.checked);
+  removeSmallIslands(copy, Number(els.island.value));
   ctx.putImageData(copy, 0, 0);
-  out.classList.add('ready');
+  els.preview.classList.add('ready');
 }
 
 function loadFile(file) {
@@ -166,8 +353,8 @@ function loadFile(file) {
 }
 window.loadFile = loadFile; // exposed for verification
 
-// Additional exposures so the plan's browser_evaluate assertions can reach
-// otherwise script-scoped state.
+// Additional exposures so browser_evaluate assertions can reach otherwise
+// script-scoped state.
 window.els = els;
 window.offscreen = offscreen;
 window.offCtx = offCtx;
@@ -189,6 +376,10 @@ els.drop.addEventListener('drop', e => {
 
 els.thresh.addEventListener('input', () => {
   els.threshVal.textContent = els.thresh.value;
+  render();
+});
+els.island.addEventListener('input', () => {
+  els.islandVal.textContent = els.island.value;
   render();
 });
 els.invert.addEventListener('change', render);
