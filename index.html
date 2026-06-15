@@ -9,12 +9,35 @@
   header { padding: 16px 20px; background: #111; color: #fff; }
   header h1 { margin: 0; font-size: 18px; }
   main { padding: 20px; max-width: 900px; margin: 0 auto; }
+  #drop { border: 2px dashed #999; border-radius: 8px; padding: 28px; text-align: center; background: #fff; }
+  #drop.dragover { border-color: #111; background: #eee; }
+  .link { color: #06c; cursor: pointer; text-decoration: underline; }
+  #controls { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin: 16px 0; }
+  #controls.disabled { opacity: 0.5; }
+  #output { max-width: 100%; height: auto; image-rendering: pixelated; border: 1px solid #ccc; background: #fff; display: none; }
+  #output.ready { display: block; }
+  button { padding: 6px 12px; cursor: pointer; }
+  .error { color: #b00; }
 </style>
 </head>
 <body>
 <header><h1>Schwarz-Weiß-Konverter</h1></header>
 <main>
+  <div id="drop" tabindex="0">
+    <p>Bild hierher ziehen oder <label class="link">auswählen<input id="file" type="file" accept="image/*" hidden></label></p>
+  </div>
+
+  <div id="controls" class="disabled">
+    <label>Schwellwert: <span id="threshVal">128</span>
+      <input id="thresh" type="range" min="0" max="255" value="128" disabled>
+    </label>
+    <button id="otsu" disabled>Auto (Otsu)</button>
+    <label><input id="invert" type="checkbox" disabled> Invertieren</label>
+    <button id="download" disabled>PNG herunterladen</button>
+  </div>
+
   <p id="status">Bereit. Lade ein Bild, um zu starten.</p>
+  <canvas id="output"></canvas>
 </main>
 <script>
 "use strict";
