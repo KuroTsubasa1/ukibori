@@ -247,6 +247,22 @@
         </div>
         <input id="levels" type="range" min="2" max="8" value="4" disabled>
       </div>
+
+      <!-- Aufräumen (gilt für den ganzen Farbmodus) -->
+      <div class="field mode-color" hidden>
+        <div class="field-head">
+          <label for="colorIsland">Inseln entfernen (max. px)</label>
+          <span id="colorIslandVal" class="badge">0</span>
+        </div>
+        <input id="colorIsland" type="range" min="0" max="2000" value="0" disabled>
+      </div>
+      <div class="field mode-color" hidden>
+        <div class="field-head">
+          <label for="smooth">Kanten glätten</label>
+          <span id="smoothVal" class="badge">0</span>
+        </div>
+        <input id="smooth" type="range" min="0" max="5" value="0" disabled>
+      </div>
     </div>
 
     <div class="actions">
@@ -441,6 +457,86 @@ function quantizeMedianCut(imageData, numColors) {
 }
 window.quantizeMedianCut = quantizeMedianCut;
 
+// Removes small color islands from a flat-color image (any number of colors).
+// Each 4-connected region of one exact color smaller than minSize pixels is
+// recolored to the color that borders it most, dissolving specks into their
+// surroundings. Mutates and returns the ImageData. minSize <= 0 is a no-op.
+function removeSmallColorIslands(imageData, minSize) {
+  if (minSize <= 0) return imageData;
+  const { width, height, data } = imageData;
+  const n = width * height;
+  const visited = new Uint8Array(n);
+  const stack = new Int32Array(n);
+  const region = new Int32Array(n);
+  const colorOf = (p) => { const i = p * 4; return (data[i] << 16) | (data[i + 1] << 8) | data[i + 2]; };
+  for (let p = 0; p < n; p++) {
+    if (visited[p]) continue;
+    const color = colorOf(p);
+    const border = new Map(); // neighboring color -> shared edge count
+    let sp = 0, count = 0;
+    stack[sp++] = p; visited[p] = 1;
+    while (sp > 0) {
+      const q = stack[--sp];
+      region[count++] = q;
+      const x = q % width, y = (q - x) / width;
+      const neighbors = [];
+      if (x > 0) neighbors.push(q - 1);
+      if (x < width - 1) neighbors.push(q + 1);
+      if (y > 0) neighbors.push(q - width);
+      if (y < height - 1) neighbors.push(q + width);
+      for (const r of neighbors) {
+        const nc = colorOf(r);
+        if (nc === color) {
+          if (!visited[r]) { visited[r] = 1; stack[sp++] = r; }
+        } else {
+          border.set(nc, (border.get(nc) || 0) + 1);
+        }
+      }
+    }
+    if (count < minSize && border.size > 0) {
+      let bestC = -1, bestN = -1;
+      for (const [c, cnt] of border) { if (cnt > bestN) { bestN = cnt; bestC = c; } }
+      const r = (bestC >> 16) & 255, g = (bestC >> 8) & 255, b = bestC & 255;
+      for (let k = 0; k < count; k++) { const idx = region[k] * 4; data[idx] = r; data[idx + 1] = g; data[idx + 2] = b; }
+    }
+  }
+  return imageData;
+}
+window.removeSmallColorIslands = removeSmallColorIslands;
+
+// Majority filter: each pixel becomes the most common color in its 3x3
+// neighborhood, run `passes` times. Smooths ragged edges and clears isolated
+// pixels on flat-color images. Mutates and returns the ImageData. 0 = no-op.
+function majorityFilter(imageData, passes) {
+  if (passes <= 0) return imageData;
+  const { width, height, data } = imageData;
+  for (let pass = 0; pass < passes; pass++) {
+    const src = new Uint8ClampedArray(data); // read from a stable snapshot
+    const counts = new Map();
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        counts.clear();
+        let bestC = -1, bestN = -1;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = y + dy; if (yy < 0 || yy >= height) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx; if (xx < 0 || xx >= width) continue;
+            const i = (yy * width + xx) * 4;
+            const c = (src[i] << 16) | (src[i + 1] << 8) | src[i + 2];
+            const v = (counts.get(c) || 0) + 1;
+            counts.set(c, v);
+            if (v > bestN) { bestN = v; bestC = c; }
+          }
+        }
+        const o = (y * width + x) * 4;
+        data[o] = (bestC >> 16) & 255; data[o + 1] = (bestC >> 8) & 255; data[o + 2] = bestC & 255;
+      }
+    }
+  }
+  return imageData;
+}
+window.majorityFilter = majorityFilter;
+
 const els = {
   drop: document.getElementById('drop'),
   file: document.getElementById('file'),
@@ -458,6 +554,10 @@ const els = {
   numColorsVal: document.getElementById('numColorsVal'),
   levels: document.getElementById('levels'),
   levelsVal: document.getElementById('levelsVal'),
+  colorIsland: document.getElementById('colorIsland'),
+  colorIslandVal: document.getElementById('colorIslandVal'),
+  smooth: document.getElementById('smooth'),
+  smoothVal: document.getElementById('smoothVal'),
   download: document.getElementById('download'),
   output: document.getElementById('output'),
   preview: document.getElementById('preview'),
@@ -479,7 +579,8 @@ function setStatus(msg, isError) {
 
 function enableControls(on) {
   els.controls.classList.toggle('disabled', !on);
-  [els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels, els.download]
+  [els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels,
+   els.colorIsland, els.smooth, els.download]
     .forEach(e => { e.disabled = !on; });
 }
 
@@ -516,10 +617,14 @@ function render() {
   if (mode === 'bw') {
     applyThreshold(copy, Number(els.thresh.value), els.invert.checked);
     removeSmallIslands(copy, Number(els.island.value));
-  } else if (colorMethod === 'palette') {
-    quantizeMedianCut(copy, Number(els.numColors.value));
   } else {
-    posterize(copy, Number(els.levels.value));
+    if (colorMethod === 'palette') {
+      quantizeMedianCut(copy, Number(els.numColors.value));
+    } else {
+      posterize(copy, Number(els.levels.value));
+    }
+    removeSmallColorIslands(copy, Number(els.colorIsland.value));
+    majorityFilter(copy, Number(els.smooth.value));
   }
   ctx.putImageData(copy, 0, 0);
   els.preview.classList.add('ready');
@@ -599,6 +704,14 @@ els.numColors.addEventListener('input', () => {
 });
 els.levels.addEventListener('input', () => {
   els.levelsVal.textContent = els.levels.value;
+  render();
+});
+els.colorIsland.addEventListener('input', () => {
+  els.colorIslandVal.textContent = els.colorIsland.value;
+  render();
+});
+els.smooth.addEventListener('input', () => {
+  els.smoothVal.textContent = els.smooth.value;
   render();
 });
 
