@@ -194,6 +194,14 @@ els.otsu.addEventListener('click', () => {
   els.threshVal.textContent = t;
   render();
 });
+
+els.download.addEventListener('click', () => {
+  if (!originalData) return;
+  const a = document.createElement('a');
+  a.download = 'schwarz-weiss.png';
+  a.href = els.output.toDataURL('image/png');
+  a.click();
+});
 </script>
 </body>
 </html>
