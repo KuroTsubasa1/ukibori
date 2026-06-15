@@ -86,11 +86,11 @@
   body.has-image .dropzone .drop-compact { display: block; }
 
   /* Toolbar */
+  [hidden] { display: none !important; }
   .toolbar {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 18px 24px;
-    align-items: end;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--radius);
@@ -99,6 +99,26 @@
     transition: opacity .15s;
   }
   .toolbar.disabled { opacity: .5; pointer-events: none; }
+  .fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 18px 24px;
+    align-items: end;
+  }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+  /* Segmented control */
+  .seg-group { display: inline-flex; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; }
+  .seg {
+    font: inherit; font-size: 13px; font-weight: 600;
+    padding: 7px 14px; border: 0; border-radius: 7px;
+    background: transparent; color: var(--muted); cursor: pointer;
+    transition: background .12s, color .12s;
+  }
+  .seg:hover { color: var(--ink); }
+  .seg.seg-active { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(16,16,26,.08); }
+  .seg-group.seg-sm .seg { padding: 5px 11px; font-size: 12.5px; }
+
   .field { display: flex; flex-direction: column; gap: 8px; }
   .field-head { display: flex; align-items: center; justify-content: space-between; }
   .field-head label { font-size: 12.5px; font-weight: 600; color: var(--muted); }
@@ -167,7 +187,7 @@
   <span class="logo" aria-hidden="true">◐</span>
   <div>
     <h1>Schwarz-Weiß-Konverter</h1>
-    <p class="tagline">Farbbild → reines Schwarz/Weiß · komplett lokal im Browser</p>
+    <p class="tagline">Schwarz/Weiß oder flache Farben · komplett lokal im Browser</p>
   </div>
 </header>
 
@@ -183,25 +203,55 @@
   </section>
 
   <section id="controls" class="toolbar disabled">
-    <div class="field">
-      <div class="field-head">
-        <label for="thresh">Schwellwert</label>
-        <span id="threshVal" class="badge">128</span>
-      </div>
-      <input id="thresh" type="range" min="0" max="255" value="128" disabled>
+    <div class="seg-group" role="tablist" aria-label="Modus">
+      <button type="button" id="modeBw" class="seg seg-active">Schwarz / Weiß</button>
+      <button type="button" id="modeColor" class="seg">Farben reduzieren</button>
     </div>
 
-    <div class="field">
-      <div class="field-head">
-        <label for="island">Inseln entfernen (max. px)</label>
-        <span id="islandVal" class="badge">0</span>
+    <div class="fields">
+      <!-- Schwarz/Weiß -->
+      <div class="field mode-bw">
+        <div class="field-head">
+          <label for="thresh">Schwellwert</label>
+          <span id="threshVal" class="badge">128</span>
+        </div>
+        <input id="thresh" type="range" min="0" max="255" value="128" disabled>
       </div>
-      <input id="island" type="range" min="0" max="2000" value="0" disabled>
+      <div class="field mode-bw">
+        <div class="field-head">
+          <label for="island">Inseln entfernen (max. px)</label>
+          <span id="islandVal" class="badge">0</span>
+        </div>
+        <input id="island" type="range" min="0" max="2000" value="0" disabled>
+      </div>
+
+      <!-- Farben reduzieren -->
+      <div class="field mode-color" hidden>
+        <div class="field-head"><label>Methode</label></div>
+        <div class="seg-group seg-sm" role="tablist" aria-label="Methode">
+          <button type="button" id="methPalette" class="seg seg-active">Palette</button>
+          <button type="button" id="methPosterize" class="seg">Posterize</button>
+        </div>
+      </div>
+      <div class="field mode-color meth-palette" hidden>
+        <div class="field-head">
+          <label for="numColors">Anzahl Farben</label>
+          <span id="numColorsVal" class="badge">8</span>
+        </div>
+        <input id="numColors" type="range" min="2" max="32" value="8" disabled>
+      </div>
+      <div class="field mode-color meth-posterize" hidden>
+        <div class="field-head">
+          <label for="levels">Stufen pro Kanal</label>
+          <span id="levelsVal" class="badge">4</span>
+        </div>
+        <input id="levels" type="range" min="2" max="8" value="4" disabled>
+      </div>
     </div>
 
-    <div class="field field-actions">
-      <button id="otsu" class="btn" disabled>Auto (Otsu)</button>
-      <label class="toggle"><input id="invert" type="checkbox" disabled> Invertieren</label>
+    <div class="actions">
+      <button id="otsu" class="btn mode-bw" disabled>Auto (Otsu)</button>
+      <label class="toggle mode-bw"><input id="invert" type="checkbox" disabled> Invertieren</label>
       <button id="download" class="btn btn-primary" disabled>PNG herunterladen</button>
     </div>
   </section>
@@ -308,6 +358,89 @@ function removeSmallIslands(imageData, minSize) {
 }
 window.removeSmallIslands = removeSmallIslands;
 
+// Posterize: reduce each RGB channel to `levels` evenly-spaced steps, which
+// collapses smooth gradients into flat bands. Mutates and returns the ImageData.
+function posterize(imageData, levels) {
+  if (levels < 2) levels = 2;
+  const d = imageData.data;
+  const step = 255 / (levels - 1);
+  for (let i = 0; i < d.length; i += 4) {
+    d[i]     = Math.round(Math.round(d[i]     / step) * step);
+    d[i + 1] = Math.round(Math.round(d[i + 1] / step) * step);
+    d[i + 2] = Math.round(Math.round(d[i + 2] / step) * step);
+  }
+  return imageData;
+}
+window.posterize = posterize;
+
+// Median-cut color quantization: reduce the image to at most `numColors`
+// representative flat colors and map every pixel to the nearest one. The
+// palette is built from a sample of pixels for speed; mapping covers all
+// pixels. Mutates and returns the ImageData.
+function quantizeMedianCut(imageData, numColors) {
+  const d = imageData.data;
+  const n = d.length / 4;
+  if (n === 0 || numColors < 1) return imageData;
+
+  // 1. Sample pixels (cap the work for large images).
+  const maxSamples = 20000;
+  const stepPx = Math.max(1, Math.floor(n / maxSamples));
+  const samples = [];
+  for (let p = 0; p < n; p += stepPx) {
+    const i = p * 4;
+    samples.push([d[i], d[i + 1], d[i + 2]]);
+  }
+
+  // 2. Repeatedly split the bucket with the widest color range at its median.
+  let buckets = [samples];
+  while (buckets.length < numColors) {
+    let bi = -1, bestRange = -1, bestCh = 0;
+    for (let b = 0; b < buckets.length; b++) {
+      const bk = buckets[b];
+      if (bk.length < 2) continue;
+      const min = [255, 255, 255], max = [0, 0, 0];
+      for (const s of bk) for (let c = 0; c < 3; c++) {
+        if (s[c] < min[c]) min[c] = s[c];
+        if (s[c] > max[c]) max[c] = s[c];
+      }
+      for (let c = 0; c < 3; c++) {
+        const r = max[c] - min[c];
+        if (r > bestRange) { bestRange = r; bi = b; bestCh = c; }
+      }
+    }
+    if (bi < 0) break; // nothing left to split
+    const bk = buckets[bi];
+    bk.sort((a, b) => a[bestCh] - b[bestCh]);
+    const mid = bk.length >> 1;
+    buckets.splice(bi, 1, bk.slice(0, mid), bk.slice(mid));
+  }
+
+  // 3. Palette = average color of each bucket.
+  const palette = buckets.map(bk => {
+    let r = 0, g = 0, b = 0;
+    for (const s of bk) { r += s[0]; g += s[1]; b += s[2]; }
+    const len = bk.length || 1;
+    return [Math.round(r / len), Math.round(g / len), Math.round(b / len)];
+  });
+
+  // 4. Map every pixel to its nearest palette color (Euclidean in RGB).
+  for (let p = 0; p < n; p++) {
+    const i = p * 4;
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    let best = 0, bestDist = Infinity;
+    for (let k = 0; k < palette.length; k++) {
+      const pc = palette[k];
+      const dr = r - pc[0], dg = g - pc[1], db = b - pc[2];
+      const dist = dr * dr + dg * dg + db * db;
+      if (dist < bestDist) { bestDist = dist; best = k; }
+    }
+    const pc = palette[best];
+    d[i] = pc[0]; d[i + 1] = pc[1]; d[i + 2] = pc[2];
+  }
+  return imageData;
+}
+window.quantizeMedianCut = quantizeMedianCut;
+
 const els = {
   drop: document.getElementById('drop'),
   file: document.getElementById('file'),
@@ -317,12 +450,23 @@ const els = {
   islandVal: document.getElementById('islandVal'),
   otsu: document.getElementById('otsu'),
   invert: document.getElementById('invert'),
+  modeBw: document.getElementById('modeBw'),
+  modeColor: document.getElementById('modeColor'),
+  methPalette: document.getElementById('methPalette'),
+  methPosterize: document.getElementById('methPosterize'),
+  numColors: document.getElementById('numColors'),
+  numColorsVal: document.getElementById('numColorsVal'),
+  levels: document.getElementById('levels'),
+  levelsVal: document.getElementById('levelsVal'),
   download: document.getElementById('download'),
   output: document.getElementById('output'),
   preview: document.getElementById('preview'),
   controls: document.getElementById('controls'),
   status: document.getElementById('status'),
 };
+
+let mode = 'bw';            // 'bw' | 'color'
+let colorMethod = 'palette'; // 'palette' | 'posterize'
 
 const offscreen = document.createElement('canvas');
 const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
@@ -335,12 +479,27 @@ function setStatus(msg, isError) {
 
 function enableControls(on) {
   els.controls.classList.toggle('disabled', !on);
-  [els.thresh, els.island, els.otsu, els.invert, els.download].forEach(e => { e.disabled = !on; });
+  [els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels, els.download]
+    .forEach(e => { e.disabled = !on; });
 }
 
 function setThreshold(t) {
   els.thresh.value = t;
   els.threshVal.textContent = t;
+}
+
+// Show only the controls that belong to the current mode and color method.
+function updateControlVisibility() {
+  const bw = mode === 'bw';
+  const palette = colorMethod === 'palette';
+  document.querySelectorAll('.mode-bw').forEach(e => { e.hidden = !bw; });
+  document.querySelectorAll('.mode-color').forEach(e => { e.hidden = bw; });
+  document.querySelectorAll('.meth-palette').forEach(e => { e.hidden = bw || !palette; });
+  document.querySelectorAll('.meth-posterize').forEach(e => { e.hidden = bw || palette; });
+  els.modeBw.classList.toggle('seg-active', bw);
+  els.modeColor.classList.toggle('seg-active', !bw);
+  els.methPalette.classList.toggle('seg-active', palette);
+  els.methPosterize.classList.toggle('seg-active', !palette);
 }
 
 function render() {
@@ -354,8 +513,14 @@ function render() {
     originalData.width,
     originalData.height
   );
-  applyThreshold(copy, Number(els.thresh.value), els.invert.checked);
-  removeSmallIslands(copy, Number(els.island.value));
+  if (mode === 'bw') {
+    applyThreshold(copy, Number(els.thresh.value), els.invert.checked);
+    removeSmallIslands(copy, Number(els.island.value));
+  } else if (colorMethod === 'palette') {
+    quantizeMedianCut(copy, Number(els.numColors.value));
+  } else {
+    posterize(copy, Number(els.levels.value));
+  }
   ctx.putImageData(copy, 0, 0);
   els.preview.classList.add('ready');
 }
@@ -428,13 +593,39 @@ els.otsu.addEventListener('click', () => {
   render();
 });
 
+els.numColors.addEventListener('input', () => {
+  els.numColorsVal.textContent = els.numColors.value;
+  render();
+});
+els.levels.addEventListener('input', () => {
+  els.levelsVal.textContent = els.levels.value;
+  render();
+});
+
+function setMode(m) {
+  mode = m;
+  updateControlVisibility();
+  render();
+}
+function setColorMethod(m) {
+  colorMethod = m;
+  updateControlVisibility();
+  render();
+}
+els.modeBw.addEventListener('click', () => setMode('bw'));
+els.modeColor.addEventListener('click', () => setMode('color'));
+els.methPalette.addEventListener('click', () => setColorMethod('palette'));
+els.methPosterize.addEventListener('click', () => setColorMethod('posterize'));
+
 els.download.addEventListener('click', () => {
   if (!originalData) return;
   const a = document.createElement('a');
-  a.download = 'schwarz-weiss.png';
+  a.download = mode === 'bw' ? 'schwarz-weiss.png' : 'farben-reduziert.png';
   a.href = els.output.toDataURL('image/png');
   a.click();
 });
+
+updateControlVisibility();
 </script>
 </body>
 </html>
