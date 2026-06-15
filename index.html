@@ -38,6 +38,37 @@ function applyThreshold(imageData, threshold, invert) {
   return imageData;
 }
 window.applyThreshold = applyThreshold;
+
+// Otsu's method: returns the threshold (0..255) maximizing between-class variance.
+function computeOtsuThreshold(imageData) {
+  const d = imageData.data;
+  const hist = new Array(256).fill(0);
+  let total = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = Math.round(rgbToLuminance(d[i], d[i + 1], d[i + 2]));
+    hist[lum]++;
+    total++;
+  }
+  if (total === 0) return 128;
+  let sum = 0;
+  for (let t = 0; t < 256; t++) sum += t * hist[t];
+  let sumB = 0, wB = 0, maxVar = -1, threshold = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (wB === 0) continue;
+    const wF = total - wB;
+    if (wF === 0) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    // >= breaks ties toward the upper edge of a flat variance plateau, so the
+    // chosen threshold lands strictly inside the valley between two clusters.
+    if (between >= maxVar) { maxVar = between; threshold = t; }
+  }
+  return threshold;
+}
+window.computeOtsuThreshold = computeOtsuThreshold;
 // implementation grows over the following tasks
 </script>
 </body>
