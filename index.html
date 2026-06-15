@@ -181,6 +181,19 @@ els.file.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.tar
 els.drop.addEventListener('drop', e => {
   if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
 });
+
+els.thresh.addEventListener('input', () => {
+  els.threshVal.textContent = els.thresh.value;
+  render();
+});
+els.invert.addEventListener('change', render);
+els.otsu.addEventListener('click', () => {
+  if (!originalData) return;
+  const t = computeOtsuThreshold(originalData);
+  els.thresh.value = t;
+  els.threshVal.textContent = t;
+  render();
+});
 </script>
 </body>
 </html>
