@@ -338,6 +338,11 @@ function enableControls(on) {
   [els.thresh, els.island, els.otsu, els.invert, els.download].forEach(e => { e.disabled = !on; });
 }
 
+function setThreshold(t) {
+  els.thresh.value = t;
+  els.threshVal.textContent = t;
+}
+
 function render() {
   if (!originalData) return;
   const out = els.output;
@@ -375,6 +380,7 @@ function loadFile(file) {
     }
     enableControls(true);
     document.body.classList.add('has-image');
+    setThreshold(computeOtsuThreshold(originalData)); // start at the auto value
     setStatus(`Geladen: ${img.naturalWidth}×${img.naturalHeight}px`, false);
     render();
   };
@@ -418,9 +424,7 @@ els.island.addEventListener('input', () => {
 els.invert.addEventListener('change', render);
 els.otsu.addEventListener('click', () => {
   if (!originalData) return;
-  const t = computeOtsuThreshold(originalData);
-  els.thresh.value = t;
-  els.threshVal.textContent = t;
+  setThreshold(computeOtsuThreshold(originalData));
   render();
 });
 
