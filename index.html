@@ -149,7 +149,8 @@
     width: 100%; max-width: 64px; height: 34px; padding: 2px;
     border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer;
   }
-  .fields.circle-row { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .fields.circle-row,
+  .fields.threed-row { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--line); }
 
   .hint { font-size: 11.5px; color: var(--muted); }
   .status { margin: 0; font-size: 13px; color: var(--muted); }
@@ -294,6 +295,32 @@
       <div class="field">
         <div class="field-head"><label for="circleColor">Rahmenfarbe</label></div>
         <input id="circleColor" type="color" value="#000000" disabled>
+      </div>
+    </div>
+
+    <div class="fields threed-row mode-bw" hidden>
+      <div class="field">
+        <div class="field-head"><label for="modelWidth">3D-Breite (mm)</label><span id="modelWidthVal" class="badge">80</span></div>
+        <input id="modelWidth" type="range" min="20" max="300" value="80" step="1" disabled>
+      </div>
+      <div class="field">
+        <div class="field-head"><label for="thickBlack">Dicke Schwarz (mm)</label><span id="thickBlackVal" class="badge">3.0</span></div>
+        <input id="thickBlack" type="range" min="0" max="10" value="3" step="0.2" disabled>
+      </div>
+      <div class="field">
+        <div class="field-head"><label for="thickWhite">Dicke Weiß (mm)</label><span id="thickWhiteVal" class="badge">3.0</span></div>
+        <input id="thickWhite" type="range" min="0" max="10" value="3" step="0.2" disabled>
+      </div>
+      <div class="field">
+        <div class="field-head"><label for="modelRes">Auflösung (px)</label><span id="modelResVal" class="badge">256</span></div>
+        <input id="modelRes" type="range" min="32" max="512" value="256" step="16" disabled>
+      </div>
+      <div class="field">
+        <div class="field-head"><label for="modelSmooth">Glättung</label><span id="modelSmoothVal" class="badge">1.5</span></div>
+        <input id="modelSmooth" type="range" min="0" max="5" value="1.5" step="0.5" disabled>
+      </div>
+      <div class="field" style="justify-content: flex-end;">
+        <button id="modelExport" class="btn btn-primary" disabled>STL exportieren</button>
       </div>
     </div>
 
@@ -600,6 +627,414 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+// ======================================================================
+// 3D model generation: contour tracing -> simplify -> earcut -> extrude.
+// ======================================================================
+
+// --- earcut (MIT, Mapbox), O(n^2) variant: triangulates a polygon w/ holes ---
+function earcut(data, holeIndices, dim) {
+  dim = dim || 2;
+  const hasHoles = holeIndices && holeIndices.length;
+  const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
+  let outerNode = ec_linkedList(data, 0, outerLen, dim, true);
+  const triangles = [];
+  if (!outerNode || outerNode.next === outerNode.prev) return triangles;
+  if (hasHoles) outerNode = ec_eliminateHoles(data, holeIndices, outerNode, dim);
+  ec_earcutLinked(outerNode, triangles, dim);
+  return triangles;
+}
+function ec_linkedList(data, start, end, dim, clockwise) {
+  let i, last;
+  if (clockwise === (ec_signedArea(data, start, end, dim) > 0)) {
+    for (i = start; i < end; i += dim) last = ec_insertNode(i, data[i], data[i + 1], last);
+  } else {
+    for (i = end - dim; i >= start; i -= dim) last = ec_insertNode(i, data[i], data[i + 1], last);
+  }
+  if (last && ec_equals(last, last.next)) { ec_removeNode(last); last = last.next; }
+  return last;
+}
+function ec_filterPoints(start, end) {
+  if (!start) return start;
+  if (!end) end = start;
+  let p = start, again;
+  do {
+    again = false;
+    if (!p.steiner && (ec_equals(p, p.next) || ec_area(p.prev, p, p.next) === 0)) {
+      ec_removeNode(p); p = end = p.prev;
+      if (p === p.next) break;
+      again = true;
+    } else { p = p.next; }
+  } while (again || p !== end);
+  return end;
+}
+function ec_earcutLinked(ear, triangles, dim, pass) {
+  if (!ear) return;
+  let stop = ear, prev, next;
+  while (ear.prev !== ear.next) {
+    prev = ear.prev; next = ear.next;
+    if (ec_isEar(ear)) {
+      triangles.push(prev.i / dim, ear.i / dim, next.i / dim);
+      ec_removeNode(ear);
+      ear = next.next; stop = next.next;
+      continue;
+    }
+    ear = next;
+    if (ear === stop) {
+      if (!pass) ec_earcutLinked(ec_filterPoints(ear), triangles, dim, 1);
+      else if (pass === 1) { ear = ec_cureLocalIntersections(ec_filterPoints(ear), triangles, dim); ec_earcutLinked(ear, triangles, dim, 2); }
+      else if (pass === 2) ec_splitEarcut(ear, triangles, dim);
+      break;
+    }
+  }
+}
+function ec_isEar(ear) {
+  const a = ear.prev, b = ear, c = ear.next;
+  if (ec_area(a, b, c) >= 0) return false;
+  let p = ear.next.next;
+  while (p !== ear.prev) {
+    if (ec_pointInTriangle(a.x, a.y, b.x, b.y, c.x, c.y, p.x, p.y) && ec_area(p.prev, p, p.next) >= 0) return false;
+    p = p.next;
+  }
+  return true;
+}
+function ec_cureLocalIntersections(start, triangles, dim) {
+  let p = start;
+  do {
+    const a = p.prev, b = p.next.next;
+    if (!ec_equals(a, b) && ec_intersects(a, p, p.next, b) && ec_locallyInside(a, b) && ec_locallyInside(b, a)) {
+      triangles.push(a.i / dim, p.i / dim, b.i / dim);
+      ec_removeNode(p); ec_removeNode(p.next);
+      p = start = b;
+    }
+    p = p.next;
+  } while (p !== start);
+  return ec_filterPoints(p);
+}
+function ec_splitEarcut(start, triangles, dim) {
+  let a = start;
+  do {
+    let b = a.next.next;
+    while (b !== a.prev) {
+      if (a.i !== b.i && ec_isValidDiagonal(a, b)) {
+        let c = ec_splitPolygon(a, b);
+        a = ec_filterPoints(a, a.next);
+        c = ec_filterPoints(c, c.next);
+        ec_earcutLinked(a, triangles, dim);
+        ec_earcutLinked(c, triangles, dim);
+        return;
+      }
+      b = b.next;
+    }
+    a = a.next;
+  } while (a !== start);
+}
+function ec_eliminateHoles(data, holeIndices, outerNode, dim) {
+  const queue = [];
+  let i, len, start, end, list;
+  for (i = 0, len = holeIndices.length; i < len; i++) {
+    start = holeIndices[i] * dim;
+    end = i < len - 1 ? holeIndices[i + 1] * dim : data.length;
+    list = ec_linkedList(data, start, end, dim, false);
+    if (list === list.next) list.steiner = true;
+    queue.push(ec_getLeftmost(list));
+  }
+  queue.sort((a, b) => a.x - b.x);
+  for (i = 0; i < queue.length; i++) outerNode = ec_eliminateHole(queue[i], outerNode);
+  return outerNode;
+}
+function ec_eliminateHole(hole, outerNode) {
+  const bridge = ec_findHoleBridge(hole, outerNode);
+  if (!bridge) return outerNode;
+  const bridgeReverse = ec_splitPolygon(bridge, hole);
+  ec_filterPoints(bridgeReverse, bridgeReverse.next);
+  return ec_filterPoints(bridge, bridge.next);
+}
+function ec_findHoleBridge(hole, outerNode) {
+  let p = outerNode, qx = -Infinity, m;
+  const hx = hole.x, hy = hole.y;
+  do {
+    if (hy <= p.y && hy >= p.next.y && p.next.y !== p.y) {
+      const x = p.x + (hy - p.y) * (p.next.x - p.x) / (p.next.y - p.y);
+      if (x <= hx && x > qx) {
+        qx = x;
+        m = p.x < p.next.x ? p : p.next;
+        if (x === hx) return m;
+      }
+    }
+    p = p.next;
+  } while (p !== outerNode);
+  if (!m) return null;
+  const stop = m, mx = m.x, my = m.y;
+  let tanMin = Infinity, tan;
+  p = m;
+  do {
+    if (hx >= p.x && p.x >= mx && hx !== p.x &&
+        ec_pointInTriangle(hy < my ? hx : qx, hy, mx, my, hy < my ? qx : hx, hy, p.x, p.y)) {
+      tan = Math.abs(hy - p.y) / (hx - p.x);
+      if (ec_locallyInside(p, hole) && (tan < tanMin || (tan === tanMin && (p.x > m.x || (p.x === m.x && ec_sectorContains(m, p)))))) {
+        m = p; tanMin = tan;
+      }
+    }
+    p = p.next;
+  } while (p !== stop);
+  return m;
+}
+function ec_sectorContains(m, p) { return ec_area(m.prev, m, p.prev) < 0 && ec_area(p.next, m, m.next) < 0; }
+function ec_getLeftmost(start) {
+  let p = start, leftmost = start;
+  do { if (p.x < leftmost.x || (p.x === leftmost.x && p.y < leftmost.y)) leftmost = p; p = p.next; } while (p !== start);
+  return leftmost;
+}
+function ec_pointInTriangle(ax, ay, bx, by, cx, cy, px, py) {
+  return (cx - px) * (ay - py) >= (ax - px) * (cy - py) &&
+         (ax - px) * (by - py) >= (bx - px) * (ay - py) &&
+         (bx - px) * (cy - py) >= (cx - px) * (by - py);
+}
+function ec_isValidDiagonal(a, b) {
+  return a.next.i !== b.i && a.prev.i !== b.i && !ec_intersectsPolygon(a, b) &&
+    ((ec_locallyInside(a, b) && ec_locallyInside(b, a) && ec_middleInside(a, b) &&
+      (ec_area(a.prev, a, b.prev) || ec_area(a, b.prev, b))) ||
+     (ec_equals(a, b) && ec_area(a.prev, a, a.next) > 0 && ec_area(b.prev, b, b.next) > 0));
+}
+function ec_area(p, q, r) { return (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y); }
+function ec_equals(p1, p2) { return p1.x === p2.x && p1.y === p2.y; }
+function ec_intersects(p1, q1, p2, q2) {
+  const o1 = ec_sign(ec_area(p1, q1, p2)), o2 = ec_sign(ec_area(p1, q1, q2)),
+        o3 = ec_sign(ec_area(p2, q2, p1)), o4 = ec_sign(ec_area(p2, q2, q1));
+  if (o1 !== o2 && o3 !== o4) return true;
+  if (o1 === 0 && ec_onSegment(p1, p2, q1)) return true;
+  if (o2 === 0 && ec_onSegment(p1, q2, q1)) return true;
+  if (o3 === 0 && ec_onSegment(p2, p1, q2)) return true;
+  if (o4 === 0 && ec_onSegment(p2, q1, q2)) return true;
+  return false;
+}
+function ec_onSegment(p, q, r) { return q.x <= Math.max(p.x, r.x) && q.x >= Math.min(p.x, r.x) && q.y <= Math.max(p.y, r.y) && q.y >= Math.min(p.y, r.y); }
+function ec_sign(n) { return n > 0 ? 1 : n < 0 ? -1 : 0; }
+function ec_intersectsPolygon(a, b) {
+  let p = a;
+  do {
+    if (p.i !== a.i && p.next.i !== a.i && p.i !== b.i && p.next.i !== b.i && ec_intersects(p, p.next, a, b)) return true;
+    p = p.next;
+  } while (p !== a);
+  return false;
+}
+function ec_locallyInside(a, b) {
+  return ec_area(a.prev, a, a.next) < 0 ?
+    ec_area(a, b, a.next) >= 0 && ec_area(a, a.prev, b) >= 0 :
+    ec_area(a, b, a.prev) < 0 || ec_area(a, a.next, b) < 0;
+}
+function ec_middleInside(a, b) {
+  let p = a, inside = false;
+  const px = (a.x + b.x) / 2, py = (a.y + b.y) / 2;
+  do {
+    if (((p.y > py) !== (p.next.y > py)) && p.next.y !== p.y && (px < (p.next.x - p.x) * (py - p.y) / (p.next.y - p.y) + p.x)) inside = !inside;
+    p = p.next;
+  } while (p !== a);
+  return inside;
+}
+function ec_splitPolygon(a, b) {
+  const a2 = ec_newNode(a.i, a.x, a.y), b2 = ec_newNode(b.i, b.x, b.y), an = a.next, bp = b.prev;
+  a.next = b; b.prev = a; a2.next = an; an.prev = a2; b2.next = a2; a2.prev = b2; bp.next = b2; b2.prev = bp;
+  return b2;
+}
+function ec_insertNode(i, x, y, last) {
+  const p = ec_newNode(i, x, y);
+  if (!last) { p.prev = p; p.next = p; }
+  else { p.next = last.next; p.prev = last; last.next.prev = p; last.next = p; }
+  return p;
+}
+function ec_removeNode(p) { p.next.prev = p.prev; p.prev.next = p.next; }
+function ec_newNode(i, x, y) { return { i, x, y, prev: null, next: null, steiner: false }; }
+function ec_signedArea(data, start, end, dim) {
+  let sum = 0;
+  for (let i = start, j = end - dim; i < end; i += dim) { sum += (data[j] - data[i]) * (data[i + 1] + data[j + 1]); j = i; }
+  return sum;
+}
+
+// Triangulate one component (outer ring + holes), each an array of [x,y].
+// Returns an array of triangles [[x,y],[x,y],[x,y]].
+function triangulateComponent(outer, holes) {
+  const data = [], holeIndices = [];
+  for (const p of outer) data.push(p[0], p[1]);
+  for (const h of holes) { holeIndices.push(data.length / 2); for (const p of h) data.push(p[0], p[1]); }
+  const idx = earcut(data, holeIndices, 2);
+  const tris = [];
+  for (let i = 0; i < idx.length; i += 3) {
+    const a = idx[i], b = idx[i + 1], c = idx[i + 2];
+    tris.push([[data[a * 2], data[a * 2 + 1]], [data[b * 2], data[b * 2 + 1]], [data[c * 2], data[c * 2 + 1]]]);
+  }
+  return tris;
+}
+
+// Perpendicular distance from p to the line through a,b.
+function ptLineDist(p, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const len = Math.hypot(dx, dy);
+  if (len === 0) return Math.hypot(p[0] - a[0], p[1] - a[1]);
+  return Math.abs((p[0] - a[0]) * dy - (p[1] - a[1]) * dx) / len;
+}
+// Douglas-Peucker on an open polyline (endpoints fixed). tol in same units.
+function dpSimplify(pts, tol) {
+  const n = pts.length;
+  if (n <= 2) return pts.slice();
+  const keep = new Uint8Array(n); keep[0] = 1; keep[n - 1] = 1;
+  const stack = [[0, n - 1]];
+  while (stack.length) {
+    const [s, e] = stack.pop();
+    let maxD = -1, idx = -1;
+    for (let i = s + 1; i < e; i++) {
+      const d = ptLineDist(pts[i], pts[s], pts[e]);
+      if (d > maxD) { maxD = d; idx = i; }
+    }
+    if (idx > 0 && maxD > tol) { keep[idx] = 1; stack.push([s, idx]); stack.push([idx, e]); }
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(pts[i]);
+  return out;
+}
+function polyArea(pts) {
+  let s = 0;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) s += (pts[j][0] - pts[i][0]) * (pts[j][1] + pts[i][1]);
+  return s / 2; // >0 = CCW in y-up
+}
+function pointInPoly(pt, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    if (((poly[i][1] > pt[1]) !== (poly[j][1] > pt[1])) &&
+        (pt[0] < (poly[j][0] - poly[i][0]) * (pt[1] - poly[i][1]) / (poly[j][1] - poly[i][1]) + poly[i][0])) inside = !inside;
+  }
+  return inside;
+}
+
+// Trace closed boundary loops of the "on" cells on a cols x rows grid. Each loop
+// is an array of [x,y] lattice points (cell corners), first point repeated last.
+// Edges are oriented with the filled region on the left (image y-down coords).
+function extractLoops(cols, rows, isOn) {
+  const on = (c, r) => c >= 0 && r >= 0 && c < cols && r < rows && isOn(c, r);
+  const edges = new Map(); // "x,y" start -> stack of [ex,ey]
+  const add = (x1, y1, x2, y2) => { const k = x1 + ',' + y1; if (!edges.has(k)) edges.set(k, []); edges.get(k).push([x2, y2]); };
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (!on(c, r)) continue;
+    if (!on(c, r - 1)) add(c + 1, r, c, r);         // top edge, going left
+    if (!on(c, r + 1)) add(c, r + 1, c + 1, r + 1); // bottom edge, going right
+    if (!on(c - 1, r)) add(c, r, c, r + 1);         // left edge, going down
+    if (!on(c + 1, r)) add(c + 1, r + 1, c + 1, r); // right edge, going up
+  }
+  const loops = [];
+  for (const startKey of Array.from(edges.keys())) {
+    while (edges.get(startKey) && edges.get(startKey).length) {
+      const [sx, sy] = startKey.split(',').map(Number);
+      const loop = [[sx, sy]];
+      let cx = sx, cy = sy;
+      while (true) {
+        const outs = edges.get(cx + ',' + cy);
+        if (!outs || !outs.length) break;
+        const [nx, ny] = outs.pop();
+        loop.push([nx, ny]);
+        cx = nx; cy = ny;
+        if (cx === sx && cy === sy) break;
+      }
+      loops.push(loop);
+    }
+  }
+  return loops;
+}
+
+// Downsample the processed B/W image into a classification grid. Cells: 1=black,
+// 0=white, -1=empty (outside the circle, when enabled). Returns {cols,rows,cells}.
+function buildCells(maxDim) {
+  const enabled = els.circleEnable.checked;
+  let sx, sy, sw, sh;
+  if (enabled) { const r = circle.r; sx = circle.cx - r; sy = circle.cy - r; sw = 2 * r; sh = 2 * r; }
+  else { sx = 0; sy = 0; sw = processedCanvas.width; sh = processedCanvas.height; }
+  let cols, rows;
+  if (sw >= sh) { cols = Math.max(2, Math.min(maxDim, Math.round(sw))); rows = Math.max(2, Math.round(cols * sh / sw)); }
+  else { rows = Math.max(2, Math.min(maxDim, Math.round(sh))); cols = Math.max(2, Math.round(rows * sw / sh)); }
+  const tmp = document.createElement('canvas');
+  tmp.width = cols; tmp.height = rows;
+  const ctx = tmp.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cols, rows);
+  ctx.drawImage(processedCanvas, sx, sy, sw, sh, 0, 0, cols, rows);
+  const d = ctx.getImageData(0, 0, cols, rows).data;
+  const cells = new Int8Array(cols * rows);
+  const ccx = cols / 2, ccy = rows / 2, cr = Math.min(cols, rows) / 2;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const i = (r * cols + c) * 4;
+    let v = d[i] < 128 ? 1 : 0;
+    if (enabled) { const dx = c + 0.5 - ccx, dy = r + 0.5 - ccy; if (dx * dx + dy * dy > cr * cr) v = -1; }
+    cells[r * cols + c] = v;
+  }
+  return { cols, rows, cells };
+}
+
+// Build extruded triangle facets for one color (target 1=black, 0=white).
+function partFacets(cells, cols, rows, target, thickness, pitch, smoothTol) {
+  if (thickness <= 0) return [];
+  const isOn = (c, r) => cells[r * cols + c] === target;
+  let loops = extractLoops(cols, rows, isOn).map(loop => {
+    // drop repeated closing point, convert to mm with y-flip (the flip turns the
+    // extraction's solid-on-left winding into CCW outers / CW holes)
+    const pts = loop.slice(0, loop.length - 1).map(([x, y]) => [x * pitch, (rows - y) * pitch]);
+    return dpSimplify(pts, smoothTol);
+  }).filter(l => l.length >= 3);
+  const outers = [], holes = [];
+  for (const l of loops) (polyArea(l) > 0 ? outers : holes).push(l);
+  const comps = outers.map(o => ({ outer: o, holes: [] }));
+  for (const h of holes) {
+    let best = -1, bestArea = Infinity;
+    for (let i = 0; i < comps.length; i++) {
+      if (pointInPoly(h[0], comps[i].outer)) { const a = Math.abs(polyArea(comps[i].outer)); if (a < bestArea) { bestArea = a; best = i; } }
+    }
+    if (best >= 0) comps[best].holes.push(h);
+  }
+  const facets = [], T = thickness;
+  for (const comp of comps) {
+    for (const t of triangulateComponent(comp.outer, comp.holes)) {
+      facets.push([[t[0][0], t[0][1], T], [t[1][0], t[1][1], T], [t[2][0], t[2][1], T]]); // top
+      facets.push([[t[0][0], t[0][1], 0], [t[2][0], t[2][1], 0], [t[1][0], t[1][1], 0]]); // bottom
+    }
+    for (const ring of [comp.outer, ...comp.holes]) {
+      for (let i = 0; i < ring.length; i++) {
+        const p1 = ring[i], p2 = ring[(i + 1) % ring.length];
+        const a = [p1[0], p1[1], 0], b = [p2[0], p2[1], 0], c = [p2[0], p2[1], T], dd = [p1[0], p1[1], T];
+        facets.push([a, b, c]); facets.push([a, c, dd]);
+      }
+    }
+  }
+  return facets;
+}
+function signedVolume(facets) {
+  let v = 0;
+  for (const f of facets) {
+    const [a, b, c] = f;
+    v += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+  }
+  return v;
+}
+// Ensure outward-facing normals: flip all facets if the enclosed volume is negative.
+function orientOutward(facets) {
+  if (signedVolume(facets) < 0) for (const f of facets) { const t = f[1]; f[1] = f[2]; f[2] = t; }
+  return facets;
+}
+function triNormal(a, b, c) {
+  const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+  const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+  let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+  const len = Math.hypot(nx, ny, nz) || 1;
+  return [nx / len, ny / len, nz / len];
+}
+function facetsToSolid(name, facets) {
+  const f4 = n => Number(n.toFixed(4));
+  let s = 'solid ' + name + '\n';
+  for (const f of facets) {
+    const n = triNormal(f[0], f[1], f[2]);
+    s += `facet normal ${f4(n[0])} ${f4(n[1])} ${f4(n[2])}\nouter loop\n`;
+    for (const v of f) s += `vertex ${f4(v[0])} ${f4(v[1])} ${f4(v[2])}\n`;
+    s += 'endloop\nendfacet\n';
+  }
+  return s + 'endsolid ' + name + '\n';
+}
+
 const els = {
   drop: document.getElementById('drop'),
   file: document.getElementById('file'),
@@ -627,6 +1062,17 @@ const els = {
   circleThickness: document.getElementById('circleThickness'),
   circleThicknessVal: document.getElementById('circleThicknessVal'),
   circleColor: document.getElementById('circleColor'),
+  modelWidth: document.getElementById('modelWidth'),
+  modelWidthVal: document.getElementById('modelWidthVal'),
+  thickBlack: document.getElementById('thickBlack'),
+  thickBlackVal: document.getElementById('thickBlackVal'),
+  thickWhite: document.getElementById('thickWhite'),
+  thickWhiteVal: document.getElementById('thickWhiteVal'),
+  modelRes: document.getElementById('modelRes'),
+  modelResVal: document.getElementById('modelResVal'),
+  modelSmooth: document.getElementById('modelSmooth'),
+  modelSmoothVal: document.getElementById('modelSmoothVal'),
+  modelExport: document.getElementById('modelExport'),
   download: document.getElementById('download'),
   output: document.getElementById('output'),
   preview: document.getElementById('preview'),
@@ -652,7 +1098,8 @@ function enableControls(on) {
   els.controls.classList.toggle('disabled', !on);
   [els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels,
    els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
-   els.circleThickness, els.circleColor, els.download]
+   els.circleThickness, els.circleColor, els.modelWidth, els.thickBlack,
+   els.thickWhite, els.modelRes, els.modelSmooth, els.modelExport, els.download]
     .forEach(e => { e.disabled = !on; });
 }
 
@@ -791,6 +1238,37 @@ function updateCircleCursor() {
   els.output.style.cursor = els.circleEnable.checked ? 'grab' : 'default';
 }
 
+// Builds the two-part extruded model from the current B/W result and downloads
+// it as one ASCII STL with two solids (schwarz, weiss). With the circle enabled
+// the model is round (cells outside the circle are dropped).
+function exportModel() {
+  if (!processedData || mode !== 'bw') return;
+  const maxDim = Number(els.modelRes.value);
+  const widthMm = Number(els.modelWidth.value);
+  const tBlack = Number(els.thickBlack.value);
+  const tWhite = Number(els.thickWhite.value);
+  const { cols, rows, cells } = buildCells(maxDim);
+  const pitch = widthMm / cols;
+  const tol = Number(els.modelSmooth.value) * pitch; // slider is in cells
+  const blackF = orientOutward(partFacets(cells, cols, rows, 1, tBlack, pitch, tol));
+  const whiteF = orientOutward(partFacets(cells, cols, rows, 0, tWhite, pitch, tol));
+  if (!blackF.length && !whiteF.length) {
+    setStatus('Kein 3D-Modell: keine passenden Flächen gefunden.', true);
+    return;
+  }
+  let stl = '';
+  if (blackF.length) stl += facetsToSolid('schwarz', blackF);
+  if (whiteF.length) stl += facetsToSolid('weiss', whiteF);
+  const blob = new Blob([stl], { type: 'model/stl' });
+  const a = document.createElement('a');
+  a.download = 'modell.stl';
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  URL.revokeObjectURL(a.href);
+  setStatus(`3D-Modell exportiert: ${cols}×${rows} Raster, ${(blackF.length + whiteF.length)} Dreiecke.`, false);
+}
+window.exportModel = exportModel;
+
 function loadFile(file) {
   if (!file || !file.type.startsWith('image/')) {
     setStatus('Bitte eine Bilddatei auswählen.', true);
@@ -842,6 +1320,16 @@ window.render = render;
 window.paint = paint;
 window.exportData = exportData;
 window.circle = circle;
+window.earcut = earcut;
+window.triangulateComponent = triangulateComponent;
+window.extractLoops = extractLoops;
+window.dpSimplify = dpSimplify;
+window.polyArea = polyArea;
+window.partFacets = partFacets;
+window.signedVolume = signedVolume;
+window.orientOutward = orientOutward;
+window.buildCells = buildCells;
+window.facetsToSolid = facetsToSolid;
 Object.defineProperty(window, 'originalData', {
   get() { return originalData; },
   set(v) { originalData = v; },
@@ -953,6 +1441,13 @@ els.modeBw.addEventListener('click', () => setMode('bw'));
 els.modeColor.addEventListener('click', () => setMode('color'));
 els.methPalette.addEventListener('click', () => setColorMethod('palette'));
 els.methPosterize.addEventListener('click', () => setColorMethod('posterize'));
+
+els.modelWidth.addEventListener('input', () => { els.modelWidthVal.textContent = els.modelWidth.value; });
+els.thickBlack.addEventListener('input', () => { els.thickBlackVal.textContent = Number(els.thickBlack.value).toFixed(1); });
+els.thickWhite.addEventListener('input', () => { els.thickWhiteVal.textContent = Number(els.thickWhite.value).toFixed(1); });
+els.modelRes.addEventListener('input', () => { els.modelResVal.textContent = els.modelRes.value; });
+els.modelSmooth.addEventListener('input', () => { els.modelSmoothVal.textContent = Number(els.modelSmooth.value).toFixed(1); });
+els.modelExport.addEventListener('click', exportModel);
 
 els.download.addEventListener('click', () => {
   if (!processedData) return;
