@@ -145,6 +145,12 @@
   .toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; cursor: pointer; user-select: none; }
   .toggle input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 
+  input[type=color] {
+    width: 100%; max-width: 64px; height: 34px; padding: 2px;
+    border: 1px solid var(--line); border-radius: 8px; background: #fff; cursor: pointer;
+  }
+  .fields.circle-row { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--line); }
+
   .status { margin: 0; font-size: 13px; color: var(--muted); }
   .status.error { color: var(--danger); font-weight: 600; }
 
@@ -262,6 +268,23 @@
           <span id="smoothVal" class="badge">0</span>
         </div>
         <input id="smooth" type="range" min="0" max="5" value="0" disabled>
+      </div>
+    </div>
+
+    <div class="fields circle-row">
+      <div class="field">
+        <label class="toggle"><input id="circleEnable" type="checkbox" disabled> Kreis zuschneiden</label>
+      </div>
+      <div class="field">
+        <div class="field-head">
+          <label for="circleThickness">Rahmendicke (px)</label>
+          <span id="circleThicknessVal" class="badge">10</span>
+        </div>
+        <input id="circleThickness" type="range" min="0" max="200" value="10" disabled>
+      </div>
+      <div class="field">
+        <div class="field-head"><label for="circleColor">Rahmenfarbe</label></div>
+        <input id="circleColor" type="color" value="#000000" disabled>
       </div>
     </div>
 
@@ -537,6 +560,39 @@ function majorityFilter(imageData, passes) {
 }
 window.majorityFilter = majorityFilter;
 
+// Crops the image to the largest centered circle: paints a ring of `thickness`
+// pixels in ringColor ([r,g,b]) just inside the circle's edge, fills everything
+// outside the circle white, and leaves the inside untouched. Mutates and
+// returns the ImageData.
+function applyCircleMask(imageData, thickness, ringColor) {
+  const { width, height, data } = imageData;
+  const cx = (width - 1) / 2, cy = (height - 1) / 2;
+  const R = Math.min(width, height) / 2;
+  const inner = R - Math.max(0, thickness);
+  const R2 = R * R, inner2 = inner * inner;
+  const [rr, rg, rb] = ringColor;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const dx = x - cx, dy = y - cy;
+      const d2 = dx * dx + dy * dy;
+      const i = (y * width + x) * 4;
+      if (d2 > R2) {                 // outside the circle -> white
+        data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = 255;
+      } else if (d2 > inner2) {      // ring band
+        data[i] = rr; data[i + 1] = rg; data[i + 2] = rb; data[i + 3] = 255;
+      }                              // else: inside, keep the image as-is
+    }
+  }
+  return imageData;
+}
+window.applyCircleMask = applyCircleMask;
+
+// "#rrggbb" -> [r, g, b]
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
 const els = {
   drop: document.getElementById('drop'),
   file: document.getElementById('file'),
@@ -558,6 +614,10 @@ const els = {
   colorIslandVal: document.getElementById('colorIslandVal'),
   smooth: document.getElementById('smooth'),
   smoothVal: document.getElementById('smoothVal'),
+  circleEnable: document.getElementById('circleEnable'),
+  circleThickness: document.getElementById('circleThickness'),
+  circleThicknessVal: document.getElementById('circleThicknessVal'),
+  circleColor: document.getElementById('circleColor'),
   download: document.getElementById('download'),
   output: document.getElementById('output'),
   preview: document.getElementById('preview'),
@@ -580,7 +640,8 @@ function setStatus(msg, isError) {
 function enableControls(on) {
   els.controls.classList.toggle('disabled', !on);
   [els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels,
-   els.colorIsland, els.smooth, els.download]
+   els.colorIsland, els.smooth, els.circleEnable, els.circleThickness,
+   els.circleColor, els.download]
     .forEach(e => { e.disabled = !on; });
 }
 
@@ -625,6 +686,9 @@ function render() {
     }
     removeSmallColorIslands(copy, Number(els.colorIsland.value));
     majorityFilter(copy, Number(els.smooth.value));
+  }
+  if (els.circleEnable.checked) {
+    applyCircleMask(copy, Number(els.circleThickness.value), hexToRgb(els.circleColor.value));
   }
   ctx.putImageData(copy, 0, 0);
   els.preview.classList.add('ready');
@@ -714,6 +778,12 @@ els.smooth.addEventListener('input', () => {
   els.smoothVal.textContent = els.smooth.value;
   render();
 });
+els.circleEnable.addEventListener('change', render);
+els.circleThickness.addEventListener('input', () => {
+  els.circleThicknessVal.textContent = els.circleThickness.value;
+  render();
+});
+els.circleColor.addEventListener('input', render);
 
 function setMode(m) {
   mode = m;
