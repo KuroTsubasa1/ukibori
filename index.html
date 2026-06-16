@@ -312,6 +312,10 @@
         <input id="thickWhite" type="range" min="0" max="10" value="3" step="0.2" disabled>
       </div>
       <div class="field">
+        <div class="field-head"><label for="ringThick">Dicke Rand (mm)</label><span id="ringThickVal" class="badge">4.0</span></div>
+        <input id="ringThick" type="range" min="0" max="12" value="4" step="0.2" disabled>
+      </div>
+      <div class="field">
         <div class="field-head"><label for="modelRes">Auflösung (px)</label><span id="modelResVal" class="badge">256</span></div>
         <input id="modelRes" type="range" min="32" max="512" value="256" step="16" disabled>
       </div>
@@ -320,7 +324,7 @@
         <input id="modelSmooth" type="range" min="0" max="5" value="1.5" step="0.5" disabled>
       </div>
       <div class="field" style="justify-content: flex-end;">
-        <button id="modelExport" class="btn btn-primary" disabled>STL exportieren</button>
+        <button id="modelExport" class="btn btn-primary" disabled>3D-Modell (.3mf)</button>
       </div>
     </div>
 
@@ -958,10 +962,18 @@ function buildCells(maxDim) {
   const d = ctx.getImageData(0, 0, cols, rows).data;
   const cells = new Int8Array(cols * rows);
   const ccx = cols / 2, ccy = rows / 2, cr = Math.min(cols, rows) / 2;
+  // Ring band (value 2): only when the circle is on, has a 2D width and a height.
+  const ringCells = (enabled && Number(els.circleThickness.value) > 0 && Number(els.ringThick.value) > 0)
+    ? Number(els.circleThickness.value) * (cols / sw) : 0;
+  const inner = cr - ringCells;
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     const i = (r * cols + c) * 4;
     let v = d[i] < 128 ? 1 : 0;
-    if (enabled) { const dx = c + 0.5 - ccx, dy = r + 0.5 - ccy; if (dx * dx + dy * dy > cr * cr) v = -1; }
+    if (enabled) {
+      const dx = c + 0.5 - ccx, dy = r + 0.5 - ccy, dist2 = dx * dx + dy * dy;
+      if (dist2 > cr * cr) v = -1;                          // outside the circle
+      else if (ringCells > 0 && dist2 > inner * inner) v = 2; // raised ring band
+    }
     cells[r * cols + c] = v;
   }
   return { cols, rows, cells };
@@ -1016,23 +1028,106 @@ function orientOutward(facets) {
   if (signedVolume(facets) < 0) for (const f of facets) { const t = f[1]; f[1] = f[2]; f[2] = t; }
   return facets;
 }
-function triNormal(a, b, c) {
-  const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-  const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-  let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-  const len = Math.hypot(nx, ny, nz) || 1;
-  return [nx / len, ny / len, nz / len];
+// Convert independent triangle facets into an indexed mesh (shared vertices).
+function facetsToIndexedMesh(facets) {
+  const map = new Map(), vertices = [], triangles = [];
+  const idx = v => {
+    const k = v[0].toFixed(4) + '_' + v[1].toFixed(4) + '_' + v[2].toFixed(4);
+    let i = map.get(k);
+    if (i === undefined) { i = vertices.length; map.set(k, i); vertices.push(v); }
+    return i;
+  };
+  for (const f of facets) triangles.push([idx(f[0]), idx(f[1]), idx(f[2])]);
+  return { vertices, triangles };
 }
-function facetsToSolid(name, facets) {
-  const f4 = n => Number(n.toFixed(4));
-  let s = 'solid ' + name + '\n';
-  for (const f of facets) {
-    const n = triNormal(f[0], f[1], f[2]);
-    s += `facet normal ${f4(n[0])} ${f4(n[1])} ${f4(n[2])}\nouter loop\n`;
-    for (const v of f) s += `vertex ${f4(v[0])} ${f4(v[1])} ${f4(v[2])}\n`;
-    s += 'endloop\nendfacet\n';
+
+// --- Minimal ZIP (STORE, no compression) for the 3MF/OPC container ---
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function zipStore(files) {
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name), crc = crc32(f.bytes), size = f.bytes.length;
+    const lh = new Uint8Array(30 + name.length), dv = new DataView(lh.buffer);
+    dv.setUint32(0, 0x04034b50, true); dv.setUint16(4, 20, true); dv.setUint16(8, 0, true);
+    dv.setUint32(14, crc, true); dv.setUint32(18, size, true); dv.setUint32(22, size, true);
+    dv.setUint16(26, name.length, true);
+    lh.set(name, 30);
+    parts.push(lh, f.bytes);
+    const cd = new Uint8Array(46 + name.length), cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint32(16, crc, true); cv.setUint32(20, size, true); cv.setUint32(24, size, true);
+    cv.setUint16(28, name.length, true); cv.setUint32(42, offset, true);
+    cd.set(name, 46);
+    central.push(cd);
+    offset += lh.length + size;
   }
-  return s + 'endsolid ' + name + '\n';
+  let cdSize = 0; for (const c of central) cdSize += c.length;
+  const end = new Uint8Array(22), ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cdSize, true); ev.setUint32(16, offset, true);
+  const all = [...parts, ...central, end];
+  let total = 0; for (const a of all) total += a.length;
+  const buf = new Uint8Array(total); let p = 0;
+  for (const a of all) { buf.set(a, p); p += a.length; }
+  return buf;
+}
+
+// Build a 3MF package from parts [{name, color:[r,g,b], facets}] as a Blob.
+// Each part becomes its own <object> (separate mesh) colored via a colorgroup.
+function build3MF(parts) {
+  const enc = new TextEncoder();
+  let colors = '', objects = '', items = '';
+  parts.forEach((part, i) => {
+    const m = facetsToIndexedMesh(part.facets);
+    const col = '#' + part.color.map(c => c.toString(16).padStart(2, '0')).join('').toUpperCase() + 'FF';
+    colors += `   <m:color color="${col}" />\n`;
+    let vs = '';
+    for (const v of m.vertices) vs += `     <vertex x="${+v[0].toFixed(4)}" y="${+v[1].toFixed(4)}" z="${+v[2].toFixed(4)}" />\n`;
+    let ts = '';
+    for (const t of m.triangles) ts += `     <triangle v1="${t[0]}" v2="${t[1]}" v3="${t[2]}" />\n`;
+    const id = i + 2;
+    objects += `  <object id="${id}" name="${part.name}" type="model" pid="1" pindex="${i}">\n   <mesh>\n    <vertices>\n${vs}    </vertices>\n    <triangles>\n${ts}    </triangles>\n   </mesh>\n  </object>\n`;
+    items += `  <item objectid="${id}" />\n`;
+  });
+  const model = `<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
+ <resources>
+  <m:colorgroup id="1">
+${colors}  </m:colorgroup>
+${objects} </resources>
+ <build>
+${items} </build>
+</model>
+`;
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+ <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" />
+ <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml" />
+</Types>
+`;
+  const rels = `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel" />
+</Relationships>
+`;
+  const zip = zipStore([
+    { name: '[Content_Types].xml', bytes: enc.encode(contentTypes) },
+    { name: '_rels/.rels', bytes: enc.encode(rels) },
+    { name: '3D/3dmodel.model', bytes: enc.encode(model) },
+  ]);
+  return new Blob([zip], { type: 'model/3mf' });
 }
 
 const els = {
@@ -1068,6 +1163,8 @@ const els = {
   thickBlackVal: document.getElementById('thickBlackVal'),
   thickWhite: document.getElementById('thickWhite'),
   thickWhiteVal: document.getElementById('thickWhiteVal'),
+  ringThick: document.getElementById('ringThick'),
+  ringThickVal: document.getElementById('ringThickVal'),
   modelRes: document.getElementById('modelRes'),
   modelResVal: document.getElementById('modelResVal'),
   modelSmooth: document.getElementById('modelSmooth'),
@@ -1099,7 +1196,8 @@ function enableControls(on) {
   [els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels,
    els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
    els.circleThickness, els.circleColor, els.modelWidth, els.thickBlack,
-   els.thickWhite, els.modelRes, els.modelSmooth, els.modelExport, els.download]
+   els.thickWhite, els.ringThick, els.modelRes, els.modelSmooth,
+   els.modelExport, els.download]
     .forEach(e => { e.disabled = !on; });
 }
 
@@ -1238,34 +1336,36 @@ function updateCircleCursor() {
   els.output.style.cursor = els.circleEnable.checked ? 'grab' : 'default';
 }
 
-// Builds the two-part extruded model from the current B/W result and downloads
-// it as one ASCII STL with two solids (schwarz, weiss). With the circle enabled
-// the model is round (cells outside the circle are dropped).
+// Builds the extruded model from the current B/W result and downloads it as a
+// 3MF with each color as its own object. With the circle enabled the model is
+// round; if the ring has a width/height it becomes a raised third part.
 function exportModel() {
   if (!processedData || mode !== 'bw') return;
   const maxDim = Number(els.modelRes.value);
   const widthMm = Number(els.modelWidth.value);
-  const tBlack = Number(els.thickBlack.value);
-  const tWhite = Number(els.thickWhite.value);
   const { cols, rows, cells } = buildCells(maxDim);
   const pitch = widthMm / cols;
   const tol = Number(els.modelSmooth.value) * pitch; // slider is in cells
-  const blackF = orientOutward(partFacets(cells, cols, rows, 1, tBlack, pitch, tol));
-  const whiteF = orientOutward(partFacets(cells, cols, rows, 0, tWhite, pitch, tol));
-  if (!blackF.length && !whiteF.length) {
+  const part = (target, thick) => orientOutward(partFacets(cells, cols, rows, target, thick, pitch, tol));
+  const parts = [];
+  const blackF = part(1, Number(els.thickBlack.value));
+  if (blackF.length) parts.push({ name: 'schwarz', color: [0, 0, 0], facets: blackF });
+  const whiteF = part(0, Number(els.thickWhite.value));
+  if (whiteF.length) parts.push({ name: 'weiss', color: [255, 255, 255], facets: whiteF });
+  const ringF = part(2, Number(els.ringThick.value));
+  if (ringF.length) parts.push({ name: 'rand', color: hexToRgb(els.circleColor.value), facets: ringF });
+  if (!parts.length) {
     setStatus('Kein 3D-Modell: keine passenden Flächen gefunden.', true);
     return;
   }
-  let stl = '';
-  if (blackF.length) stl += facetsToSolid('schwarz', blackF);
-  if (whiteF.length) stl += facetsToSolid('weiss', whiteF);
-  const blob = new Blob([stl], { type: 'model/stl' });
+  const blob = build3MF(parts);
   const a = document.createElement('a');
-  a.download = 'modell.stl';
+  a.download = 'modell.3mf';
   a.href = URL.createObjectURL(blob);
   a.click();
   URL.revokeObjectURL(a.href);
-  setStatus(`3D-Modell exportiert: ${cols}×${rows} Raster, ${(blackF.length + whiteF.length)} Dreiecke.`, false);
+  const tris = parts.reduce((s, p) => s + p.facets.length, 0);
+  setStatus(`3D-Modell (.3mf) exportiert: ${parts.length} Teile, ${tris} Dreiecke.`, false);
 }
 window.exportModel = exportModel;
 
@@ -1329,7 +1429,10 @@ window.partFacets = partFacets;
 window.signedVolume = signedVolume;
 window.orientOutward = orientOutward;
 window.buildCells = buildCells;
-window.facetsToSolid = facetsToSolid;
+window.build3MF = build3MF;
+window.facetsToIndexedMesh = facetsToIndexedMesh;
+window.zipStore = zipStore;
+window.crc32 = crc32;
 Object.defineProperty(window, 'originalData', {
   get() { return originalData; },
   set(v) { originalData = v; },
@@ -1445,6 +1548,7 @@ els.methPosterize.addEventListener('click', () => setColorMethod('posterize'));
 els.modelWidth.addEventListener('input', () => { els.modelWidthVal.textContent = els.modelWidth.value; });
 els.thickBlack.addEventListener('input', () => { els.thickBlackVal.textContent = Number(els.thickBlack.value).toFixed(1); });
 els.thickWhite.addEventListener('input', () => { els.thickWhiteVal.textContent = Number(els.thickWhite.value).toFixed(1); });
+els.ringThick.addEventListener('input', () => { els.ringThickVal.textContent = Number(els.ringThick.value).toFixed(1); });
 els.modelRes.addEventListener('input', () => { els.modelResVal.textContent = els.modelRes.value; });
 els.modelSmooth.addEventListener('input', () => { els.modelSmoothVal.textContent = Number(els.modelSmooth.value).toFixed(1); });
 els.modelExport.addEventListener('click', exportModel);
