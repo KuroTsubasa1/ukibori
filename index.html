@@ -151,6 +151,7 @@
   }
   .fields.circle-row { margin-top: 4px; padding-top: 16px; border-top: 1px solid var(--line); }
 
+  .hint { font-size: 11.5px; color: var(--muted); }
   .status { margin: 0; font-size: 13px; color: var(--muted); }
   .status.error { color: var(--danger); font-weight: 600; }
 
@@ -274,6 +275,14 @@
     <div class="fields circle-row">
       <div class="field">
         <label class="toggle"><input id="circleEnable" type="checkbox" disabled> Kreis zuschneiden</label>
+        <span class="hint">Im Bild ziehen zum Verschieben · Mausrad zum Zoomen</span>
+      </div>
+      <div class="field">
+        <div class="field-head">
+          <label for="circleSize">Kreisgröße (Radius)</label>
+          <span id="circleSizeVal" class="badge">0</span>
+        </div>
+        <input id="circleSize" type="range" min="10" max="1000" value="100" disabled>
       </div>
       <div class="field">
         <div class="field-head">
@@ -560,15 +569,13 @@ function majorityFilter(imageData, passes) {
 }
 window.majorityFilter = majorityFilter;
 
-// Crops the image to the largest centered circle: paints a ring of `thickness`
-// pixels in ringColor ([r,g,b]) just inside the circle's edge, fills everything
-// outside the circle white, and leaves the inside untouched. Mutates and
-// returns the ImageData.
-function applyCircleMask(imageData, thickness, ringColor) {
+// Crops the image to a circle centered at (cx, cy) with radius R: paints a ring
+// of `thickness` pixels in ringColor ([r,g,b]) just inside the circle's edge,
+// fills everything outside the circle white, and leaves the inside untouched.
+// Mutates and returns the ImageData.
+function applyCircleMask(imageData, thickness, ringColor, cx, cy, R) {
   const { width, height, data } = imageData;
-  const cx = (width - 1) / 2, cy = (height - 1) / 2;
-  const R = Math.min(width, height) / 2;
-  const inner = R - Math.max(0, thickness);
+  const inner = Math.max(0, R - Math.max(0, thickness));
   const R2 = R * R, inner2 = inner * inner;
   const [rr, rg, rb] = ringColor;
   for (let y = 0; y < height; y++) {
@@ -615,6 +622,8 @@ const els = {
   smooth: document.getElementById('smooth'),
   smoothVal: document.getElementById('smoothVal'),
   circleEnable: document.getElementById('circleEnable'),
+  circleSize: document.getElementById('circleSize'),
+  circleSizeVal: document.getElementById('circleSizeVal'),
   circleThickness: document.getElementById('circleThickness'),
   circleThicknessVal: document.getElementById('circleThicknessVal'),
   circleColor: document.getElementById('circleColor'),
@@ -630,7 +639,8 @@ let colorMethod = 'palette'; // 'palette' | 'posterize'
 
 const offscreen = document.createElement('canvas');
 const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
-let originalData = null; // ImageData at full resolution
+let originalData = null;  // ImageData at full resolution
+let processedData = null; // cached mode+cleanup result (no circle)
 
 function setStatus(msg, isError) {
   els.status.textContent = msg;
@@ -640,8 +650,8 @@ function setStatus(msg, isError) {
 function enableControls(on) {
   els.controls.classList.toggle('disabled', !on);
   [els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels,
-   els.colorIsland, els.smooth, els.circleEnable, els.circleThickness,
-   els.circleColor, els.download]
+   els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
+   els.circleThickness, els.circleColor, els.download]
     .forEach(e => { e.disabled = !on; });
 }
 
@@ -664,12 +674,10 @@ function updateControlVisibility() {
   els.methPosterize.classList.toggle('seg-active', !palette);
 }
 
-function render() {
-  if (!originalData) return;
-  const out = els.output;
-  out.width = originalData.width;
-  out.height = originalData.height;
-  const ctx = out.getContext('2d');
+const circle = { cx: 0, cy: 0, r: 0 }; // selection in image coordinates
+
+// Mode + cleanup, without the circle. Returns a fresh ImageData.
+function processImage() {
   const copy = new ImageData(
     new Uint8ClampedArray(originalData.data),
     originalData.width,
@@ -687,11 +695,63 @@ function render() {
     removeSmallColorIslands(copy, Number(els.colorIsland.value));
     majorityFilter(copy, Number(els.smooth.value));
   }
+  return copy;
+}
+
+// Draws the interactive editing preview: the full processed image, with the
+// area outside the circle dimmed and the ring shown as a guide. The real
+// white-filled crop is only produced on export (see exportData).
+function paint() {
+  if (!processedData) return;
+  const out = els.output;
+  out.width = processedData.width;
+  out.height = processedData.height;
+  const ctx = out.getContext('2d');
+  ctx.putImageData(processedData, 0, 0);
   if (els.circleEnable.checked) {
-    applyCircleMask(copy, Number(els.circleThickness.value), hexToRgb(els.circleColor.value));
+    const { cx, cy, r } = circle;
+    const t = Number(els.circleThickness.value);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, out.width, out.height);
+    ctx.arc(cx, cy, r, 0, Math.PI * 2, true); // reverse winding -> hole at circle
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.fill('evenodd');
+    ctx.restore();
+    if (t > 0) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(0, r - t / 2), 0, Math.PI * 2);
+      ctx.lineWidth = t;
+      ctx.strokeStyle = els.circleColor.value;
+      ctx.stroke();
+    }
   }
-  ctx.putImageData(copy, 0, 0);
   els.preview.classList.add('ready');
+}
+
+// Full recompute (mode + cleanup), then repaint.
+function render() {
+  if (!originalData) return;
+  processedData = processImage();
+  paint();
+}
+
+// Final image for export: processed image with the real circle mask applied.
+function exportData() {
+  const copy = new ImageData(
+    new Uint8ClampedArray(processedData.data),
+    processedData.width,
+    processedData.height
+  );
+  if (els.circleEnable.checked) {
+    applyCircleMask(copy, Number(els.circleThickness.value),
+      hexToRgb(els.circleColor.value), circle.cx, circle.cy, circle.r);
+  }
+  return copy;
+}
+
+function updateCircleCursor() {
+  els.output.style.cursor = els.circleEnable.checked ? 'grab' : 'default';
 }
 
 function loadFile(file) {
@@ -715,6 +775,16 @@ function loadFile(file) {
     enableControls(true);
     document.body.classList.add('has-image');
     setThreshold(computeOtsuThreshold(originalData)); // start at the auto value
+    // Default circle: largest centered circle that fits the image.
+    const w = originalData.width, h = originalData.height;
+    circle.cx = w / 2;
+    circle.cy = h / 2;
+    circle.r = Math.min(w, h) / 2;
+    els.circleSize.min = 10;
+    els.circleSize.max = Math.round(Math.hypot(w, h) / 2);
+    els.circleSize.value = Math.round(circle.r);
+    els.circleSizeVal.textContent = Math.round(circle.r);
+    updateCircleCursor();
     setStatus(`Geladen: ${img.naturalWidth}×${img.naturalHeight}px`, false);
     render();
   };
@@ -732,6 +802,9 @@ window.els = els;
 window.offscreen = offscreen;
 window.offCtx = offCtx;
 window.render = render;
+window.paint = paint;
+window.exportData = exportData;
+window.circle = circle;
 Object.defineProperty(window, 'originalData', {
   get() { return originalData; },
   set(v) { originalData = v; },
@@ -778,12 +851,54 @@ els.smooth.addEventListener('input', () => {
   els.smoothVal.textContent = els.smooth.value;
   render();
 });
-els.circleEnable.addEventListener('change', render);
+els.circleEnable.addEventListener('change', () => { updateCircleCursor(); paint(); });
+els.circleSize.addEventListener('input', () => {
+  circle.r = Number(els.circleSize.value);
+  els.circleSizeVal.textContent = els.circleSize.value;
+  paint();
+});
 els.circleThickness.addEventListener('input', () => {
   els.circleThicknessVal.textContent = els.circleThickness.value;
-  render();
+  paint();
 });
-els.circleColor.addEventListener('input', render);
+els.circleColor.addEventListener('input', paint);
+
+// Drag on the preview to move the circle; wheel to zoom its radius.
+let dragging = false, lastX = 0, lastY = 0;
+els.output.addEventListener('pointerdown', e => {
+  if (!els.circleEnable.checked || !processedData) return;
+  dragging = true;
+  lastX = e.clientX; lastY = e.clientY;
+  els.output.setPointerCapture(e.pointerId);
+  els.output.style.cursor = 'grabbing';
+  e.preventDefault();
+});
+els.output.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const rect = els.output.getBoundingClientRect();
+  const scale = els.output.width / rect.width; // image px per client px
+  circle.cx = Math.max(0, Math.min(els.output.width, circle.cx + (e.clientX - lastX) * scale));
+  circle.cy = Math.max(0, Math.min(els.output.height, circle.cy + (e.clientY - lastY) * scale));
+  lastX = e.clientX; lastY = e.clientY;
+  paint();
+});
+function endDrag() {
+  if (!dragging) return;
+  dragging = false;
+  updateCircleCursor();
+}
+els.output.addEventListener('pointerup', endDrag);
+els.output.addEventListener('pointercancel', endDrag);
+els.output.addEventListener('wheel', e => {
+  if (!els.circleEnable.checked || !processedData) return;
+  e.preventDefault();
+  const min = Number(els.circleSize.min), max = Number(els.circleSize.max);
+  const next = Math.max(min, Math.min(max, circle.r * (e.deltaY < 0 ? 1.06 : 0.94)));
+  circle.r = next;
+  els.circleSize.value = Math.round(next);
+  els.circleSizeVal.textContent = Math.round(next);
+  paint();
+}, { passive: false });
 
 function setMode(m) {
   mode = m;
@@ -801,10 +916,15 @@ els.methPalette.addEventListener('click', () => setColorMethod('palette'));
 els.methPosterize.addEventListener('click', () => setColorMethod('posterize'));
 
 els.download.addEventListener('click', () => {
-  if (!originalData) return;
+  if (!processedData) return;
+  const data = exportData();
+  const tmp = document.createElement('canvas');
+  tmp.width = data.width;
+  tmp.height = data.height;
+  tmp.getContext('2d').putImageData(data, 0, 0);
   const a = document.createElement('a');
   a.download = mode === 'bw' ? 'schwarz-weiss.png' : 'farben-reduziert.png';
-  a.href = els.output.toDataURL('image/png');
+  a.href = tmp.toDataURL('image/png');
   a.click();
 });
 
