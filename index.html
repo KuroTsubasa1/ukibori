@@ -639,8 +639,9 @@ let colorMethod = 'palette'; // 'palette' | 'posterize'
 
 const offscreen = document.createElement('canvas');
 const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
-let originalData = null;  // ImageData at full resolution
-let processedData = null; // cached mode+cleanup result (no circle)
+let originalData = null;    // ImageData at full resolution
+let processedData = null;   // cached mode+cleanup result (no circle)
+let processedCanvas = null; // processedData drawn to a canvas, for compositing
 
 function setStatus(msg, isError) {
   els.status.textContent = msg;
@@ -698,22 +699,41 @@ function processImage() {
   return copy;
 }
 
-// Draws the interactive editing preview: the full processed image, with the
-// area outside the circle dimmed and the ring shown as a guide. The real
+// The output frame in image coordinates. When the circle pokes past the image
+// edges the frame grows to contain the whole circle (the overflow is filled
+// white); otherwise it equals the image. x0/y0 is the frame's top-left in image
+// coordinates (may be negative); the image is drawn at (-x0, -y0).
+function circleFrame() {
+  const w = processedData.width, h = processedData.height;
+  if (!els.circleEnable.checked) return { x0: 0, y0: 0, fw: w, fh: h };
+  const { cx, cy, r } = circle;
+  const x0 = Math.floor(Math.min(0, cx - r));
+  const y0 = Math.floor(Math.min(0, cy - r));
+  const x1 = Math.ceil(Math.max(w, cx + r));
+  const y1 = Math.ceil(Math.max(h, cy + r));
+  return { x0, y0, fw: x1 - x0, fh: y1 - y0 };
+}
+
+// Draws the interactive editing preview into the (possibly extended) frame: the
+// full processed image, white where the frame extends beyond it, the area
+// outside the circle dimmed, and the ring shown as a guide. The real
 // white-filled crop is only produced on export (see exportData).
 function paint() {
-  if (!processedData) return;
+  if (!processedData || !processedCanvas) return;
+  const f = circleFrame();
   const out = els.output;
-  out.width = processedData.width;
-  out.height = processedData.height;
+  out.width = f.fw;
+  out.height = f.fh;
   const ctx = out.getContext('2d');
-  ctx.putImageData(processedData, 0, 0);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, f.fw, f.fh);
+  ctx.drawImage(processedCanvas, -f.x0, -f.y0);
   if (els.circleEnable.checked) {
-    const { cx, cy, r } = circle;
+    const cx = circle.cx - f.x0, cy = circle.cy - f.y0, r = circle.r;
     const t = Number(els.circleThickness.value);
     ctx.save();
     ctx.beginPath();
-    ctx.rect(0, 0, out.width, out.height);
+    ctx.rect(0, 0, f.fw, f.fh);
     ctx.arc(cx, cy, r, 0, Math.PI * 2, true); // reverse winding -> hole at circle
     ctx.fillStyle = 'rgba(255,255,255,0.8)';
     ctx.fill('evenodd');
@@ -729,25 +749,34 @@ function paint() {
   els.preview.classList.add('ready');
 }
 
-// Full recompute (mode + cleanup), then repaint.
+// Full recompute (mode + cleanup), cache it to a canvas, then repaint.
 function render() {
   if (!originalData) return;
   processedData = processImage();
+  processedCanvas = document.createElement('canvas');
+  processedCanvas.width = processedData.width;
+  processedCanvas.height = processedData.height;
+  processedCanvas.getContext('2d').putImageData(processedData, 0, 0);
   paint();
 }
 
-// Final image for export: processed image with the real circle mask applied.
+// Final image for export: the processed image placed in the extended frame
+// (white outside it), with the real white-filled circle mask applied.
 function exportData() {
-  const copy = new ImageData(
-    new Uint8ClampedArray(processedData.data),
-    processedData.width,
-    processedData.height
-  );
+  const f = circleFrame();
+  const tmp = document.createElement('canvas');
+  tmp.width = f.fw;
+  tmp.height = f.fh;
+  const ctx = tmp.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, f.fw, f.fh);
+  ctx.drawImage(processedCanvas, -f.x0, -f.y0);
+  const data = ctx.getImageData(0, 0, f.fw, f.fh);
   if (els.circleEnable.checked) {
-    applyCircleMask(copy, Number(els.circleThickness.value),
-      hexToRgb(els.circleColor.value), circle.cx, circle.cy, circle.r);
+    applyCircleMask(data, Number(els.circleThickness.value),
+      hexToRgb(els.circleColor.value), circle.cx - f.x0, circle.cy - f.y0, circle.r);
   }
-  return copy;
+  return data;
 }
 
 function updateCircleCursor() {
@@ -876,9 +905,11 @@ els.output.addEventListener('pointerdown', e => {
 els.output.addEventListener('pointermove', e => {
   if (!dragging) return;
   const rect = els.output.getBoundingClientRect();
-  const scale = els.output.width / rect.width; // image px per client px
-  circle.cx = Math.max(0, Math.min(els.output.width, circle.cx + (e.clientX - lastX) * scale));
-  circle.cy = Math.max(0, Math.min(els.output.height, circle.cy + (e.clientY - lastY) * scale));
+  const scale = els.output.width / rect.width; // frame px per client px (1:1 with image units)
+  // Clamp the center to the image so the circle always overlaps it; the frame
+  // extends to fit whatever part of the circle pokes past the edges.
+  circle.cx = Math.max(0, Math.min(processedData.width, circle.cx + (e.clientX - lastX) * scale));
+  circle.cy = Math.max(0, Math.min(processedData.height, circle.cy + (e.clientY - lastY) * scale));
   lastX = e.clientX; lastY = e.clientY;
   paint();
 });
