@@ -760,22 +760,30 @@ function render() {
   paint();
 }
 
-// Final image for export: the processed image placed in the extended frame
-// (white outside it), with the real white-filled circle mask applied.
+// Final image for export. With the circle enabled it is cropped to the circle's
+// bounding box (a square tightly containing the circle, white outside it, ring
+// applied). Without the circle it is just the processed image.
 function exportData() {
-  const f = circleFrame();
+  if (!els.circleEnable.checked) {
+    return new ImageData(
+      new Uint8ClampedArray(processedData.data),
+      processedData.width,
+      processedData.height
+    );
+  }
+  const r = circle.r;
+  const x0 = Math.round(circle.cx - r), y0 = Math.round(circle.cy - r);
+  const fw = Math.round(2 * r), fh = Math.round(2 * r);
   const tmp = document.createElement('canvas');
-  tmp.width = f.fw;
-  tmp.height = f.fh;
+  tmp.width = fw;
+  tmp.height = fh;
   const ctx = tmp.getContext('2d', { willReadFrequently: true });
   ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, f.fw, f.fh);
-  ctx.drawImage(processedCanvas, -f.x0, -f.y0);
-  const data = ctx.getImageData(0, 0, f.fw, f.fh);
-  if (els.circleEnable.checked) {
-    applyCircleMask(data, Number(els.circleThickness.value),
-      hexToRgb(els.circleColor.value), circle.cx - f.x0, circle.cy - f.y0, circle.r);
-  }
+  ctx.fillRect(0, 0, fw, fh);
+  ctx.drawImage(processedCanvas, -x0, -y0);
+  const data = ctx.getImageData(0, 0, fw, fh);
+  applyCircleMask(data, Number(els.circleThickness.value),
+    hexToRgb(els.circleColor.value), circle.cx - x0, circle.cy - y0, r);
   return data;
 }
 
