@@ -1,52 +1,5 @@
 "use strict";
 
-// buildCells bridges UI state + processed canvas to the 3D cell grid (DOM-aware).
-// Downsample the processed B/W image into a classification grid. Cells: 1=black,
-// 0=white, 2=rand (circle ring or rectangle frame), -1=empty (outside the circle,
-// when enabled). Returns {cols,rows,cells}.
-function buildCells(maxDim) {
-  const enabled = els.circleEnable.checked;
-  let sx, sy, sw, sh;
-  if (enabled) { const r = circle.r; sx = circle.cx - r; sy = circle.cy - r; sw = 2 * r; sh = 2 * r; }
-  else { sx = 0; sy = 0; sw = processedCanvas.width; sh = processedCanvas.height; }
-  let cols, rows;
-  if (sw >= sh) { cols = Math.max(2, Math.min(maxDim, Math.round(sw))); rows = Math.max(2, Math.round(cols * sh / sw)); }
-  else { rows = Math.max(2, Math.min(maxDim, Math.round(sh))); cols = Math.max(2, Math.round(rows * sw / sh)); }
-  const tmp = document.createElement('canvas');
-  tmp.width = cols; tmp.height = rows;
-  const ctx = tmp.getContext('2d', { willReadFrequently: true });
-  const keepAlpha = els.keepAlpha.checked;
-  if (!keepAlpha) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cols, rows); }
-  ctx.drawImage(processedCanvas, sx, sy, sw, sh, 0, 0, cols, rows);
-  const d = ctx.getImageData(0, 0, cols, rows).data;
-  const cells = new Int8Array(cols * rows);
-  const ccx = cols / 2, ccy = rows / 2, cr = Math.min(cols, rows) / 2;
-  // Ring band (value 2): only when the circle is on, has a 2D width and a height.
-  const ringCells = (enabled && Number(els.circleThickness.value) > 0 && Number(els.ringThick.value) > 0)
-    ? Number(els.circleThickness.value) * (cols / sw) : 0;
-  const inner = cr - ringCells;
-  // Rectangle frame band (value 2): only without a circle crop, when a frame
-  // width and height are set. Same px->cell conversion as the ring.
-  const frameCells = (!enabled && Number(els.frameWidth.value) > 0 && Number(els.ringThick.value) > 0)
-    ? Number(els.frameWidth.value) * (cols / sw) : 0;
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-    const i = (r * cols + c) * 4;
-    // Transparent areas (when kept) become empty: no material.
-    let v = (keepAlpha && d[i + 3] < 128) ? -1 : (d[i] < 128 ? 1 : 0);
-    if (enabled) {
-      const dx = c + 0.5 - ccx, dy = r + 0.5 - ccy, dist2 = dx * dx + dy * dy;
-      if (dist2 > cr * cr) v = -1;                          // outside the circle
-      else if (ringCells > 0 && dist2 > inner * inner) v = 2; // raised ring band (solid)
-    } else if (frameCells > 0 &&
-               (c < frameCells || c >= cols - frameCells ||
-                r < frameCells || r >= rows - frameCells)) {
-      v = 2;                                                // raised frame band (solid)
-    }
-    cells[r * cols + c] = v;
-  }
-  return { cols, rows, cells };
-}
-
 const els = {
   drop: document.getElementById('drop'),
   file: document.getElementById('file'),
@@ -430,13 +383,10 @@ window.exportData = exportData;
 window.circle = circle;
 window.earcut = earcut;
 window.triangulateComponent = triangulateComponent;
-window.extractLoops = extractLoops;
 window.dpSimplify = dpSimplify;
 window.polyArea = polyArea;
-window.partFacets = partFacets;
 window.signedVolume = signedVolume;
 window.orientOutward = orientOutward;
-window.buildCells = buildCells;
 window.build3MF = build3MF;
 window.facetsToIndexedMesh = facetsToIndexedMesh;
 window.zipStore = zipStore;

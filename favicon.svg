@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a2a32"/>
+      <stop offset="1" stop-color="#16161a"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="1" width="30" height="30" rx="7" fill="url(#bg)" stroke="#3a3a44"/>
+  <!-- Kanji 浮 (Ukibori = raised relief) with an embossed/raised look -->
+  <g font-family="'Hiragino Sans','Yu Gothic',sans-serif" font-size="21" font-weight="700"
+     text-anchor="middle">
+    <text x="16" y="24.2" fill="rgba(0,0,0,.55)">浮</text>
+    <text x="16" y="22.2" fill="rgba(255,255,255,.28)">浮</text>
+    <text x="16" y="23.2" fill="#f4f4f7">浮</text>
+  </g>
+</svg>
