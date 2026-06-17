@@ -251,6 +251,8 @@
     box-shadow: 0 2px 10px rgba(16,16,26,.18);
     background: #fff;
   }
+  /* When keeping transparency, let the preview's checkerboard show through. */
+  body.alpha #output { background: transparent; }
 
   /* Narrow windows: fall back to stacked layout. */
   @media (max-width: 860px) {
@@ -296,6 +298,12 @@
           <summary>Konvertierung</summary>
           <div class="acc-body">
             <div class="fields">
+              <!-- Gilt für beide Modi -->
+              <div class="field">
+                <label class="toggle"><input id="keepAlpha" type="checkbox" disabled> Transparenten Hintergrund erhalten</label>
+                <span class="hint">Transparente Bereiche bleiben transparent statt weiß (Vorschau, PNG &amp; 3D)</span>
+              </div>
+
               <!-- Schwarz/Weiß -->
               <div class="field mode-bw">
                 <div class="field-head">
@@ -711,9 +719,10 @@ window.majorityFilter = majorityFilter;
 
 // Crops the image to a circle centered at (cx, cy) with radius R: paints a ring
 // of `thickness` pixels in ringColor ([r,g,b]) just inside the circle's edge,
-// fills everything outside the circle white, and leaves the inside untouched.
-// Mutates and returns the ImageData.
-function applyCircleMask(imageData, thickness, ringColor, cx, cy, R) {
+// fills everything outside the circle (white, or transparent when
+// transparentOutside is set), and leaves the inside untouched. Mutates and
+// returns the ImageData.
+function applyCircleMask(imageData, thickness, ringColor, cx, cy, R, transparentOutside) {
   const { width, height, data } = imageData;
   const inner = Math.max(0, R - Math.max(0, thickness));
   const R2 = R * R, inner2 = inner * inner;
@@ -723,9 +732,10 @@ function applyCircleMask(imageData, thickness, ringColor, cx, cy, R) {
       const dx = x - cx, dy = y - cy;
       const d2 = dx * dx + dy * dy;
       const i = (y * width + x) * 4;
-      if (d2 > R2) {                 // outside the circle -> white
-        data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = 255;
-      } else if (d2 > inner2) {      // ring band
+      if (d2 > R2) {                 // outside the circle
+        if (transparentOutside) { data[i + 3] = 0; }
+        else { data[i] = 255; data[i + 1] = 255; data[i + 2] = 255; data[i + 3] = 255; }
+      } else if (d2 > inner2) {      // ring band (always solid)
         data[i] = rr; data[i + 1] = rg; data[i + 2] = rb; data[i + 3] = 255;
       }                              // else: inside, keep the image as-is
     }
@@ -1067,7 +1077,8 @@ function buildCells(maxDim) {
   const tmp = document.createElement('canvas');
   tmp.width = cols; tmp.height = rows;
   const ctx = tmp.getContext('2d', { willReadFrequently: true });
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cols, rows);
+  const keepAlpha = els.keepAlpha.checked;
+  if (!keepAlpha) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cols, rows); }
   ctx.drawImage(processedCanvas, sx, sy, sw, sh, 0, 0, cols, rows);
   const d = ctx.getImageData(0, 0, cols, rows).data;
   const cells = new Int8Array(cols * rows);
@@ -1082,15 +1093,16 @@ function buildCells(maxDim) {
     ? Number(els.frameWidth.value) * (cols / sw) : 0;
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     const i = (r * cols + c) * 4;
-    let v = d[i] < 128 ? 1 : 0;
+    // Transparent areas (when kept) become empty: no material.
+    let v = (keepAlpha && d[i + 3] < 128) ? -1 : (d[i] < 128 ? 1 : 0);
     if (enabled) {
       const dx = c + 0.5 - ccx, dy = r + 0.5 - ccy, dist2 = dx * dx + dy * dy;
       if (dist2 > cr * cr) v = -1;                          // outside the circle
-      else if (ringCells > 0 && dist2 > inner * inner) v = 2; // raised ring band
+      else if (ringCells > 0 && dist2 > inner * inner) v = 2; // raised ring band (solid)
     } else if (frameCells > 0 &&
                (c < frameCells || c >= cols - frameCells ||
                 r < frameCells || r >= rows - frameCells)) {
-      v = 2;                                                // raised frame band
+      v = 2;                                                // raised frame band (solid)
     }
     cells[r * cols + c] = v;
   }
@@ -1256,6 +1268,7 @@ ${items} </build>
 const els = {
   drop: document.getElementById('drop'),
   file: document.getElementById('file'),
+  keepAlpha: document.getElementById('keepAlpha'),
   thresh: document.getElementById('thresh'),
   threshVal: document.getElementById('threshVal'),
   island: document.getElementById('island'),
@@ -1321,7 +1334,7 @@ function setStatus(msg, isError) {
 
 function enableControls(on) {
   els.controls.classList.toggle('disabled', !on);
-  [els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels,
+  [els.keepAlpha, els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels,
    els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
    els.circleThickness, els.circleColor, els.modelWidth, els.thickBlack,
    els.thickWhite, els.ringThick, els.frameWidth, els.baseThick, els.bodyColor,
@@ -1350,13 +1363,31 @@ function updateControlVisibility() {
 
 const circle = { cx: 0, cy: 0, r: 0 }; // selection in image coordinates
 
-// Mode + cleanup, without the circle. Returns a fresh ImageData.
+// A source pixel counts as transparent below this alpha (fixed, binary edge).
+const ALPHA_CUTOFF = 128;
+
+// Mode + cleanup, without the circle. Returns a fresh ImageData. With
+// keepAlpha off, transparent source pixels are composited over white (so they
+// become opaque white); with it on, they are restored to fully transparent
+// after processing, so the background stays transparent.
 function processImage() {
+  const src = originalData.data;
   const copy = new ImageData(
-    new Uint8ClampedArray(originalData.data),
+    new Uint8ClampedArray(src),
     originalData.width,
     originalData.height
   );
+  const d = copy.data;
+  const keepAlpha = els.keepAlpha.checked;
+  // Flatten alpha before processing: transparent -> white (unless we keep it),
+  // semi/opaque -> fully opaque so the mode operations work on solid colors.
+  for (let i = 0; i < d.length; i += 4) {
+    if (src[i + 3] < ALPHA_CUTOFF) {
+      if (!keepAlpha) { d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = 255; }
+    } else {
+      d[i + 3] = 255;
+    }
+  }
   if (mode === 'bw') {
     applyThreshold(copy, Number(els.thresh.value), els.invert.checked);
     removeSmallIslands(copy, Number(els.island.value));
@@ -1368,6 +1399,9 @@ function processImage() {
     }
     removeSmallColorIslands(copy, Number(els.colorIsland.value));
     majorityFilter(copy, Number(els.smooth.value));
+  }
+  if (keepAlpha) {
+    for (let i = 0; i < d.length; i += 4) if (src[i + 3] < ALPHA_CUTOFF) d[i + 3] = 0;
   }
   return copy;
 }
@@ -1398,8 +1432,12 @@ function paint() {
   out.width = f.fw;
   out.height = f.fh;
   const ctx = out.getContext('2d');
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, f.fw, f.fh);
+  if (els.keepAlpha.checked) {
+    ctx.clearRect(0, 0, f.fw, f.fh);
+  } else {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, f.fw, f.fh);
+  }
   ctx.drawImage(processedCanvas, -f.x0, -f.y0);
   if (els.circleEnable.checked) {
     const cx = circle.cx - f.x0, cy = circle.cy - f.y0, r = circle.r;
@@ -1451,12 +1489,15 @@ function exportData() {
   tmp.width = fw;
   tmp.height = fh;
   const ctx = tmp.getContext('2d', { willReadFrequently: true });
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, fw, fh);
+  const keepAlpha = els.keepAlpha.checked;
+  if (!keepAlpha) {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, fw, fh);
+  }
   ctx.drawImage(processedCanvas, -x0, -y0);
   const data = ctx.getImageData(0, 0, fw, fh);
   applyCircleMask(data, Number(els.circleThickness.value),
-    hexToRgb(els.circleColor.value), circle.cx - x0, circle.cy - y0, r);
+    hexToRgb(els.circleColor.value), circle.cx - x0, circle.cy - y0, r, keepAlpha);
   return data;
 }
 
@@ -1595,6 +1636,10 @@ els.island.addEventListener('input', () => {
   render();
 });
 els.invert.addEventListener('change', render);
+els.keepAlpha.addEventListener('change', () => {
+  document.body.classList.toggle('alpha', els.keepAlpha.checked);
+  render();
+});
 els.otsu.addEventListener('click', () => {
   if (!originalData) return;
   setThreshold(computeOtsuThreshold(originalData));
