@@ -1,0 +1,536 @@
+"use strict";
+
+// buildCells bridges UI state + processed canvas to the 3D cell grid (DOM-aware).
+// Downsample the processed B/W image into a classification grid. Cells: 1=black,
+// 0=white, 2=rand (circle ring or rectangle frame), -1=empty (outside the circle,
+// when enabled). Returns {cols,rows,cells}.
+function buildCells(maxDim) {
+  const enabled = els.circleEnable.checked;
+  let sx, sy, sw, sh;
+  if (enabled) { const r = circle.r; sx = circle.cx - r; sy = circle.cy - r; sw = 2 * r; sh = 2 * r; }
+  else { sx = 0; sy = 0; sw = processedCanvas.width; sh = processedCanvas.height; }
+  let cols, rows;
+  if (sw >= sh) { cols = Math.max(2, Math.min(maxDim, Math.round(sw))); rows = Math.max(2, Math.round(cols * sh / sw)); }
+  else { rows = Math.max(2, Math.min(maxDim, Math.round(sh))); cols = Math.max(2, Math.round(rows * sw / sh)); }
+  const tmp = document.createElement('canvas');
+  tmp.width = cols; tmp.height = rows;
+  const ctx = tmp.getContext('2d', { willReadFrequently: true });
+  const keepAlpha = els.keepAlpha.checked;
+  if (!keepAlpha) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cols, rows); }
+  ctx.drawImage(processedCanvas, sx, sy, sw, sh, 0, 0, cols, rows);
+  const d = ctx.getImageData(0, 0, cols, rows).data;
+  const cells = new Int8Array(cols * rows);
+  const ccx = cols / 2, ccy = rows / 2, cr = Math.min(cols, rows) / 2;
+  // Ring band (value 2): only when the circle is on, has a 2D width and a height.
+  const ringCells = (enabled && Number(els.circleThickness.value) > 0 && Number(els.ringThick.value) > 0)
+    ? Number(els.circleThickness.value) * (cols / sw) : 0;
+  const inner = cr - ringCells;
+  // Rectangle frame band (value 2): only without a circle crop, when a frame
+  // width and height are set. Same px->cell conversion as the ring.
+  const frameCells = (!enabled && Number(els.frameWidth.value) > 0 && Number(els.ringThick.value) > 0)
+    ? Number(els.frameWidth.value) * (cols / sw) : 0;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const i = (r * cols + c) * 4;
+    // Transparent areas (when kept) become empty: no material.
+    let v = (keepAlpha && d[i + 3] < 128) ? -1 : (d[i] < 128 ? 1 : 0);
+    if (enabled) {
+      const dx = c + 0.5 - ccx, dy = r + 0.5 - ccy, dist2 = dx * dx + dy * dy;
+      if (dist2 > cr * cr) v = -1;                          // outside the circle
+      else if (ringCells > 0 && dist2 > inner * inner) v = 2; // raised ring band (solid)
+    } else if (frameCells > 0 &&
+               (c < frameCells || c >= cols - frameCells ||
+                r < frameCells || r >= rows - frameCells)) {
+      v = 2;                                                // raised frame band (solid)
+    }
+    cells[r * cols + c] = v;
+  }
+  return { cols, rows, cells };
+}
+
+const els = {
+  drop: document.getElementById('drop'),
+  file: document.getElementById('file'),
+  keepAlpha: document.getElementById('keepAlpha'),
+  thresh: document.getElementById('thresh'),
+  threshVal: document.getElementById('threshVal'),
+  island: document.getElementById('island'),
+  islandVal: document.getElementById('islandVal'),
+  otsu: document.getElementById('otsu'),
+  invert: document.getElementById('invert'),
+  modeBw: document.getElementById('modeBw'),
+  modeColor: document.getElementById('modeColor'),
+  methPalette: document.getElementById('methPalette'),
+  methPosterize: document.getElementById('methPosterize'),
+  numColors: document.getElementById('numColors'),
+  numColorsVal: document.getElementById('numColorsVal'),
+  levels: document.getElementById('levels'),
+  levelsVal: document.getElementById('levelsVal'),
+  colorIsland: document.getElementById('colorIsland'),
+  colorIslandVal: document.getElementById('colorIslandVal'),
+  smooth: document.getElementById('smooth'),
+  smoothVal: document.getElementById('smoothVal'),
+  circleEnable: document.getElementById('circleEnable'),
+  circleSize: document.getElementById('circleSize'),
+  circleSizeVal: document.getElementById('circleSizeVal'),
+  circleThickness: document.getElementById('circleThickness'),
+  circleThicknessVal: document.getElementById('circleThicknessVal'),
+  circleColor: document.getElementById('circleColor'),
+  modelWidth: document.getElementById('modelWidth'),
+  modelWidthVal: document.getElementById('modelWidthVal'),
+  thickBlack: document.getElementById('thickBlack'),
+  thickBlackVal: document.getElementById('thickBlackVal'),
+  thickWhite: document.getElementById('thickWhite'),
+  thickWhiteVal: document.getElementById('thickWhiteVal'),
+  ringThick: document.getElementById('ringThick'),
+  ringThickVal: document.getElementById('ringThickVal'),
+  frameWidth: document.getElementById('frameWidth'),
+  frameWidthVal: document.getElementById('frameWidthVal'),
+  baseThick: document.getElementById('baseThick'),
+  baseThickVal: document.getElementById('baseThickVal'),
+  bodyColor: document.getElementById('bodyColor'),
+  modelRes: document.getElementById('modelRes'),
+  modelResVal: document.getElementById('modelResVal'),
+  modelSmooth: document.getElementById('modelSmooth'),
+  modelSmoothVal: document.getElementById('modelSmoothVal'),
+  modelExport: document.getElementById('modelExport'),
+  download: document.getElementById('download'),
+  output: document.getElementById('output'),
+  preview: document.getElementById('preview'),
+  controls: document.getElementById('controls'),
+  status: document.getElementById('status'),
+};
+
+let mode = 'bw';            // 'bw' | 'color'
+let colorMethod = 'palette'; // 'palette' | 'posterize'
+
+const offscreen = document.createElement('canvas');
+const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
+let originalData = null;    // ImageData at full resolution
+let processedData = null;   // cached mode+cleanup result (no circle)
+let processedCanvas = null; // processedData drawn to a canvas, for compositing
+
+function setStatus(msg, isError) {
+  els.status.textContent = msg;
+  els.status.className = isError ? 'status error' : 'status';
+}
+
+function enableControls(on) {
+  els.controls.classList.toggle('disabled', !on);
+  [els.keepAlpha, els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels,
+   els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
+   els.circleThickness, els.circleColor, els.modelWidth, els.thickBlack,
+   els.thickWhite, els.ringThick, els.frameWidth, els.baseThick, els.bodyColor,
+   els.modelRes, els.modelSmooth, els.modelExport, els.download]
+    .forEach(e => { e.disabled = !on; });
+}
+
+function setThreshold(t) {
+  els.thresh.value = t;
+  els.threshVal.textContent = t;
+}
+
+// Show only the controls that belong to the current mode and color method.
+function updateControlVisibility() {
+  const bw = mode === 'bw';
+  const palette = colorMethod === 'palette';
+  document.querySelectorAll('.mode-bw').forEach(e => { e.hidden = !bw; });
+  document.querySelectorAll('.mode-color').forEach(e => { e.hidden = bw; });
+  document.querySelectorAll('.meth-palette').forEach(e => { e.hidden = bw || !palette; });
+  document.querySelectorAll('.meth-posterize').forEach(e => { e.hidden = bw || palette; });
+  els.modeBw.classList.toggle('seg-active', bw);
+  els.modeColor.classList.toggle('seg-active', !bw);
+  els.methPalette.classList.toggle('seg-active', palette);
+  els.methPosterize.classList.toggle('seg-active', !palette);
+}
+
+const circle = { cx: 0, cy: 0, r: 0 }; // selection in image coordinates
+
+// A source pixel counts as transparent below this alpha (fixed, binary edge).
+const ALPHA_CUTOFF = 128;
+
+// Mode + cleanup, without the circle. Returns a fresh ImageData. With
+// keepAlpha off, transparent source pixels are composited over white (so they
+// become opaque white); with it on, they are restored to fully transparent
+// after processing, so the background stays transparent.
+function processImage() {
+  const src = originalData.data;
+  const copy = new ImageData(
+    new Uint8ClampedArray(src),
+    originalData.width,
+    originalData.height
+  );
+  const d = copy.data;
+  const keepAlpha = els.keepAlpha.checked;
+  // Flatten alpha before processing: transparent -> white (unless we keep it),
+  // semi/opaque -> fully opaque so the mode operations work on solid colors.
+  for (let i = 0; i < d.length; i += 4) {
+    if (src[i + 3] < ALPHA_CUTOFF) {
+      if (!keepAlpha) { d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = 255; }
+    } else {
+      d[i + 3] = 255;
+    }
+  }
+  if (mode === 'bw') {
+    applyThreshold(copy, Number(els.thresh.value), els.invert.checked);
+    removeSmallIslands(copy, Number(els.island.value));
+  } else {
+    if (colorMethod === 'palette') {
+      quantizeMedianCut(copy, Number(els.numColors.value));
+    } else {
+      posterize(copy, Number(els.levels.value));
+    }
+    removeSmallColorIslands(copy, Number(els.colorIsland.value));
+    majorityFilter(copy, Number(els.smooth.value));
+  }
+  if (keepAlpha) {
+    for (let i = 0; i < d.length; i += 4) if (src[i + 3] < ALPHA_CUTOFF) d[i + 3] = 0;
+  }
+  return copy;
+}
+
+// The output frame in image coordinates. When the circle pokes past the image
+// edges the frame grows to contain the whole circle (the overflow is filled
+// white); otherwise it equals the image. x0/y0 is the frame's top-left in image
+// coordinates (may be negative); the image is drawn at (-x0, -y0).
+function circleFrame() {
+  const w = processedData.width, h = processedData.height;
+  if (!els.circleEnable.checked) return { x0: 0, y0: 0, fw: w, fh: h };
+  const { cx, cy, r } = circle;
+  const x0 = Math.floor(Math.min(0, cx - r));
+  const y0 = Math.floor(Math.min(0, cy - r));
+  const x1 = Math.ceil(Math.max(w, cx + r));
+  const y1 = Math.ceil(Math.max(h, cy + r));
+  return { x0, y0, fw: x1 - x0, fh: y1 - y0 };
+}
+
+// Draws the interactive editing preview into the (possibly extended) frame: the
+// full processed image, white where the frame extends beyond it, the area
+// outside the circle dimmed, and the ring shown as a guide. The real
+// white-filled crop is only produced on export (see exportData).
+function paint() {
+  if (!processedData || !processedCanvas) return;
+  const f = circleFrame();
+  const out = els.output;
+  out.width = f.fw;
+  out.height = f.fh;
+  const ctx = out.getContext('2d');
+  if (els.keepAlpha.checked) {
+    ctx.clearRect(0, 0, f.fw, f.fh);
+  } else {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, f.fw, f.fh);
+  }
+  ctx.drawImage(processedCanvas, -f.x0, -f.y0);
+  if (els.circleEnable.checked) {
+    const cx = circle.cx - f.x0, cy = circle.cy - f.y0, r = circle.r;
+    const t = Number(els.circleThickness.value);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, f.fw, f.fh);
+    ctx.arc(cx, cy, r, 0, Math.PI * 2, true); // reverse winding -> hole at circle
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.fill('evenodd');
+    ctx.restore();
+    if (t > 0) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(0, r - t / 2), 0, Math.PI * 2);
+      ctx.lineWidth = t;
+      ctx.strokeStyle = els.circleColor.value;
+      ctx.stroke();
+    }
+  }
+  els.preview.classList.add('ready');
+}
+
+// Full recompute (mode + cleanup), cache it to a canvas, then repaint.
+function render() {
+  if (!originalData) return;
+  processedData = processImage();
+  processedCanvas = document.createElement('canvas');
+  processedCanvas.width = processedData.width;
+  processedCanvas.height = processedData.height;
+  processedCanvas.getContext('2d').putImageData(processedData, 0, 0);
+  paint();
+}
+
+// Final image for export. With the circle enabled it is cropped to the circle's
+// bounding box (a square tightly containing the circle, white outside it, ring
+// applied). Without the circle it is just the processed image.
+function exportData() {
+  if (!els.circleEnable.checked) {
+    return new ImageData(
+      new Uint8ClampedArray(processedData.data),
+      processedData.width,
+      processedData.height
+    );
+  }
+  const r = circle.r;
+  const x0 = Math.round(circle.cx - r), y0 = Math.round(circle.cy - r);
+  const fw = Math.round(2 * r), fh = Math.round(2 * r);
+  const tmp = document.createElement('canvas');
+  tmp.width = fw;
+  tmp.height = fh;
+  const ctx = tmp.getContext('2d', { willReadFrequently: true });
+  const keepAlpha = els.keepAlpha.checked;
+  if (!keepAlpha) {
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, fw, fh);
+  }
+  ctx.drawImage(processedCanvas, -x0, -y0);
+  const data = ctx.getImageData(0, 0, fw, fh);
+  applyCircleMask(data, Number(els.circleThickness.value),
+    hexToRgb(els.circleColor.value), circle.cx - x0, circle.cy - y0, r, keepAlpha);
+  return data;
+}
+
+function updateCircleCursor() {
+  els.output.style.cursor = els.circleEnable.checked ? 'grab' : 'default';
+}
+
+// Builds the extruded model from the current B/W result and downloads it as a
+// 3MF with each color as its own object. Works with or without the circle crop.
+// A base plate (if set) carries the relief; the rand becomes a raised circle
+// ring (with crop) or rectangle frame (without crop).
+function exportModel() {
+  if (!processedData || mode !== 'bw') return;
+  const maxDim = Number(els.modelRes.value);
+  const widthMm = Number(els.modelWidth.value);
+  const { cols, rows, cells } = buildCells(maxDim);
+  const pitch = widthMm / cols;
+  const tol = Number(els.modelSmooth.value) * pitch; // slider is in cells
+  const baseT = Number(els.baseThick.value);
+  const bodyColor = hexToRgb(els.bodyColor.value);
+  // Relief and frame sit on top of the base plate.
+  const part = (target, thick) => orientOutward(partFacets(cells, cols, rows, target, thick, pitch, tol, baseT));
+  const parts = [];
+  // Base plate: the full footprint (everything that isn't empty), from z=0 up.
+  const baseF = orientOutward(partFacets(cells, cols, rows, v => v !== -1, baseT, pitch, tol, 0));
+  if (baseF.length) parts.push({ name: 'grundplatte', color: bodyColor, facets: baseF });
+  const blackF = part(1, Number(els.thickBlack.value));
+  if (blackF.length) parts.push({ name: 'schwarz', color: [0, 0, 0], facets: blackF });
+  const whiteF = part(0, Number(els.thickWhite.value));
+  if (whiteF.length) parts.push({ name: 'weiss', color: [255, 255, 255], facets: whiteF });
+  // Rand color: the circle ring keeps its own colour, the rectangle frame uses
+  // the shared body colour.
+  const randColor = els.circleEnable.checked ? hexToRgb(els.circleColor.value) : bodyColor;
+  const ringF = part(2, Number(els.ringThick.value));
+  if (ringF.length) parts.push({ name: 'rand', color: randColor, facets: ringF });
+  if (!parts.length) {
+    setStatus('Kein 3D-Modell: keine passenden Flächen gefunden.', true);
+    return;
+  }
+  const blob = build3MF(parts);
+  const a = document.createElement('a');
+  a.download = 'modell.3mf';
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  URL.revokeObjectURL(a.href);
+  const tris = parts.reduce((s, p) => s + p.facets.length, 0);
+  setStatus(`3D-Modell (.3mf) exportiert: ${parts.length} Teile, ${tris} Dreiecke.`, false);
+}
+window.exportModel = exportModel;
+
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) {
+    setStatus('Bitte eine Bilddatei auswählen.', true);
+    return;
+  }
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    URL.revokeObjectURL(url);
+    try {
+      offscreen.width = img.naturalWidth;
+      offscreen.height = img.naturalHeight;
+      offCtx.drawImage(img, 0, 0);
+      originalData = offCtx.getImageData(0, 0, offscreen.width, offscreen.height);
+    } catch (e) {
+      setStatus('Bild ist zu groß zum Verarbeiten.', true);
+      return;
+    }
+    enableControls(true);
+    document.body.classList.add('has-image');
+    setThreshold(computeOtsuThreshold(originalData)); // start at the auto value
+    // Default circle: largest centered circle that fits the image.
+    const w = originalData.width, h = originalData.height;
+    circle.cx = w / 2;
+    circle.cy = h / 2;
+    circle.r = Math.min(w, h) / 2;
+    els.circleSize.min = 10;
+    els.circleSize.max = Math.round(Math.hypot(w, h) / 2);
+    els.circleSize.value = Math.round(circle.r);
+    els.circleSizeVal.textContent = Math.round(circle.r);
+    updateCircleCursor();
+    setStatus(`Geladen: ${img.naturalWidth}×${img.naturalHeight}px`, false);
+    render();
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    setStatus('Bild konnte nicht geladen werden.', true);
+  };
+  img.src = url;
+}
+window.loadFile = loadFile; // exposed for verification
+
+// Additional exposures so browser_evaluate assertions can reach otherwise
+// script-scoped state.
+window.els = els;
+window.offscreen = offscreen;
+window.offCtx = offCtx;
+window.render = render;
+window.paint = paint;
+window.exportData = exportData;
+window.circle = circle;
+window.earcut = earcut;
+window.triangulateComponent = triangulateComponent;
+window.extractLoops = extractLoops;
+window.dpSimplify = dpSimplify;
+window.polyArea = polyArea;
+window.partFacets = partFacets;
+window.signedVolume = signedVolume;
+window.orientOutward = orientOutward;
+window.buildCells = buildCells;
+window.build3MF = build3MF;
+window.facetsToIndexedMesh = facetsToIndexedMesh;
+window.zipStore = zipStore;
+window.crc32 = crc32;
+Object.defineProperty(window, 'originalData', {
+  get() { return originalData; },
+  set(v) { originalData = v; },
+});
+
+els.drop.addEventListener('click', () => els.file.click());
+els.file.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+['dragenter', 'dragover'].forEach(ev =>
+  els.drop.addEventListener(ev, e => { e.preventDefault(); els.drop.classList.add('dragover'); }));
+['dragleave', 'drop'].forEach(ev =>
+  els.drop.addEventListener(ev, e => { e.preventDefault(); els.drop.classList.remove('dragover'); }));
+els.drop.addEventListener('drop', e => {
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+
+els.thresh.addEventListener('input', () => {
+  els.threshVal.textContent = els.thresh.value;
+  render();
+});
+els.island.addEventListener('input', () => {
+  els.islandVal.textContent = els.island.value;
+  render();
+});
+els.invert.addEventListener('change', render);
+els.keepAlpha.addEventListener('change', () => {
+  document.body.classList.toggle('alpha', els.keepAlpha.checked);
+  render();
+});
+els.otsu.addEventListener('click', () => {
+  if (!originalData) return;
+  setThreshold(computeOtsuThreshold(originalData));
+  render();
+});
+
+els.numColors.addEventListener('input', () => {
+  els.numColorsVal.textContent = els.numColors.value;
+  render();
+});
+els.levels.addEventListener('input', () => {
+  els.levelsVal.textContent = els.levels.value;
+  render();
+});
+els.colorIsland.addEventListener('input', () => {
+  els.colorIslandVal.textContent = els.colorIsland.value;
+  render();
+});
+els.smooth.addEventListener('input', () => {
+  els.smoothVal.textContent = els.smooth.value;
+  render();
+});
+els.circleEnable.addEventListener('change', () => { updateCircleCursor(); paint(); });
+els.circleSize.addEventListener('input', () => {
+  circle.r = Number(els.circleSize.value);
+  els.circleSizeVal.textContent = els.circleSize.value;
+  paint();
+});
+els.circleThickness.addEventListener('input', () => {
+  els.circleThicknessVal.textContent = els.circleThickness.value;
+  paint();
+});
+els.circleColor.addEventListener('input', paint);
+
+// Drag on the preview to move the circle; wheel to zoom its radius.
+let dragging = false, lastX = 0, lastY = 0;
+els.output.addEventListener('pointerdown', e => {
+  if (!els.circleEnable.checked || !processedData) return;
+  dragging = true;
+  lastX = e.clientX; lastY = e.clientY;
+  els.output.setPointerCapture(e.pointerId);
+  els.output.style.cursor = 'grabbing';
+  e.preventDefault();
+});
+els.output.addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const rect = els.output.getBoundingClientRect();
+  const scale = els.output.width / rect.width; // frame px per client px (1:1 with image units)
+  // Clamp the center to the image so the circle always overlaps it; the frame
+  // extends to fit whatever part of the circle pokes past the edges.
+  circle.cx = Math.max(0, Math.min(processedData.width, circle.cx + (e.clientX - lastX) * scale));
+  circle.cy = Math.max(0, Math.min(processedData.height, circle.cy + (e.clientY - lastY) * scale));
+  lastX = e.clientX; lastY = e.clientY;
+  paint();
+});
+function endDrag() {
+  if (!dragging) return;
+  dragging = false;
+  updateCircleCursor();
+}
+els.output.addEventListener('pointerup', endDrag);
+els.output.addEventListener('pointercancel', endDrag);
+els.output.addEventListener('wheel', e => {
+  if (!els.circleEnable.checked || !processedData) return;
+  e.preventDefault();
+  const min = Number(els.circleSize.min), max = Number(els.circleSize.max);
+  const next = Math.max(min, Math.min(max, circle.r * (e.deltaY < 0 ? 1.06 : 0.94)));
+  circle.r = next;
+  els.circleSize.value = Math.round(next);
+  els.circleSizeVal.textContent = Math.round(next);
+  paint();
+}, { passive: false });
+
+function setMode(m) {
+  mode = m;
+  updateControlVisibility();
+  render();
+}
+function setColorMethod(m) {
+  colorMethod = m;
+  updateControlVisibility();
+  render();
+}
+els.modeBw.addEventListener('click', () => setMode('bw'));
+els.modeColor.addEventListener('click', () => setMode('color'));
+els.methPalette.addEventListener('click', () => setColorMethod('palette'));
+els.methPosterize.addEventListener('click', () => setColorMethod('posterize'));
+
+els.modelWidth.addEventListener('input', () => { els.modelWidthVal.textContent = els.modelWidth.value; });
+els.thickBlack.addEventListener('input', () => { els.thickBlackVal.textContent = Number(els.thickBlack.value).toFixed(1); });
+els.thickWhite.addEventListener('input', () => { els.thickWhiteVal.textContent = Number(els.thickWhite.value).toFixed(1); });
+els.ringThick.addEventListener('input', () => { els.ringThickVal.textContent = Number(els.ringThick.value).toFixed(1); });
+els.frameWidth.addEventListener('input', () => { els.frameWidthVal.textContent = els.frameWidth.value; });
+els.baseThick.addEventListener('input', () => { els.baseThickVal.textContent = Number(els.baseThick.value).toFixed(1); });
+els.modelRes.addEventListener('input', () => { els.modelResVal.textContent = els.modelRes.value; });
+els.modelSmooth.addEventListener('input', () => { els.modelSmoothVal.textContent = Number(els.modelSmooth.value).toFixed(1); });
+els.modelExport.addEventListener('click', exportModel);
+
+els.download.addEventListener('click', () => {
+  if (!processedData) return;
+  const data = exportData();
+  const tmp = document.createElement('canvas');
+  tmp.width = data.width;
+  tmp.height = data.height;
+  tmp.getContext('2d').putImageData(data, 0, 0);
+  const a = document.createElement('a');
+  a.download = mode === 'bw' ? 'schwarz-weiss.png' : 'farben-reduziert.png';
+  a.href = tmp.toDataURL('image/png');
+  a.click();
+});
+
+updateControlVisibility();
