@@ -410,6 +410,19 @@
                 <input id="ringThick" type="range" min="0" max="12" value="4" step="0.2" disabled>
               </div>
               <div class="field">
+                <div class="field-head"><label for="frameWidth">Randbreite (px)</label><span id="frameWidthVal" class="badge">0</span></div>
+                <input id="frameWidth" type="range" min="0" max="200" value="0" step="1" disabled>
+                <span class="hint">Rechteck-Rahmen · nur ohne Kreis-Zuschnitt</span>
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="baseThick">Grundplatte (mm)</label><span id="baseThickVal" class="badge">0.0</span></div>
+                <input id="baseThick" type="range" min="0" max="8" value="0" step="0.2" disabled>
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="bodyColor">Rahmen-/Grundfarbe</label></div>
+                <input id="bodyColor" type="color" value="#000000" disabled>
+              </div>
+              <div class="field">
                 <div class="field-head"><label for="modelRes">Auflösung (px)</label><span id="modelResVal" class="badge">256</span></div>
                 <input id="modelRes" type="range" min="32" max="512" value="256" step="16" disabled>
               </div>
@@ -419,6 +432,7 @@
               </div>
               <div class="field">
                 <button id="modelExport" class="btn btn-primary" disabled>3D-Modell (.3mf)</button>
+                <span class="hint">Funktioniert mit und ohne Kreis-Zuschnitt</span>
               </div>
             </div>
           </div>
@@ -1040,7 +1054,8 @@ function extractLoops(cols, rows, isOn) {
 }
 
 // Downsample the processed B/W image into a classification grid. Cells: 1=black,
-// 0=white, -1=empty (outside the circle, when enabled). Returns {cols,rows,cells}.
+// 0=white, 2=rand (circle ring or rectangle frame), -1=empty (outside the circle,
+// when enabled). Returns {cols,rows,cells}.
 function buildCells(maxDim) {
   const enabled = els.circleEnable.checked;
   let sx, sy, sw, sh;
@@ -1061,6 +1076,10 @@ function buildCells(maxDim) {
   const ringCells = (enabled && Number(els.circleThickness.value) > 0 && Number(els.ringThick.value) > 0)
     ? Number(els.circleThickness.value) * (cols / sw) : 0;
   const inner = cr - ringCells;
+  // Rectangle frame band (value 2): only without a circle crop, when a frame
+  // width and height are set. Same px->cell conversion as the ring.
+  const frameCells = (!enabled && Number(els.frameWidth.value) > 0 && Number(els.ringThick.value) > 0)
+    ? Number(els.frameWidth.value) * (cols / sw) : 0;
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     const i = (r * cols + c) * 4;
     let v = d[i] < 128 ? 1 : 0;
@@ -1068,16 +1087,25 @@ function buildCells(maxDim) {
       const dx = c + 0.5 - ccx, dy = r + 0.5 - ccy, dist2 = dx * dx + dy * dy;
       if (dist2 > cr * cr) v = -1;                          // outside the circle
       else if (ringCells > 0 && dist2 > inner * inner) v = 2; // raised ring band
+    } else if (frameCells > 0 &&
+               (c < frameCells || c >= cols - frameCells ||
+                r < frameCells || r >= rows - frameCells)) {
+      v = 2;                                                // raised frame band
     }
     cells[r * cols + c] = v;
   }
   return { cols, rows, cells };
 }
 
-// Build extruded triangle facets for one color (target 1=black, 0=white).
-function partFacets(cells, cols, rows, target, thickness, pitch, smoothTol) {
+// Build extruded triangle facets for one color (target 1=black, 0=white, 2=rand)
+// or for an arbitrary cell predicate. `target` is a cell value to match, or a
+// function (cellValue) => boolean (e.g. v => v !== -1 for the full footprint).
+// The part is extruded from z0 (default 0) up to z0 + thickness, so callers can
+// stack the relief on top of a base plate.
+function partFacets(cells, cols, rows, target, thickness, pitch, smoothTol, z0 = 0) {
   if (thickness <= 0) return [];
-  const isOn = (c, r) => cells[r * cols + c] === target;
+  const match = typeof target === 'function' ? target : (v) => v === target;
+  const isOn = (c, r) => match(cells[r * cols + c]);
   let loops = extractLoops(cols, rows, isOn).map(loop => {
     // drop repeated closing point, convert to mm with y-flip (the flip turns the
     // extraction's solid-on-left winding into CCW outers / CW holes)
@@ -1094,16 +1122,16 @@ function partFacets(cells, cols, rows, target, thickness, pitch, smoothTol) {
     }
     if (best >= 0) comps[best].holes.push(h);
   }
-  const facets = [], T = thickness;
+  const facets = [], zTop = z0 + thickness, zBot = z0;
   for (const comp of comps) {
     for (const t of triangulateComponent(comp.outer, comp.holes)) {
-      facets.push([[t[0][0], t[0][1], T], [t[1][0], t[1][1], T], [t[2][0], t[2][1], T]]); // top
-      facets.push([[t[0][0], t[0][1], 0], [t[2][0], t[2][1], 0], [t[1][0], t[1][1], 0]]); // bottom
+      facets.push([[t[0][0], t[0][1], zTop], [t[1][0], t[1][1], zTop], [t[2][0], t[2][1], zTop]]); // top
+      facets.push([[t[0][0], t[0][1], zBot], [t[2][0], t[2][1], zBot], [t[1][0], t[1][1], zBot]]); // bottom
     }
     for (const ring of [comp.outer, ...comp.holes]) {
       for (let i = 0; i < ring.length; i++) {
         const p1 = ring[i], p2 = ring[(i + 1) % ring.length];
-        const a = [p1[0], p1[1], 0], b = [p2[0], p2[1], 0], c = [p2[0], p2[1], T], dd = [p1[0], p1[1], T];
+        const a = [p1[0], p1[1], zBot], b = [p2[0], p2[1], zBot], c = [p2[0], p2[1], zTop], dd = [p1[0], p1[1], zTop];
         facets.push([a, b, c]); facets.push([a, c, dd]);
       }
     }
@@ -1260,6 +1288,11 @@ const els = {
   thickWhiteVal: document.getElementById('thickWhiteVal'),
   ringThick: document.getElementById('ringThick'),
   ringThickVal: document.getElementById('ringThickVal'),
+  frameWidth: document.getElementById('frameWidth'),
+  frameWidthVal: document.getElementById('frameWidthVal'),
+  baseThick: document.getElementById('baseThick'),
+  baseThickVal: document.getElementById('baseThickVal'),
+  bodyColor: document.getElementById('bodyColor'),
   modelRes: document.getElementById('modelRes'),
   modelResVal: document.getElementById('modelResVal'),
   modelSmooth: document.getElementById('modelSmooth'),
@@ -1291,8 +1324,8 @@ function enableControls(on) {
   [els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels,
    els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
    els.circleThickness, els.circleColor, els.modelWidth, els.thickBlack,
-   els.thickWhite, els.ringThick, els.modelRes, els.modelSmooth,
-   els.modelExport, els.download]
+   els.thickWhite, els.ringThick, els.frameWidth, els.baseThick, els.bodyColor,
+   els.modelRes, els.modelSmooth, els.modelExport, els.download]
     .forEach(e => { e.disabled = !on; });
 }
 
@@ -1432,8 +1465,9 @@ function updateCircleCursor() {
 }
 
 // Builds the extruded model from the current B/W result and downloads it as a
-// 3MF with each color as its own object. With the circle enabled the model is
-// round; if the ring has a width/height it becomes a raised third part.
+// 3MF with each color as its own object. Works with or without the circle crop.
+// A base plate (if set) carries the relief; the rand becomes a raised circle
+// ring (with crop) or rectangle frame (without crop).
 function exportModel() {
   if (!processedData || mode !== 'bw') return;
   const maxDim = Number(els.modelRes.value);
@@ -1441,14 +1475,23 @@ function exportModel() {
   const { cols, rows, cells } = buildCells(maxDim);
   const pitch = widthMm / cols;
   const tol = Number(els.modelSmooth.value) * pitch; // slider is in cells
-  const part = (target, thick) => orientOutward(partFacets(cells, cols, rows, target, thick, pitch, tol));
+  const baseT = Number(els.baseThick.value);
+  const bodyColor = hexToRgb(els.bodyColor.value);
+  // Relief and frame sit on top of the base plate.
+  const part = (target, thick) => orientOutward(partFacets(cells, cols, rows, target, thick, pitch, tol, baseT));
   const parts = [];
+  // Base plate: the full footprint (everything that isn't empty), from z=0 up.
+  const baseF = orientOutward(partFacets(cells, cols, rows, v => v !== -1, baseT, pitch, tol, 0));
+  if (baseF.length) parts.push({ name: 'grundplatte', color: bodyColor, facets: baseF });
   const blackF = part(1, Number(els.thickBlack.value));
   if (blackF.length) parts.push({ name: 'schwarz', color: [0, 0, 0], facets: blackF });
   const whiteF = part(0, Number(els.thickWhite.value));
   if (whiteF.length) parts.push({ name: 'weiss', color: [255, 255, 255], facets: whiteF });
+  // Rand color: the circle ring keeps its own colour, the rectangle frame uses
+  // the shared body colour.
+  const randColor = els.circleEnable.checked ? hexToRgb(els.circleColor.value) : bodyColor;
   const ringF = part(2, Number(els.ringThick.value));
-  if (ringF.length) parts.push({ name: 'rand', color: hexToRgb(els.circleColor.value), facets: ringF });
+  if (ringF.length) parts.push({ name: 'rand', color: randColor, facets: ringF });
   if (!parts.length) {
     setStatus('Kein 3D-Modell: keine passenden Flächen gefunden.', true);
     return;
@@ -1644,6 +1687,8 @@ els.modelWidth.addEventListener('input', () => { els.modelWidthVal.textContent =
 els.thickBlack.addEventListener('input', () => { els.thickBlackVal.textContent = Number(els.thickBlack.value).toFixed(1); });
 els.thickWhite.addEventListener('input', () => { els.thickWhiteVal.textContent = Number(els.thickWhite.value).toFixed(1); });
 els.ringThick.addEventListener('input', () => { els.ringThickVal.textContent = Number(els.ringThick.value).toFixed(1); });
+els.frameWidth.addEventListener('input', () => { els.frameWidthVal.textContent = els.frameWidth.value; });
+els.baseThick.addEventListener('input', () => { els.baseThickVal.textContent = Number(els.baseThick.value).toFixed(1); });
 els.modelRes.addEventListener('input', () => { els.modelResVal.textContent = els.modelRes.value; });
 els.modelSmooth.addEventListener('input', () => { els.modelSmoothVal.textContent = Number(els.modelSmooth.value).toFixed(1); });
 els.modelExport.addEventListener('click', exportModel);
