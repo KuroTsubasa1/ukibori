@@ -313,21 +313,110 @@ function extractLoops(cols, rows, isOn) {
   return loops;
 }
 
-// Build extruded triangle facets for one color (target 1=black, 0=white, 2=rand)
-// or for an arbitrary cell predicate. `target` is a cell value to match, or a
-// function (cellValue) => boolean (e.g. v => v !== -1 for the full footprint).
-// The part is extruded from z0 (default 0) up to z0 + thickness, so callers can
-// stack the relief on top of a base plate.
-function partFacets(cells, cols, rows, target, thickness, pitch, smoothTol, z0 = 0) {
-  if (thickness <= 0) return [];
-  const match = typeof target === 'function' ? target : (v) => v === target;
-  const isOn = (c, r) => match(cells[r * cols + c]);
-  let loops = extractLoops(cols, rows, isOn).map(loop => {
-    // drop repeated closing point, convert to mm with y-flip (the flip turns the
-    // extraction's solid-on-left winding into CCW outers / CW holes)
-    const pts = loop.slice(0, loop.length - 1).map(([x, y]) => [x * pitch, (rows - y) * pitch]);
-    return dpSimplify(pts, smoothTol);
-  }).filter(l => l.length >= 3);
+// One pass of Chaikin corner-cutting on a closed polygon: each edge is replaced
+// by points at 1/4 and 3/4 of its length, rounding sharp corners; endpoints wrap.
+function chaikinClosed(pts) {
+  const n = pts.length;
+  if (n < 3) return pts.slice();
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    out.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25]);
+    out.push([a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]);
+  }
+  return out;
+}
+window.chaikinClosed = chaikinClosed;
+
+// Smooth a closed boundary loop. Two Chaikin passes round the unit-step staircase
+// (each corner is cut by only ~1/4 cell, so long straight edges stay straight and
+// rectangles keep effectively crisp corners), then Douglas-Peucker decimates to
+// keep the triangle count sane. `tol` is the smoothing slider in mm; we apply at
+// least ~0.4 cell so smooth/straight runs collapse even at slider 0.
+function smoothLoop(pts, tol, pitch) {
+  if (pts.length < 3) return pts.slice();
+  const rounded = chaikinClosed(chaikinClosed(pts));
+  return dpSimplify(rounded, Math.max(tol, 0.4 * pitch));
+}
+window.smoothLoop = smoothLoop;
+
+// Bilinear sample of a scalar field stored row-major (cols x rows); clamps to edge.
+function bilinearField(F, cols, rows, x, y) {
+  x = Math.max(0, Math.min(cols - 1, x)); y = Math.max(0, Math.min(rows - 1, y));
+  const x0 = Math.floor(x), y0 = Math.floor(y);
+  const x1 = Math.min(cols - 1, x0 + 1), y1 = Math.min(rows - 1, y0 + 1);
+  const fx = x - x0, fy = y - y0, v = (c, r) => F[r * cols + c];
+  return v(x0, y0) * (1 - fx) * (1 - fy) + v(x1, y0) * fx * (1 - fy)
+       + v(x0, y1) * (1 - fx) * fy + v(x1, y1) * fx * fy;
+}
+
+// Sub-pixel contour of a continuous signed field f(c,r) (>0 inside) via marching
+// squares with linear edge interpolation. Returns closed loops in sample
+// coordinates, oriented with the inside on the left. The grid is padded with
+// "outside" so regions touching the border close along it. This replaces the
+// binary staircase (extractLoops) with smooth, sub-pixel-accurate boundaries.
+function marchingSquaresLoops(f, cols, rows) {
+  const OUT = -1e15;
+  const F = new Float64Array(cols * rows);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) F[r * cols + c] = f(c, r);
+  const val = (c, r) => (c < 0 || r < 0 || c >= cols || r >= rows) ? OUT : F[r * cols + c];
+  const cross = new Map();           // edge id -> [x,y]
+  const links = new Map();           // edge id -> [connected edge ids]
+  const link = (a, b) => { (links.get(a) || links.set(a, []).get(a)).push(b);
+                           (links.get(b) || links.set(b, []).get(b)).push(a); };
+  const getH = (c, r) => { const a = val(c, r), b = val(c + 1, r); return [c + a / (a - b), r]; };
+  const getV = (c, r) => { const a = val(c, r), b = val(c, r + 1); return [c, r + a / (a - b)]; };
+  const inside = (v) => v > 0;
+  for (let r = -1; r < rows; r++) for (let c = -1; c < cols; c++) {
+    const tl = val(c, r), tr = val(c + 1, r), br = val(c + 1, r + 1), bl = val(c, r + 1);
+    let idx = (inside(tl) ? 1 : 0) | (inside(tr) ? 2 : 0) | (inside(br) ? 4 : 0) | (inside(bl) ? 8 : 0);
+    if (idx === 0 || idx === 15) continue;
+    const T = 'h_' + c + '_' + r, R = 'v_' + (c + 1) + '_' + r, B = 'h_' + c + '_' + (r + 1), L = 'v_' + c + '_' + r;
+    const seg = (e1, p1, e2, p2) => { cross.set(e1, p1); cross.set(e2, p2); link(e1, e2); };
+    const pT = T, pR = R, pB = B, pL = L;
+    const PT = () => getH(c, r), PR = () => getV(c + 1, r), PB = () => getH(c, r + 1), PL = () => getV(c, r);
+    switch (idx) {
+      case 1: case 14: seg(pL, PL(), pT, PT()); break;
+      case 2: case 13: seg(pT, PT(), pR, PR()); break;
+      case 3: case 12: seg(pL, PL(), pR, PR()); break;
+      case 4: case 11: seg(pR, PR(), pB, PB()); break;
+      case 6: case 9:  seg(pT, PT(), pB, PB()); break;
+      case 7: case 8:  seg(pL, PL(), pB, PB()); break;
+      case 5: if (inside((tl + tr + br + bl) / 4)) { seg(pL, PL(), pT, PT()); seg(pR, PR(), pB, PB()); }
+              else { seg(pT, PT(), pR, PR()); seg(pL, PL(), pB, PB()); } break;
+      case 10: if (inside((tl + tr + br + bl) / 4)) { seg(pT, PT(), pR, PR()); seg(pL, PL(), pB, PB()); }
+               else { seg(pL, PL(), pT, PT()); seg(pR, PR(), pB, PB()); } break;
+    }
+  }
+  // Stitch segments into loops by walking the connectivity graph (degree ~2).
+  const used = new Set(), loops = [];
+  for (const start of links.keys()) {
+    if (used.has(start)) continue;
+    const loop = []; let prev = null, cur = start;
+    while (cur != null && !used.has(cur)) {
+      used.add(cur); loop.push(cross.get(cur));
+      let nxt = null;
+      for (const n of links.get(cur)) if (n !== prev && !used.has(n)) { nxt = n; break; }
+      prev = cur; cur = nxt;
+    }
+    if (loop.length >= 3) loops.push(loop);
+  }
+  // Orient each loop so the inside (F>0) lies to its left (sample space, y-down).
+  for (const lp of loops) {
+    const a = lp[0], b = lp[1];
+    const tx = b[0] - a[0], ty = b[1] - a[1];
+    let nx = ty, ny = -tx; const len = Math.hypot(nx, ny) || 1; nx /= len; ny /= len;
+    const fv = bilinearField(F, cols, rows, (a[0] + b[0]) / 2 + nx * 0.3, (a[1] + b[1]) / 2 + ny * 0.3);
+    if (!(fv > 0)) lp.reverse();
+  }
+  return loops;
+}
+window.marchingSquaresLoops = marchingSquaresLoops;
+
+// Extrude already-prepared closed mm loops (outers CCW / holes CW) from z0 to
+// z0+thickness: top + bottom caps (triangulated with holes) and side walls.
+function extrudeLoops(loops, thickness, z0 = 0) {
+  if (thickness <= 0 || !loops.length) return [];
   const outers = [], holes = [];
   for (const l of loops) (polyArea(l) > 0 ? outers : holes).push(l);
   const comps = outers.map(o => ({ outer: o, holes: [] }));
@@ -353,6 +442,38 @@ function partFacets(cells, cols, rows, target, thickness, pitch, smoothTol, z0 =
     }
   }
   return facets;
+}
+window.extrudeLoops = extrudeLoops;
+
+// Sub-pixel part: contour a continuous signed field (already smooth), apply the
+// smoothing slider as a light extra rounding (0 = sharpest sub-pixel, higher =
+// rounder), convert to mm (y-flip so outers come out CCW), decimate, then extrude.
+// smoothTol is the slider value in mm (= cells * pitch).
+function fieldFacets(f, cols, rows, pitch, thickness, smoothTol, z0 = 0) {
+  if (thickness <= 0) return [];
+  const iters = Math.max(0, Math.round(smoothTol / pitch)); // slider in cells -> Chaikin passes
+  const loops = marchingSquaresLoops(f, cols, rows)
+    .map(lp => { let p = lp; for (let i = 0; i < iters; i++) p = chaikinClosed(p); return p; })
+    .map(lp => lp.map(([c, r]) => [c * pitch, (rows - 1 - r) * pitch]))
+    .map(lp => dpSimplify(lp, Math.max(0.3 * pitch, smoothTol)))
+    .filter(l => l.length >= 3);
+  return extrudeLoops(loops, thickness, z0);
+}
+window.fieldFacets = fieldFacets;
+
+// Build extruded triangle facets for one binary-cell target (legacy staircase
+// path; the smooth export uses fieldFacets). Extrudes from z0 to z0+thickness.
+function partFacets(cells, cols, rows, target, thickness, pitch, smoothTol, z0 = 0) {
+  if (thickness <= 0) return [];
+  const match = typeof target === 'function' ? target : (v) => v === target;
+  const isOn = (c, r) => match(cells[r * cols + c]);
+  const loops = extractLoops(cols, rows, isOn).map(loop => {
+    // drop repeated closing point, convert to mm with y-flip (the flip turns the
+    // extraction's solid-on-left winding into CCW outers / CW holes)
+    const pts = loop.slice(0, loop.length - 1).map(([x, y]) => [x * pitch, (rows - y) * pitch]);
+    return smoothLoop(pts, smoothTol, pitch);
+  }).filter(l => l.length >= 3);
+  return extrudeLoops(loops, thickness, z0);
 }
 function signedVolume(facets) {
   let v = 0;

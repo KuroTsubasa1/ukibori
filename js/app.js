@@ -287,34 +287,81 @@ function updateCircleCursor() {
   els.output.style.cursor = els.circleEnable.checked ? 'grab' : 'default';
 }
 
+// Builds continuous signed fields (>0 inside) for each part on a cols x rows
+// grid, sampled from the processed B/W result. These feed marching-squares so
+// the exported contours are sub-pixel smooth instead of a binary staircase.
+// gray = luminance over white; alpha = coverage (when transparency is kept);
+// circle/ring/frame are analytic distance fields. Parts are intersections (min).
+function buildFields(maxDim) {
+  const enabled = els.circleEnable.checked;
+  const keepAlpha = els.keepAlpha.checked;
+  let sx, sy, sw, sh;
+  if (enabled) { const r = circle.r; sx = circle.cx - r; sy = circle.cy - r; sw = 2 * r; sh = 2 * r; }
+  else { sx = 0; sy = 0; sw = processedCanvas.width; sh = processedCanvas.height; }
+  let cols, rows;
+  if (sw >= sh) { cols = Math.max(2, Math.min(maxDim, Math.round(sw))); rows = Math.max(2, Math.round(cols * sh / sw)); }
+  else { rows = Math.max(2, Math.min(maxDim, Math.round(sh))); cols = Math.max(2, Math.round(rows * sw / sh)); }
+  const sample = (compositeWhite) => {
+    const cv = document.createElement('canvas'); cv.width = cols; cv.height = rows;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    if (compositeWhite) { cx.fillStyle = '#fff'; cx.fillRect(0, 0, cols, rows); }
+    cx.drawImage(processedCanvas, sx, sy, sw, sh, 0, 0, cols, rows);
+    return cx.getImageData(0, 0, cols, rows).data;
+  };
+  const gd = sample(true);                       // gray over white
+  const gray = new Float64Array(cols * rows);
+  for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * gd[i * 4] + 0.587 * gd[i * 4 + 1] + 0.114 * gd[i * 4 + 2];
+  let alpha = null;
+  if (keepAlpha) { const ad = sample(false); alpha = new Float64Array(cols * rows); for (let i = 0; i < alpha.length; i++) alpha[i] = ad[i * 4 + 3]; }
+  const BIG = 1e9, ix = (c, r) => r * cols + c;
+  const ccx = cols / 2, ccy = rows / 2, cr = Math.min(cols, rows) / 2;
+  const ringCells = (enabled && Number(els.circleThickness.value) > 0 && Number(els.ringThick.value) > 0)
+    ? Number(els.circleThickness.value) * (cols / sw) : 0;
+  const frameCells = (!enabled && Number(els.frameWidth.value) > 0 && Number(els.ringThick.value) > 0)
+    ? Number(els.frameWidth.value) * (cols / sw) : 0;
+  const innerR = cr - ringCells;
+  const G = (c, r) => gray[ix(c, r)];
+  const dist = (c, r) => Math.hypot(c + 0.5 - ccx, r + 0.5 - ccy);
+  const edge = (c, r) => Math.min(c, r, cols - 1 - c, rows - 1 - r);
+  const fAlpha = (c, r) => keepAlpha ? (alpha[ix(c, r)] - 128) : BIG;
+  const fCircle = (c, r) => enabled ? (cr - dist(c, r)) : BIG;
+  const fInner = (c, r) => enabled ? (innerR - dist(c, r)) : (frameCells > 0 ? (edge(c, r) - frameCells) : BIG);
+  const fBase = (c, r) => Math.min(fAlpha(c, r), fCircle(c, r));
+  const fBlack = (c, r) => Math.min(128 - G(c, r), fAlpha(c, r), fInner(c, r));
+  const fWhite = (c, r) => Math.min(G(c, r) - 128, fAlpha(c, r), fInner(c, r));
+  let fRing = null;
+  if (ringCells > 0) fRing = (c, r) => Math.min(dist(c, r) - innerR, cr - dist(c, r), fAlpha(c, r));
+  else if (frameCells > 0) fRing = (c, r) => Math.min(frameCells - edge(c, r), fAlpha(c, r));
+  return { cols, rows, pitch: Number(els.modelWidth.value) / cols, fBase, fBlack, fWhite, fRing };
+}
+window.buildFields = buildFields;
+
 // Builds the extruded model from the current B/W result and downloads it as a
 // 3MF with each color as its own object. Works with or without the circle crop.
-// A base plate (if set) carries the relief; the rand becomes a raised circle
-// ring (with crop) or rectangle frame (without crop).
+// Contours are sub-pixel smooth (marching squares on the fields from buildFields).
 function exportModel() {
   if (!processedData || mode !== 'bw') return;
   const maxDim = Number(els.modelRes.value);
-  const widthMm = Number(els.modelWidth.value);
-  const { cols, rows, cells } = buildCells(maxDim);
-  const pitch = widthMm / cols;
+  const { cols, rows, pitch, fBase, fBlack, fWhite, fRing } = buildFields(maxDim);
   const tol = Number(els.modelSmooth.value) * pitch; // slider is in cells
   const baseT = Number(els.baseThick.value);
   const bodyColor = hexToRgb(els.bodyColor.value);
-  // Relief and frame sit on top of the base plate.
-  const part = (target, thick) => orientOutward(partFacets(cells, cols, rows, target, thick, pitch, tol, baseT));
+  const facets = (f, thick, z0) => orientOutward(fieldFacets(f, cols, rows, pitch, thick, tol, z0));
   const parts = [];
-  // Base plate: the full footprint (everything that isn't empty), from z=0 up.
-  const baseF = orientOutward(partFacets(cells, cols, rows, v => v !== -1, baseT, pitch, tol, 0));
+  // Base plate: the full footprint, from z=0 up. Relief + rand sit on top (z0=baseT).
+  const baseF = facets(fBase, baseT, 0);
   if (baseF.length) parts.push({ name: 'grundplatte', color: bodyColor, facets: baseF });
-  const blackF = part(1, Number(els.thickBlack.value));
+  const blackF = facets(fBlack, Number(els.thickBlack.value), baseT);
   if (blackF.length) parts.push({ name: 'schwarz', color: [0, 0, 0], facets: blackF });
-  const whiteF = part(0, Number(els.thickWhite.value));
+  const whiteF = facets(fWhite, Number(els.thickWhite.value), baseT);
   if (whiteF.length) parts.push({ name: 'weiss', color: [255, 255, 255], facets: whiteF });
   // Rand color: the circle ring keeps its own colour, the rectangle frame uses
   // the shared body colour.
-  const randColor = els.circleEnable.checked ? hexToRgb(els.circleColor.value) : bodyColor;
-  const ringF = part(2, Number(els.ringThick.value));
-  if (ringF.length) parts.push({ name: 'rand', color: randColor, facets: ringF });
+  if (fRing) {
+    const randColor = els.circleEnable.checked ? hexToRgb(els.circleColor.value) : bodyColor;
+    const ringF = facets(fRing, Number(els.ringThick.value), baseT);
+    if (ringF.length) parts.push({ name: 'rand', color: randColor, facets: ringF });
+  }
   if (!parts.length) {
     setStatus('Kein 3D-Modell: keine passenden Flächen gefunden.', true);
     return;
