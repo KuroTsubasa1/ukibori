@@ -46,6 +46,21 @@ jobs:
             --exclude='ui-check.png' \
             ./ "${SSH_USER}@${SSH_HOST}:/opt/ukibori/"
 
+      - name: Provision nginx + TLS (certbot)
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          CERTBOT_EMAIL: ${{ vars.CERTBOT_EMAIL }}
+        run: |
+          # Ship the provisioning script + nginx config (excluded from the site
+          # mirror above) to a staging dir, then run it on the server.
+          rsync -avz \
+            -e "ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes" \
+            ./deploy/ "${SSH_USER}@${SSH_HOST}:/tmp/ukibori-deploy/"
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes \
+            "${SSH_USER}@${SSH_HOST}" \
+            "CERTBOT_EMAIL='${CERTBOT_EMAIL}' bash /tmp/ukibori-deploy/provision.sh"
+
       - name: Cleanup SSH key
         if: always()
         run: rm -f ~/.ssh/deploy_key
