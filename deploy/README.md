@@ -1,11 +1,18 @@
 # Deployment
 
 Ukibori is a static site. On every push to `master`, the
-[`Deploy`](../.github/workflows/deploy.yml) workflow rsyncs the site files to
-`/opt/ukibori` on the server over SSH, and nginx serves that directory over
-HTTPS at **https://ukibori.lasseharm.space**.
+[`Deploy`](../.github/workflows/deploy.yml) workflow:
 
-## GitHub repo secrets (already configured)
+1. rsyncs the site files to `/opt/ukibori` over SSH, then
+2. runs [`provision.sh`](provision.sh) on the server, which installs the nginx
+   vhost and — on the very first deploy — obtains the Let's Encrypt certificate
+   automatically (http-01 challenge), then reloads nginx.
+
+The site is served over HTTPS at **https://ukibori.lasseharm.space**.
+
+## GitHub repo configuration
+
+Secrets (already configured):
 
 | Secret            | Purpose                                              |
 | ----------------- | ---------------------------------------------------- |
@@ -13,12 +20,30 @@ HTTPS at **https://ukibori.lasseharm.space**.
 | `SSH_HOST`        | Server hostname or IP                                |
 | `SSH_USER`        | SSH/deploy user                                      |
 
+Variables (optional):
+
+| Variable        | Purpose                                                            |
+| --------------- | ----------------------------------------------------------------- |
+| `CERTBOT_EMAIL` | Email for Let's Encrypt expiry notices. Defaults to `lasse.harm@di-unternehmer.com` if unset. |
+
 ## One-time server setup
 
-Run these once on the server (`SSH_USER` needs sudo for the setup; the deploy
-itself does not).
+The pipeline installs the nginx vhost and obtains the certificate itself. You
+only need to satisfy these prerequisites once:
 
-### 1. Create the project directory, owned by the deploy user
+### 1. DNS
+
+Point the `A`/`AAAA` record for `ukibori.lasseharm.space` at the server. This
+must resolve **before** the first deploy, or the http-01 challenge will fail.
+
+### 2. Install nginx + certbot
+
+```bash
+sudo apt update
+sudo apt install -y nginx certbot
+```
+
+### 3. Create the project directory, owned by the deploy user
 
 ```bash
 sudo mkdir -p /opt/ukibori
@@ -26,43 +51,23 @@ sudo chown "$USER":"$USER" /opt/ukibori
 sudo chmod 755 /opt/ukibori   # nginx (www-data) must be able to read it
 ```
 
-### 2. Install nginx + certbot
+### 4. Grant the deploy user passwordless sudo
 
-```bash
-sudo apt update
-sudo apt install -y nginx certbot python3-certbot-nginx
+`provision.sh` runs `certbot`, `nginx`, `systemctl`, etc. via `sudo` over a
+non-interactive SSH session, so the deploy user needs `NOPASSWD` sudo. Create
+`/etc/sudoers.d/ukibori-deploy` (replace `DEPLOY_USER`):
+
+```
+DEPLOY_USER ALL=(root) NOPASSWD: /usr/bin/certbot, /usr/sbin/nginx, /bin/systemctl reload nginx, /bin/mkdir, /bin/cp, /bin/ln, /bin/rm, /usr/bin/tee
 ```
 
-### 3. Install the nginx vhost
+> Tighten or broaden to taste. The simplest (least restrictive) alternative is a
+> blanket `DEPLOY_USER ALL=(root) NOPASSWD: ALL`.
 
-```bash
-sudo cp /opt/ukibori/deploy/nginx/ukibori.conf /etc/nginx/sites-available/ukibori.conf
-sudo ln -sf /etc/nginx/sites-available/ukibori.conf /etc/nginx/sites-enabled/ukibori.conf
-```
-
-> The committed `ukibori.conf` references TLS certs that don't exist yet, so it
-> won't pass `nginx -t` until step 4. If you want nginx to start beforehand,
-> obtain the cert with the standalone/webroot method first (step 4), then enable
-> the vhost.
-
-### 4. Obtain the SSL certificate (Let's Encrypt)
-
-Point the DNS `A`/`AAAA` record for `ukibori.lasseharm.space` at the server
-first, then:
-
-```bash
-sudo mkdir -p /var/www/certbot
-sudo certbot --nginx -d ukibori.lasseharm.space
-```
-
-`certbot --nginx` provisions the cert and wires it into the vhost. Auto-renewal
-is handled by the `certbot.timer` systemd unit installed with the package.
-
-### 5. Reload nginx
-
-```bash
-sudo nginx -t && sudo systemctl reload nginx
-```
+That's it — push to `master` and the first deploy provisions everything.
+Certificate **renewal** thereafter is handled automatically by the `certbot.timer`
+systemd unit; the port-80 block in the vhost keeps the webroot challenge path
+available for renewals.
 
 ## Triggering a deploy
 
