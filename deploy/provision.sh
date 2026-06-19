@@ -41,7 +41,11 @@ EOF
     # not exist yet, so it must not be loaded during bootstrap).
     sudo rm -f "$NGINX_ENABLED"
     sudo ln -sf "$BOOTSTRAP_AVAIL" "$BOOTSTRAP_ENABLED"
-    sudo nginx -t && sudo systemctl reload nginx
+    # NB: keep `nginx -t` and the reload on separate lines. In a `cmd && cmd`
+    # list, a failure of the first command is exempt from `set -e`, so a bad
+    # config would be silently swallowed and the deploy would go green anyway.
+    sudo nginx -t
+    sudo systemctl reload nginx
 
     sudo certbot certonly --webroot -w "$WEBROOT" -d "$DOMAIN" \
         --non-interactive --agree-tos -m "$EMAIL"
@@ -51,6 +55,7 @@ fi
 sudo rm -f "$BOOTSTRAP_ENABLED"
 sudo cp "$SCRIPT_DIR/nginx/ukibori.conf" "$NGINX_AVAIL"
 sudo ln -sf "$NGINX_AVAIL" "$NGINX_ENABLED"
-sudo nginx -t && sudo systemctl reload nginx
+sudo nginx -t
+sudo systemctl reload nginx
 
 echo "Provisioning complete: https://$DOMAIN"
