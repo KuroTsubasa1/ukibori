@@ -23,7 +23,9 @@ BOOTSTRAP_ENABLED="/etc/nginx/sites-enabled/ukibori-bootstrap.conf"
 sudo mkdir -p "$WEBROOT" /opt/ukibori
 
 # --- Bootstrap: obtain the cert if it doesn't exist yet -----------------------
-if [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+# Note: /etc/letsencrypt/live is root-only (0700), so this must use sudo or it
+# always reads "missing" and needlessly re-bootstraps on every deploy.
+if ! sudo test -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem"; then
     echo "No certificate for $DOMAIN yet — bootstrapping via http-01 challenge."
 
     # Temporary HTTP-only vhost that only serves the ACME challenge.
