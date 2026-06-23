@@ -272,8 +272,12 @@ function buildBookmarkParts(doc) {
   // recess depth = (its rank in the layer order) x the color step, so reordering
   // the Ebenen list restacks the colors. Front-most color = shallowest.
   const floor = Math.min(2 * doc.layerHeightMm, T); // colored-floor thickness (mm)
-  const recessOf = (d) => Math.max(0, Math.min(d, T - floor)); // clamp so floor+base fit
-  const baseUnder = (d) => T - recessOf(d) - floor;            // base height beneath floor (>=0)
+  // Always keep a solid base under every colored floor so engravings never reach
+  // the bottom/base layer (clamp recess to leave >= minBase beneath the floor).
+  const minBase = Math.min(Math.max(0.6, 2 * doc.layerHeightMm), Math.max(0, T - floor));
+  const maxRecess = Math.max(0, T - floor - minBase);
+  const recessOf = (d) => Math.max(0, Math.min(d, maxRecess));
+  const baseUnder = (d) => T - recessOf(d) - floor;            // base height beneath floor (>= minBase)
 
   // Per-color recess depth from rank in the global color order. Colors are
   // ordered element-by-element front -> back; within a reduce-image element the
