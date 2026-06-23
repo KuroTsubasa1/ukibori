@@ -484,6 +484,29 @@ function zipStore(files) {
   return buf;
 }
 
+// Analytic signed field (>0 inside the rounded-rect body AND outside the hole),
+// in cell units, for a cols×rows grid spanning widthMm×heightMm. Cell centers
+// map to mm via (c+0.5)/(cols/widthMm), (r+0.5)/(rows/heightMm); r=0 is the top.
+// The hole is horizontally centered, its center marginTopMm+radius from the top.
+function roundedRectHoleField(cols, rows, p) {
+  const sx = cols / p.widthMm, sy = rows / p.heightMm; // cells per mm
+  const s = (sx + sy) / 2;                              // ~uniform scale for radii
+  const hw = p.widthMm / 2, hh = p.heightMm / 2;
+  const rr = Math.min(p.cornerRadiusMm, hw, hh);
+  const holeR = p.hole.diameterMm / 2;
+  const holeCx = p.widthMm / 2, holeCy = p.hole.marginTopMm + holeR;
+  return (c, r) => {
+    const x = (c + 0.5) / sx, y = (r + 0.5) / sy;       // mm, origin top-left
+    // rounded-rect SDF (centered): >0 outside, <0 inside
+    const qx = Math.abs(x - hw) - (hw - rr), qy = Math.abs(y - hh) - (hh - rr);
+    const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - rr;
+    const bodyInside = -outside;                         // >0 inside body, mm
+    const holeOutside = Math.hypot(x - holeCx, y - holeCy) - holeR; // >0 outside hole, mm
+    return Math.min(bodyInside, holeOutside) * s;        // mm -> cells
+  };
+}
+window.roundedRectHoleField = roundedRectHoleField;
+
 // Build a 3MF package from parts [{name, color:[r,g,b], facets}] as a Blob.
 // Each part becomes its own <object> (separate mesh) colored via a colorgroup.
 function build3MF(parts) {
