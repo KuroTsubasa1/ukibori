@@ -519,7 +519,10 @@ function build3MF(parts) {
     let vs = '';
     for (const v of m.vertices) vs += `     <vertex x="${+v[0].toFixed(4)}" y="${+v[1].toFixed(4)}" z="${+v[2].toFixed(4)}" />\n`;
     let ts = '';
-    for (const t of m.triangles) ts += `     <triangle v1="${t[0]}" v2="${t[1]}" v3="${t[2]}" />\n`;
+    // Per-triangle color reference (pid->colorgroup, p1 applies to the whole
+    // triangle) in addition to the object-level pid/pindex — many slicers only
+    // pick up colors from the per-triangle form.
+    for (const t of m.triangles) ts += `     <triangle v1="${t[0]}" v2="${t[1]}" v3="${t[2]}" pid="1" p1="${i}" />\n`;
     const id = i + 2;
     objects += `  <object id="${id}" name="${part.name}" type="model" pid="1" pindex="${i}">\n   <mesh>\n    <vertices>\n${vs}    </vertices>\n    <triangles>\n${ts}    </triangles>\n   </mesh>\n  </object>\n`;
     items += `  <item objectid="${id}" />\n`;
