@@ -171,7 +171,7 @@ function exportBookmark3MF(doc) {
   a.download = "lesezeichen.3mf";
   a.href = URL.createObjectURL(blob);
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
   return { parts, blob };
 }
 
