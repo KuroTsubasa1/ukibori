@@ -17,6 +17,11 @@
 </header>
 
 <main>
+  <div class="app-mode seg-group" role="tablist" aria-label="App-Modus">
+    <button type="button" id="appModeRelief" class="seg seg-active">Bild → Relief</button>
+    <button type="button" id="appModeBookmark" class="seg">Lesezeichen</button>
+  </div>
+  <div id="reliefWorkspace">
   <section id="drop" class="dropzone" tabindex="0">
     <div class="drop-full">
       <div class="drop-icon" aria-hidden="true">⬆</div>
@@ -200,10 +205,92 @@
       <canvas id="output"></canvas>
     </section>
   </div>
+  </div><!-- /#reliefWorkspace -->
+
+  <div id="bmWorkspace" class="workspace" hidden>
+    <aside class="sidebar">
+      <div class="bm-actions">
+        <button type="button" id="bmAddImage" class="btn">+ Bild</button>
+        <button type="button" id="bmAddText" class="btn">+ Text</button>
+      </div>
+      <input id="bmFile" type="file" accept="image/*" hidden>
+      <input id="bmFontFile" type="file" accept=".ttf,.otf,font/*" hidden>
+      <input id="bmLoadFile" type="file" accept=".json,application/json" hidden>
+
+      <details class="acc" open>
+        <summary>Lesezeichen</summary>
+        <div class="acc-body"><div class="fields">
+          <div class="field"><div class="field-head"><label for="bmWidth">Breite (mm)</label><span id="bmWidthVal" class="badge">50</span></div>
+            <input id="bmWidth" type="range" min="20" max="120" value="50" step="1"></div>
+          <div class="field"><div class="field-head"><label for="bmHeight">Höhe (mm)</label><span id="bmHeightVal" class="badge">150</span></div>
+            <input id="bmHeight" type="range" min="40" max="250" value="150" step="1"></div>
+          <div class="field"><div class="field-head"><label for="bmCorner">Eckradius (mm)</label><span id="bmCornerVal" class="badge">4</span></div>
+            <input id="bmCorner" type="range" min="0" max="25" value="4" step="0.5"></div>
+          <div class="field"><div class="field-head"><label for="bmThickness">Dicke (mm)</label><span id="bmThicknessVal" class="badge">3.0</span></div>
+            <input id="bmThickness" type="range" min="0.6" max="8" value="3" step="0.2"></div>
+          <div class="field"><div class="field-head"><label for="bmLayerHeight">Schichthöhe (mm)</label><span id="bmLayerHeightVal" class="badge">0.20</span></div>
+            <input id="bmLayerHeight" type="range" min="0.05" max="0.4" value="0.2" step="0.01"></div>
+          <div class="field"><div class="field-head"><label for="bmHoleD">Loch ⌀ (mm)</label><span id="bmHoleDVal" class="badge">5</span></div>
+            <input id="bmHoleD" type="range" min="0" max="15" value="5" step="0.5"></div>
+          <div class="field"><div class="field-head"><label for="bmHoleMargin">Loch Abstand oben (mm)</label><span id="bmHoleMarginVal" class="badge">8</span></div>
+            <input id="bmHoleMargin" type="range" min="2" max="30" value="8" step="0.5"></div>
+          <div class="field"><div class="field-head"><label for="bmBaseColor">Grundfarbe</label></div>
+            <input id="bmBaseColor" type="color" value="#000000"></div>
+          <div class="field"><div class="field-head"><label for="bmResolution">Auflösung (px)</label><span id="bmResolutionVal" class="badge">256</span></div>
+            <input id="bmResolution" type="range" min="64" max="512" value="256" step="16"></div>
+        </div></div>
+      </details>
+
+      <details class="acc" open>
+        <summary>Ebenen</summary>
+        <div class="acc-body"><ul id="bmLayers" class="bm-layers"></ul></div>
+      </details>
+
+      <details class="acc" open>
+        <summary>Element</summary>
+        <div class="acc-body"><div id="bmProps" class="fields"><p class="hint">Kein Element ausgewählt.</p></div></div>
+      </details>
+
+      <div class="sidebar-footer">
+        <button id="bmExport" class="btn btn-primary">3D-Modell (.3mf)</button>
+        <div class="bm-actions">
+          <button id="bmSave" class="btn">Projekt speichern</button>
+          <button id="bmLoad" class="btn">Projekt laden</button>
+        </div>
+        <p id="bmStatus" class="status">Lesezeichen-Modus.</p>
+      </div>
+    </aside>
+
+    <section id="bmPreview" class="preview">
+      <canvas id="bmCanvas"></canvas>
+    </section>
+  </div>
 </main>
 
+<script>
+(function () {
+  var relief = document.getElementById('appModeRelief');
+  var bookmark = document.getElementById('appModeBookmark');
+  var bmWs = document.getElementById('bmWorkspace');
+  relief.addEventListener('click', function () {
+    document.body.classList.remove('bookmark-mode');
+    bmWs.hidden = true;
+    relief.classList.add('seg-active');
+    bookmark.classList.remove('seg-active');
+  });
+  bookmark.addEventListener('click', function () {
+    document.body.classList.add('bookmark-mode');
+    bmWs.hidden = false;
+    bookmark.classList.add('seg-active');
+    relief.classList.remove('seg-active');
+  });
+}());
+</script>
 <script src="js/image-ops.js"></script>
 <script src="js/geometry.js"></script>
+<script src="js/bookmark-model.js"></script>
+<script src="js/bookmark-export.js"></script>
+<script src="js/bookmark-editor.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
