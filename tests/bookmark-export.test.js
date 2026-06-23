@@ -45,4 +45,30 @@
     assertEqual(out.g[idx], 255, "top element (white) wins G");
     assertEqual(out.cutout[idx], 1, "top element cutout flag set");
   });
+  function redCanvas2() {
+    const cv = document.createElement("canvas"); cv.width = 20; cv.height = 20;
+    const cx = cv.getContext("2d"); cx.fillStyle = "#ff0000"; cx.fillRect(0, 0, 20, 20);
+    return cv;
+  }
+
+  test("parts: empty doc yields a single base part", () => {
+    const d = defaultBookmark(); d.resolution = 64;
+    const parts = buildBookmarkParts(d);
+    assertEqual(parts.length, 1, "one part");
+    assertEqual(parts[0].name, "grundplatte", "base part name");
+    assert(parts[0].facets.length > 0, "base has facets");
+  });
+
+  test("parts: a green element adds a second colored part with outward volume", () => {
+    const d = defaultBookmark(); d.resolution = 64; d.baseColor = "#000000";
+    const el = makeImageElement({ src: "x", color: "#00ff00", cxMm: 25, cyMm: 75,
+      wMm: 40, hMm: 40, threshold: 200, depthLayers: 2, cutout: false });
+    el._img = redCanvas2();
+    d.elements.push(el);
+    const parts = buildBookmarkParts(d);
+    assert(parts.length >= 2, "base + green");
+    const green = parts.find(p => p.color[0] === 0 && p.color[1] === 255 && p.color[2] === 0);
+    assert(green, "green part exists");
+    assert(signedVolume(green.facets) > 0, "green volume positive (outward)");
+  });
 })();

@@ -75,3 +75,105 @@ function composeDesign(doc, cols, rows) {
 }
 
 window.composeDesign = composeDesign;
+
+// Aspect-correct grid: longest side = resolution.
+function __gridFor(doc) {
+  const res = Math.max(8, Math.round(doc.resolution));
+  if (doc.widthMm >= doc.heightMm) {
+    const cols = res; return { cols, rows: Math.max(2, Math.round(res * doc.heightMm / doc.widthMm)) };
+  }
+  const rows = res; return { rows, cols: Math.max(2, Math.round(res * doc.widthMm / doc.heightMm)) };
+}
+
+function __hex(r, g, b) {
+  const h = x => x.toString(16).padStart(2, "0");
+  return ("#" + h(r) + h(g) + h(b)).toUpperCase();
+}
+
+// Build a binary signed field (>0 inside) from a membership predicate, then
+// intersect (min) with the body/hole field so every part shares one outline.
+function __maskField(member, footprint, cols) {
+  return (c, r) => Math.min(member(c, r) ? 1 : -1, footprint(c, r));
+}
+
+function buildBookmarkParts(doc) {
+  const { cols, rows } = __gridFor(doc);
+  const comp = composeDesign(doc, cols, rows);
+  const footprint = roundedRectHoleField(cols, rows, doc);
+  const pitch = doc.widthMm / cols;
+  const smoothTol = (doc.smooth || 0) * pitch;
+  const T = doc.thicknessMm;
+  const baseHex = doc.baseColor.toUpperCase();
+  const idx = (c, r) => r * cols + c;
+  const facetsByColor = new Map(); // hex -> facets[]
+  const push = (hex, facets) => {
+    if (!facets.length) return;
+    if (!facetsByColor.has(hex)) facetsByColor.set(hex, []);
+    const acc = facetsByColor.get(hex); for (const f of facets) acc.push(f);
+  };
+
+  // 1) Front color slabs, grouped by (colorHex, depthMm).
+  const groups = new Map(); // key "hex|depth" -> {hex, depth, set:Uint8Array}
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const i = idx(c, r);
+    if (comp.isBase[i]) continue;
+    const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
+    const depth = comp.depthMm[i];
+    const key = hex + "|" + depth.toFixed(4);
+    let grp = groups.get(key);
+    if (!grp) { grp = { hex, depth, set: new Uint8Array(cols * rows) }; groups.set(key, grp); }
+    grp.set[i] = 1;
+  }
+  for (const grp of groups.values()) {
+    const f = __maskField((c, r) => grp.set[idx(c, r)] === 1, footprint, cols);
+    const facets = orientOutward(fieldFacets(f, cols, rows, pitch, grp.depth, smoothTol, T - grp.depth));
+    push(grp.hex, facets);
+  }
+
+  // 2) Base body behind non-cutout element pixels, grouped by depth; plus the
+  //    full-thickness background.
+  const behind = new Map(); // depthMm -> Uint8Array
+  const bg = new Uint8Array(cols * rows);
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const i = idx(c, r);
+    if (comp.isBase[i]) { bg[i] = 1; continue; }
+    if (comp.cutout[i]) continue;            // recess: nothing behind
+    const d = comp.depthMm[i];
+    if (d >= T) continue;                     // element already full thickness
+    let set = behind.get(d); if (!set) { set = new Uint8Array(cols * rows); behind.set(d, set); }
+    set[i] = 1;
+  }
+  // background: full thickness
+  {
+    const f = __maskField((c, r) => bg[idx(c, r)] === 1, footprint, cols);
+    push(baseHex, orientOutward(fieldFacets(f, cols, rows, pitch, T, smoothTol, 0)));
+  }
+  for (const [d, set] of behind) {
+    const f = __maskField((c, r) => set[idx(c, r)] === 1, footprint, cols);
+    push(baseHex, orientOutward(fieldFacets(f, cols, rows, pitch, T - d, smoothTol, 0)));
+  }
+
+  // 3) Assemble parts; base first and named "grundplatte".
+  const parts = [];
+  if (facetsByColor.has(baseHex)) {
+    parts.push({ name: "grundplatte", color: hexToRgb(baseHex), facets: facetsByColor.get(baseHex) });
+    facetsByColor.delete(baseHex);
+  }
+  let n = 1;
+  for (const [hex, facets] of facetsByColor) parts.push({ name: "farbe-" + (n++), color: hexToRgb(hex), facets });
+  return parts.filter(p => p.facets.length);
+}
+
+function exportBookmark3MF(doc) {
+  const parts = buildBookmarkParts(doc);
+  const blob = build3MF(parts);
+  const a = document.createElement("a");
+  a.download = "lesezeichen.3mf";
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  URL.revokeObjectURL(a.href);
+  return { parts, blob };
+}
+
+window.buildBookmarkParts = buildBookmarkParts;
+window.exportBookmark3MF = exportBookmark3MF;
