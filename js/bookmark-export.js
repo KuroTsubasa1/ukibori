@@ -32,24 +32,19 @@ function __renderElement(el, doc, cols, rows) {
   const r = new Uint8ClampedArray(n), g = new Uint8ClampedArray(n), b = new Uint8ClampedArray(n);
 
   if (el.type === "image" && el.colorMode === "reduce" && el._img) {
-    // Quantize ONLY the element's opaque pixels. The element is drawn into the
-    // full bookmark-sized grid, so a large transparent margin surrounds it; if we
-    // quantized the whole canvas the transparent background would steal palette
-    // slots and muddy the result. Pack the opaque pixels into a compact strip,
-    // quantize that, then scatter the results back (color is position-independent).
-    const idxs = [];
-    for (let i = 0; i < n; i++) if (d[i * 4 + 3] >= __ALPHA_CUTOFF) idxs.push(i);
-    const strip = new ImageData(Math.max(1, idxs.length), 1);
-    for (let k = 0; k < idxs.length; k++) {
-      const p = idxs[k] * 4;
-      strip.data[k * 4] = d[p]; strip.data[k * 4 + 1] = d[p + 1];
-      strip.data[k * 4 + 2] = d[p + 2]; strip.data[k * 4 + 3] = 255;
-    }
-    if (el.reduce.method === "palette") quantizeMedianCut(strip, el.reduce.numColors);
-    else posterize(strip, el.reduce.levels);
-    for (let k = 0; k < idxs.length; k++) {
-      const i = idxs[k];
-      mask[i] = 1; r[i] = strip.data[k * 4]; g[i] = strip.data[k * 4 + 1]; b[i] = strip.data[k * 4 + 2];
+    // Extract a canonical palette from the source image (resolution-independent),
+    // then map each grid pixel to the nearest palette color. This keeps the
+    // preview and every export resolution in agreement. remap recolors/merges
+    // colors (extracted hex -> chosen hex).
+    const pal = __imagePaletteFromImg(el._img, el.reduce.method, el.reduce.numColors, el.reduce.levels);
+    const remap = (el.reduce && el.reduce.remap) || {};
+    for (let i = 0; i < n; i++) {
+      if (d[i * 4 + 3] < __ALPHA_CUTOFF) continue;
+      const near = __nearestColor(pal, d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
+      let cr = near[0], cg = near[1], cb = near[2];
+      const m = remap[__hex(cr, cg, cb)];
+      if (m) { const c = hexToRgb(m); cr = c[0]; cg = c[1]; cb = c[2]; }
+      mask[i] = 1; r[i] = cr; g[i] = cg; b[i] = cb;
     }
     return { mask, r, g, b };
   }
@@ -103,6 +98,40 @@ function __hex(r, g, b) {
   const h = x => x.toString(16).padStart(2, "0");
   return ("#" + h(r) + h(g) + h(b)).toUpperCase();
 }
+
+// Canonical palette for a reduce-mode image: quantize the source image at a
+// capped natural resolution (resolution-INDEPENDENT) so the editor preview and
+// every export resolution share one palette. Returns an array of [r,g,b].
+function __imagePaletteFromImg(imgEl, method, numColors, levels) {
+  const iw = imgEl.naturalWidth || imgEl.width, ih = imgEl.naturalHeight || imgEl.height;
+  const scale = Math.min(1, 256 / Math.max(iw, ih, 1));
+  const w = Math.max(1, Math.round(iw * scale)), h = Math.max(1, Math.round(ih * scale)), n = w * h;
+  const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+  const cx = cv.getContext("2d", { willReadFrequently: true });
+  cx.drawImage(imgEl, 0, 0, w, h);
+  const img = cx.getImageData(0, 0, w, h), d = img.data;
+  const idxs = []; for (let i = 0; i < n; i++) if (d[i * 4 + 3] >= __ALPHA_CUTOFF) idxs.push(i);
+  const strip = new ImageData(Math.max(1, idxs.length), 1);
+  for (let k = 0; k < idxs.length; k++) { const p = idxs[k] * 4; strip.data[k*4]=d[p]; strip.data[k*4+1]=d[p+1]; strip.data[k*4+2]=d[p+2]; strip.data[k*4+3]=255; }
+  if (method === "palette") quantizeMedianCut(strip, numColors); else posterize(strip, levels);
+  const seen = new Set(), pal = [];
+  for (let k = 0; k < idxs.length; k++) {
+    const r = strip.data[k*4], g = strip.data[k*4+1], b = strip.data[k*4+2], hex = __hex(r, g, b);
+    if (!seen.has(hex)) { seen.add(hex); pal.push([r, g, b]); }
+  }
+  return pal;
+}
+// Nearest palette color (squared RGB distance).
+function __nearestColor(pal, r, g, b) {
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < pal.length; i++) {
+    const dr = pal[i][0]-r, dg = pal[i][1]-g, db = pal[i][2]-b, dd = dr*dr + dg*dg + db*db;
+    if (dd < bd) { bd = dd; best = i; }
+  }
+  return pal[best] || [r, g, b];
+}
+window.__imagePaletteFromImg = __imagePaletteFromImg;
+window.__nearestColor = __nearestColor;
 
 // Build a binary signed field (>0 inside) from a membership predicate, then
 // intersect (min) with the body/hole field so every part shares one outline.

@@ -64,8 +64,9 @@ function bodyPath(ctx, s) {
 function elementDisplayKey(el) {
   return [el.colorMode, el.color, el.threshold, el.invert,
           el.reduce && el.reduce.method, el.reduce && el.reduce.numColors,
-          el.reduce && el.reduce.levels].join('|');
+          el.reduce && el.reduce.levels, JSON.stringify(el.reduce && el.reduce.remap || {})].join('|');
 }
+function __hexOf(r, g, b) { return ('#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('')).toUpperCase(); }
 function ensureDisplay(el) {
   if (el.type !== 'image' || !el._img) return null;
   const key = elementDisplayKey(el);
@@ -79,12 +80,20 @@ function ensureDisplay(el) {
   const img = sx.getImageData(0, 0, w, h), d = img.data;
   const out = sx.createImageData(w, h), o = out.data;
   if (el.colorMode === 'reduce') {
-    const idxs = []; for (let i = 0; i < n; i++) if (d[i * 4 + 3] >= 128) idxs.push(i);
-    const strip = new ImageData(Math.max(1, idxs.length), 1);
-    for (let k = 0; k < idxs.length; k++) { const p = idxs[k] * 4; strip.data[k*4]=d[p]; strip.data[k*4+1]=d[p+1]; strip.data[k*4+2]=d[p+2]; strip.data[k*4+3]=255; }
-    if (el.reduce.method === 'palette') quantizeMedianCut(strip, el.reduce.numColors); else posterize(strip, el.reduce.levels);
-    for (let k = 0; k < idxs.length; k++) { const i = idxs[k]; o[i*4]=strip.data[k*4]; o[i*4+1]=strip.data[k*4+1]; o[i*4+2]=strip.data[k*4+2]; o[i*4+3]=255; }
+    // Same canonical palette + nearest mapping as the .3mf export, so the preview
+    // matches the print and remap keys line up.
+    const remap = (el.reduce && el.reduce.remap) || {};
+    const pal = window.__imagePaletteFromImg(el._img, el.reduce.method, el.reduce.numColors, el.reduce.levels);
+    el._palette = pal.map(c => __hexOf(c[0], c[1], c[2]));
+    for (let i = 0; i < n; i++) {
+      if (d[i * 4 + 3] < 128) continue;
+      const near = window.__nearestColor(pal, d[i*4], d[i*4+1], d[i*4+2]);
+      let cr = near[0], cg = near[1], cb = near[2];
+      const m = remap[__hexOf(cr, cg, cb)]; if (m) { const c = hexToRgb(m); cr = c[0]; cg = c[1]; cb = c[2]; }
+      o[i*4]=cr; o[i*4+1]=cg; o[i*4+2]=cb; o[i*4+3]=255;
+    }
   } else {
+    el._palette = null;
     const col = hexToRgb(el.color);
     for (let i = 0; i < n; i++) {
       let on = d[i * 4 + 3] >= 128;
@@ -97,21 +106,30 @@ function ensureDisplay(el) {
   el._display = cv; el._displayKey = key; return cv;
 }
 
-// Distinct colors in an image element's processed display (for palette swatches).
+// The element's natural (pre-remap) extracted palette — stable keys for editing.
 function elementPalette(el) {
-  const cv = ensureDisplay(el); if (!cv) return [];
-  const data = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
-  const seen = new Set(), out = [];
-  for (let i = 0; i < data.length; i += 4) {
-    if (data[i + 3] < 128) continue;
-    const hex = '#' + [data[i], data[i+1], data[i+2]].map(x => x.toString(16).padStart(2, '0')).join('');
-    if (!seen.has(hex)) { seen.add(hex); out.push(hex); }
-  }
-  return out;
+  ensureDisplay(el);
+  return el._palette || [];
 }
+// Editable swatches: a color input per extracted color. Changing one remaps that
+// extracted color to the chosen one (set two to the same color to merge them).
 function paletteSwatchHTML(el) {
-  const sw = elementPalette(el).map(hex => `<span class="sw" style="background:${hex}" title="${hex}"></span>`).join('');
+  const remap = (el.reduce && el.reduce.remap) || {};
+  const sw = elementPalette(el).map(nat => {
+    const eff = remap[nat] || nat;
+    return `<input type="color" class="sw-edit" data-orig="${nat}" value="${eff}" title="${nat} → ${eff}">`;
+  }).join('');
   return sw || '<span class="hint">–</span>';
+}
+function wireSwatches(el) {
+  document.querySelectorAll('#pPalette .sw-edit').forEach(inp => {
+    inp.addEventListener('input', e => {
+      el.reduce.remap = el.reduce.remap || {};
+      el.reduce.remap[e.target.dataset.orig] = e.target.value;
+      e.target.title = e.target.dataset.orig + ' → ' + e.target.value;
+      redrawCanvas();
+    });
+  });
 }
 
 function drawElement(ctx, el, s) {
@@ -299,12 +317,13 @@ function renderProps() {
   on('pInvert', 'change', e => { el.invert = e.target.checked; redrawCanvas(); });
   on('pNum', 'input', e => {
     el.reduce.numColors = Number(e.target.value); redrawCanvas();
-    const pal = document.getElementById('pPalette'); if (pal) pal.innerHTML = paletteSwatchHTML(el);
+    const pal = document.getElementById('pPalette'); if (pal) { pal.innerHTML = paletteSwatchHTML(el); wireSwatches(el); }
   });
   on('pW', 'input', e => { el.wMm = Number(e.target.value); redrawCanvas(); });
   on('pH', 'input', e => { el.hMm = Number(e.target.value); redrawCanvas(); });
   on('pRot', 'input', e => { el.rotationDeg = Number(e.target.value); redrawCanvas(); });
   on('pCut', 'change', e => { el.cutout = e.target.checked; redrawCanvas(); });
+  if (el.type === 'image' && el.colorMode === 'reduce') wireSwatches(el);
 }
 
 // ---- Custom font loading ----
