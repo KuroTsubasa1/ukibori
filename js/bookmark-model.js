@@ -8,7 +8,7 @@ function defaultBookmark() {
   return {
     widthMm: 50, heightMm: 150, cornerRadiusMm: 4,
     thicknessMm: 3, layerHeightMm: 0.2, smooth: 0.5,
-    resolution: 256, baseColor: "#000000",
+    resolution: 1024, baseColor: "#000000",
     hole: { diameterMm: 5, marginTopMm: 8 },
     elements: [],
     fonts: {},
