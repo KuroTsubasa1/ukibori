@@ -267,25 +267,7 @@
   </div>
 </main>
 
-<script>
-(function () {
-  var relief = document.getElementById('appModeRelief');
-  var bookmark = document.getElementById('appModeBookmark');
-  var bmWs = document.getElementById('bmWorkspace');
-  relief.addEventListener('click', function () {
-    document.body.classList.remove('bookmark-mode');
-    bmWs.hidden = true;
-    relief.classList.add('seg-active');
-    bookmark.classList.remove('seg-active');
-  });
-  bookmark.addEventListener('click', function () {
-    document.body.classList.add('bookmark-mode');
-    bmWs.hidden = false;
-    bookmark.classList.add('seg-active');
-    relief.classList.remove('seg-active');
-  });
-}());
-</script>
+
 <script src="js/image-ops.js"></script>
 <script src="js/geometry.js"></script>
 <script src="js/bookmark-model.js"></script>
