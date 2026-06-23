@@ -258,6 +258,9 @@
 
 /* ---- Bookmark composer ---- */
 .app-mode { margin-bottom: 16px; }
+/* Relief workspace fills the page like main did, so the dropzone (flex:1) and the
+   image workspace expand into it. */
+#reliefWorkspace { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 14px; }
 body.bookmark-mode #reliefWorkspace { display: none; }
 body:not(.bookmark-mode) #bmWorkspace { display: none; }
 #bmWorkspace[hidden] { display: none; }
