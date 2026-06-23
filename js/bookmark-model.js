@@ -11,6 +11,7 @@ function defaultBookmark() {
     resolution: 256, baseColor: "#000000",
     hole: { diameterMm: 5, marginTopMm: 8 },
     elements: [],
+    fonts: {},
   };
 }
 
@@ -50,6 +51,7 @@ function serializeProject(doc) {
 function deserializeProject(text) {
   const doc = JSON.parse(text);
   for (const el of doc.elements || []) if (el.type === "image") el._img = null;
+  if (!doc.fonts) doc.fonts = {};
   return doc;
 }
 
