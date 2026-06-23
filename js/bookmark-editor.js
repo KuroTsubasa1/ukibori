@@ -90,7 +90,7 @@ function drawSelection(ctx, el, s) {
   ctx.restore();
 }
 
-function bmRender() {
+function redrawCanvas() {
   if (bm.ws.hidden) return;
   fitScale();
   const s = state.scale, ctx = bm.canvas.getContext('2d');
@@ -110,8 +110,8 @@ function bmRender() {
   // outline + selection
   bodyPath(ctx, s); ctx.strokeStyle = '#3a3a44'; ctx.lineWidth = 1; ctx.stroke();
   const sel = selected(); if (sel) drawSelection(ctx, sel, s);
-  renderLayers(); renderProps();
 }
+function bmRender() { redrawCanvas(); renderLayers(); renderProps(); }
 
 // ---- Settings wiring ----
 function bindRange(id, key, fmt) {
@@ -230,20 +230,25 @@ function renderProps() {
   bm.props.innerHTML = html;
 
   const on = (id, ev, fn) => { const e = document.getElementById(id); if (e) e.addEventListener(ev, fn); };
-  on('pText', 'input', e => { el.text = e.target.value; bmRender(); });
-  on('pFont', 'change', e => { el.fontFamily = e.target.value; bmRender(); });
+  on('pText', 'input', e => { el.text = e.target.value; redrawCanvas(); renderLayers(); });
+  on('pFont', 'change', e => { el.fontFamily = e.target.value; redrawCanvas(); });
   on('pFontUpload', 'click', () => bm.fontFile.click());
-  on('pBold', 'change', e => { el.fontWeight = e.target.checked ? 'bold' : 'normal'; bmRender(); });
-  on('pColor', 'input', e => { el.color = e.target.value; bmRender(); });
+  on('pBold', 'change', e => { el.fontWeight = e.target.checked ? 'bold' : 'normal'; redrawCanvas(); });
+  on('pColor', 'input', e => { el.color = e.target.value; redrawCanvas(); renderLayers(); });
   on('pMode', 'change', e => { el.colorMode = e.target.value; bmRender(); });
-  on('pThresh', 'input', e => { el.threshold = Number(e.target.value); });
-  on('pInvert', 'change', e => { el.invert = e.target.checked; });
-  on('pNum', 'input', e => { el.reduce.numColors = Number(e.target.value); });
-  on('pDepth', 'input', e => { el.depthLayers = Number(e.target.value); renderProps(); });
-  on('pW', 'input', e => { el.wMm = Number(e.target.value); bmRender(); });
-  on('pH', 'input', e => { el.hMm = Number(e.target.value); bmRender(); });
-  on('pRot', 'input', e => { el.rotationDeg = Number(e.target.value); bmRender(); });
-  on('pCut', 'change', e => { el.cutout = e.target.checked; });
+  on('pThresh', 'input', e => { el.threshold = Number(e.target.value); redrawCanvas(); });
+  on('pInvert', 'change', e => { el.invert = e.target.checked; redrawCanvas(); });
+  on('pNum', 'input', e => { el.reduce.numColors = Number(e.target.value); redrawCanvas(); });
+  on('pDepth', 'input', e => {
+    el.depthLayers = Number(e.target.value);
+    const badge = e.target.parentElement.querySelector('.badge');
+    if (badge) badge.textContent = el.depthLayers;
+    redrawCanvas();
+  });
+  on('pW', 'input', e => { el.wMm = Number(e.target.value); redrawCanvas(); });
+  on('pH', 'input', e => { el.hMm = Number(e.target.value); redrawCanvas(); });
+  on('pRot', 'input', e => { el.rotationDeg = Number(e.target.value); redrawCanvas(); });
+  on('pCut', 'change', e => { el.cutout = e.target.checked; redrawCanvas(); });
 }
 
 // ---- Custom font loading ----
@@ -307,9 +312,9 @@ bm.canvas.addEventListener('pointermove', e => {
     const [lx, ly] = elemToLocal(el, px, py, s);
     el.wMm = Math.max(2, Math.abs(lx) * 2 / s); el.hMm = Math.max(2, Math.abs(ly) * 2 / s);
   }
-  bmRender();
+  redrawCanvas();
 });
-function endDrag() { drag = null; }
+function endDrag() { drag = null; bmRender(); }
 bm.canvas.addEventListener('pointerup', endDrag);
 bm.canvas.addEventListener('pointercancel', endDrag);
 
