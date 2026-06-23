@@ -99,10 +99,50 @@ function __hex(r, g, b) {
   return ("#" + h(r) + h(g) + h(b)).toUpperCase();
 }
 
-// Canonical palette for a reduce-mode image: quantize the source image at a
-// capped natural resolution (resolution-INDEPENDENT) so the editor preview and
-// every export resolution share one palette. Returns an array of [r,g,b].
+// Median cut that splits until EXACTLY k boxes (so "Anzahl Farben" = N gives N
+// colors, not just powers of two). Repeatedly splits the box with the widest
+// channel range at its median. Returns up to k average colors as [r,g,b].
+function __paletteMedianCutK(pts, k) {
+  k = Math.max(1, Math.round(k));
+  if (!pts.length) return [];
+  const mkBox = (arr) => {
+    let rmin=255,rmax=0,gmin=255,gmax=0,bmin=255,bmax=0;
+    for (const p of arr) {
+      if (p[0]<rmin) rmin=p[0]; if (p[0]>rmax) rmax=p[0];
+      if (p[1]<gmin) gmin=p[1]; if (p[1]>gmax) gmax=p[1];
+      if (p[2]<bmin) bmin=p[2]; if (p[2]>bmax) bmax=p[2];
+    }
+    return { arr, r: rmax-rmin, g: gmax-gmin, b: bmax-bmin };
+  };
+  let boxes = [mkBox(pts)];
+  while (boxes.length < k) {
+    let bi = -1, best = -1;
+    for (let i = 0; i < boxes.length; i++) {
+      const bx = boxes[i]; if (bx.arr.length < 2) continue;
+      const rng = Math.max(bx.r, bx.g, bx.b); if (rng > best) { best = rng; bi = i; }
+    }
+    if (bi < 0) break;                 // nothing left to split
+    const bx = boxes[bi];
+    const ch = (bx.r >= bx.g && bx.r >= bx.b) ? 0 : (bx.g >= bx.b ? 1 : 2);
+    bx.arr.sort((p, q) => p[ch] - q[ch]);
+    const mid = bx.arr.length >> 1;
+    boxes.splice(bi, 1, mkBox(bx.arr.slice(0, mid)), mkBox(bx.arr.slice(mid)));
+  }
+  return boxes.map(bx => {
+    let r=0,g=0,b=0; for (const p of bx.arr) { r+=p[0]; g+=p[1]; b+=p[2]; }
+    const m = bx.arr.length; return [Math.round(r/m), Math.round(g/m), Math.round(b/m)];
+  });
+}
+
+// Canonical palette for a reduce-mode image: extract colors from the source image
+// at a capped natural resolution (resolution-INDEPENDENT) so the editor preview
+// and every export resolution share one palette. Cached per image+params.
+// Returns an array of [r,g,b].
+const __palCache = new WeakMap();
 function __imagePaletteFromImg(imgEl, method, numColors, levels) {
+  const pkey = method + "|" + numColors + "|" + levels;
+  let cache = __palCache.get(imgEl);
+  if (cache && cache.has(pkey)) return cache.get(pkey);
   const iw = imgEl.naturalWidth || imgEl.width, ih = imgEl.naturalHeight || imgEl.height;
   const scale = Math.min(1, 256 / Math.max(iw, ih, 1));
   const w = Math.max(1, Math.round(iw * scale)), h = Math.max(1, Math.round(ih * scale)), n = w * h;
@@ -111,14 +151,22 @@ function __imagePaletteFromImg(imgEl, method, numColors, levels) {
   cx.drawImage(imgEl, 0, 0, w, h);
   const img = cx.getImageData(0, 0, w, h), d = img.data;
   const idxs = []; for (let i = 0; i < n; i++) if (d[i * 4 + 3] >= __ALPHA_CUTOFF) idxs.push(i);
-  const strip = new ImageData(Math.max(1, idxs.length), 1);
-  for (let k = 0; k < idxs.length; k++) { const p = idxs[k] * 4; strip.data[k*4]=d[p]; strip.data[k*4+1]=d[p+1]; strip.data[k*4+2]=d[p+2]; strip.data[k*4+3]=255; }
-  if (method === "palette") quantizeMedianCut(strip, numColors); else posterize(strip, levels);
-  const seen = new Set(), pal = [];
-  for (let k = 0; k < idxs.length; k++) {
-    const r = strip.data[k*4], g = strip.data[k*4+1], b = strip.data[k*4+2], hex = __hex(r, g, b);
-    if (!seen.has(hex)) { seen.add(hex); pal.push([r, g, b]); }
+  let pal;
+  if (method === "palette") {
+    const pts = []; for (let k = 0; k < idxs.length; k++) { const p = idxs[k] * 4; pts.push([d[p], d[p+1], d[p+2]]); }
+    pal = __paletteMedianCutK(pts, numColors);
+  } else {
+    const strip = new ImageData(Math.max(1, idxs.length), 1);
+    for (let k = 0; k < idxs.length; k++) { const p = idxs[k] * 4; strip.data[k*4]=d[p]; strip.data[k*4+1]=d[p+1]; strip.data[k*4+2]=d[p+2]; strip.data[k*4+3]=255; }
+    posterize(strip, levels);
+    const seen = new Set(); pal = [];
+    for (let k = 0; k < idxs.length; k++) {
+      const r = strip.data[k*4], g = strip.data[k*4+1], b = strip.data[k*4+2], hex = __hex(r, g, b);
+      if (!seen.has(hex)) { seen.add(hex); pal.push([r, g, b]); }
+    }
   }
+  if (!cache) { cache = new Map(); __palCache.set(imgEl, cache); }
+  cache.set(pkey, pal);
   return pal;
 }
 // Nearest palette color (squared RGB distance).
