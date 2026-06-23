@@ -28,7 +28,8 @@ function makeImageElement(props) {
   if (e.color == null) e.color = "#ffffff";
   if (e.threshold == null) e.threshold = 128;
   if (e.invert == null) e.invert = false;
-  if (e.reduce == null) e.reduce = { method: "palette", numColors: 8, levels: 4 };
+  if (e.reduce == null) e.reduce = { method: "palette", numColors: 8, levels: 4, remap: {} };
+  if (e.reduce.remap == null) e.reduce.remap = {}; // extractedHex -> chosenHex
   if (e.src == null) e.src = "";
   e._img = null; // runtime-only decoded image; never serialized
   return e;

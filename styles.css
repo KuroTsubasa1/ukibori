@@ -275,3 +275,6 @@ body:not(.bookmark-mode) #bmWorkspace { display: none; }
 #bmProps .field-head { margin-top: 6px; }
 .bm-swatches { display: flex; flex-wrap: wrap; gap: 5px; }
 .bm-swatches .sw { width: 20px; height: 20px; border-radius: 4px; border: 1px solid #0006; }
+.bm-swatches .sw-edit { width: 26px; height: 26px; padding: 0; border: 1px solid #0006; border-radius: 4px; cursor: pointer; background: none; }
+.bm-swatches .sw-edit::-webkit-color-swatch-wrapper { padding: 2px; }
+.bm-swatches .sw-edit::-webkit-color-swatch { border: none; border-radius: 3px; }
