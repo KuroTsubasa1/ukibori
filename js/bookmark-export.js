@@ -216,12 +216,40 @@ function __tracedFacets(member, footprint, cols, rows, pitch, thickness, z0) {
     if (member(c, r) && footprint(c, r) > 0) { data[r * cols + c] = 1; any = true; }
   }
   if (!any) return [];
+  // Clean each loop so the extrude has no zero-area walls/caps (which make the
+  // mesh non-manifold and some slicers reject it as "no mesh"): drop near-
+  // duplicate consecutive points, then drop collinear points (potrace emits
+  // collinear vertices along straight runs, which earcut turns into zero-area
+  // cap triangles).
+  const EPS = 1e-4;        // mm, coincident-point threshold
+  const AREA_EPS = 1e-4;   // mm^2, collinearity threshold (2*triangle area)
+  const clean = (l) => {
+    let p = [];
+    for (const q of l) { const last = p[p.length - 1]; if (!last || Math.hypot(q[0] - last[0], q[1] - last[1]) > EPS) p.push(q); }
+    while (p.length > 2 && Math.hypot(p[0][0] - p[p.length - 1][0], p[0][1] - p[p.length - 1][1]) <= EPS) p.pop();
+    if (p.length < 3) return p;
+    const n = p.length, out = [];
+    for (let i = 0; i < n; i++) {
+      const a = p[(i - 1 + n) % n], b = p[i], c = p[(i + 1) % n];
+      const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+      if (Math.abs(cross) > AREA_EPS) out.push(b); // keep only true corners/curve points
+    }
+    return out.length >= 3 ? out : p;
+  };
   let loops = window.traceMaskLoops(data, cols, rows, {})
     .map(l => l.map(([x, y]) => [x * pitch, (rows - y) * pitch]))
+    .map(clean)
     .filter(l => l.length >= 3);
   if (!loops.length) return [];
   let maxA = 0; for (const l of loops) { const a = polyArea(l); if (Math.abs(a) > Math.abs(maxA)) maxA = a; }
   if (maxA < 0) loops = loops.map(l => l.slice().reverse());
+  // Sub-micron deterministic jitter to break exact x/y coincidences and
+  // collinearities between loops that make earcut leave open cap edges (potrace's
+  // optimized loops align vertices exactly). 1e-5 mm is far below print scale.
+  loops = loops.map((l, li) => l.map((p, pi) => [
+    p[0] + (((li * 131 + pi * 31) % 13) - 6) * 1e-5,
+    p[1] + (((li * 71 + pi * 17) % 13) - 6) * 1e-5,
+  ]));
   return extrudeLoops(loops, thickness, z0);
 }
 
@@ -234,12 +262,7 @@ function buildBookmarkParts(doc) {
   const T = doc.thicknessMm;
   const baseHex = doc.baseColor.toUpperCase();
   const idx = (c, r) => r * cols + c;
-  const facetsByColor = new Map(); // hex -> facets[]
-  const push = (hex, facets) => {
-    if (!facets.length) return;
-    if (!facetsByColor.has(hex)) facetsByColor.set(hex, []);
-    const acc = facetsByColor.get(hex); for (const f of facets) acc.push(f);
-  };
+  const colorParts = [], baseParts = []; // each extruded solid is its own object
 
   // Engraved model: a solid base plate at full thickness; each element is carved
   // INTO the front face by a recess, with a thin colored floor at the bottom of
@@ -294,9 +317,11 @@ function buildBookmarkParts(doc) {
     if (!grp) { grp = { hex, set: new Uint8Array(cols * rows) }; groups.set(hex, grp); }
     grp.set[i] = 1;
   }
+  let __cn = 0;
   for (const grp of groups.values()) {
     const z0 = baseUnder(depthFor(grp.hex));  // floor sits on top of the base block
-    push(grp.hex, orientOutward(__tracedFacets((c, r) => grp.set[idx(c, r)] === 1, footprint, cols, rows, pitch, floor, z0)));
+    const facets = orientOutward(__tracedFacets((c, r) => grp.set[idx(c, r)] === 1, footprint, cols, rows, pitch, floor, z0));
+    if (facets.length) colorParts.push({ name: "farbe-" + (++__cn), color: hexToRgb(grp.hex), facets });
   }
 
   // 2) Base plate: full thickness under the background; under each engraved
@@ -315,21 +340,20 @@ function buildBookmarkParts(doc) {
     let set = behind.get(key); if (!set) { set = { h, m: new Uint8Array(cols * rows) }; behind.set(key, set); }
     set.m[i] = 1;
   }
-  // background: full thickness
-  push(baseHex, orientOutward(__tracedFacets((c, r) => bg[idx(c, r)] === 1, footprint, cols, rows, pitch, T, 0)));
+  // background: full thickness (its own object)
+  {
+    const facets = orientOutward(__tracedFacets((c, r) => bg[idx(c, r)] === 1, footprint, cols, rows, pitch, T, 0));
+    if (facets.length) baseParts.push({ name: "grundplatte", color: hexToRgb(baseHex), facets });
+  }
   for (const set of behind.values()) {
-    push(baseHex, orientOutward(__tracedFacets((c, r) => set.m[idx(c, r)] === 1, footprint, cols, rows, pitch, set.h, 0)));
+    const facets = orientOutward(__tracedFacets((c, r) => set.m[idx(c, r)] === 1, footprint, cols, rows, pitch, set.h, 0));
+    if (facets.length) baseParts.push({ name: "grundplatte", color: hexToRgb(baseHex), facets });
   }
 
-  // 3) Assemble parts; base first and named "grundplatte".
-  const parts = [];
-  if (facetsByColor.has(baseHex)) {
-    parts.push({ name: "grundplatte", color: hexToRgb(baseHex), facets: facetsByColor.get(baseHex) });
-    facetsByColor.delete(baseHex);
-  }
-  let n = 1;
-  for (const [hex, facets] of facetsByColor) parts.push({ name: "farbe-" + (n++), color: hexToRgb(hex), facets });
-  return parts.filter(p => p.facets.length);
+  // Each extruded solid is its own object: slicers handle multiple touching
+  // bodies fine, whereas merging them into one mesh makes it non-manifold
+  // ("no mesh"). Base bodies first.
+  return [...baseParts, ...colorParts];
 }
 
 function exportBookmark3MF(doc) {
