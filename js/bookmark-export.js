@@ -112,11 +112,21 @@ function buildBookmarkParts(doc) {
     const acc = facetsByColor.get(hex); for (const f of facets) acc.push(f);
   };
 
-  // 1) Front color slabs, grouped by (colorHex, depthMm).
+  // Engraved model: a solid base plate at full thickness; each element is carved
+  // INTO the front face by its depth (an air recess), with a thin colored floor
+  // at the bottom of the recess and base beneath it. The surrounding base stands
+  // proud, so elements read as debossed. Cutout elements are cut all the way
+  // through instead (a hole in the shape of the element).
+  const floor = Math.min(2 * doc.layerHeightMm, T); // colored-floor thickness (mm)
+  const recessOf = (d) => Math.max(0, Math.min(d, T - floor)); // clamp so floor+base fit
+  const baseUnder = (d) => T - recessOf(d) - floor;            // base height beneath floor (>=0)
+
+  // 1) Colored recess floors, grouped by (colorHex, depthMm). Skip background and
+  //    cutout (cutout = hole, no color).
   const groups = new Map(); // key "hex|depth" -> {hex, depth, set:Uint8Array}
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     const i = idx(c, r);
-    if (comp.isBase[i]) continue;
+    if (comp.isBase[i] || comp.cutout[i]) continue;
     const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
     const depth = comp.depthMm[i];
     const key = hex + "|" + depth.toFixed(4);
@@ -125,32 +135,34 @@ function buildBookmarkParts(doc) {
     grp.set[i] = 1;
   }
   for (const grp of groups.values()) {
+    const z0 = baseUnder(grp.depth);          // floor sits on top of the base block
     const f = __maskField((c, r) => grp.set[idx(c, r)] === 1, footprint, cols);
-    const facets = orientOutward(fieldFacets(f, cols, rows, pitch, grp.depth, smoothTol, T - grp.depth));
-    push(grp.hex, facets);
+    push(grp.hex, orientOutward(fieldFacets(f, cols, rows, pitch, floor, smoothTol, z0)));
   }
 
-  // 2) Base body behind non-cutout element pixels, grouped by depth; plus the
-  //    full-thickness background.
-  const behind = new Map(); // depthMm -> Uint8Array
+  // 2) Base plate: full thickness under the background; under each engraved
+  //    element a block from the back up to the colored floor (recess = air above).
+  //    Cutout pixels get no base (through-hole).
+  const behind = new Map(); // heightMm -> {h, m:Uint8Array}
   const bg = new Uint8Array(cols * rows);
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     const i = idx(c, r);
+    if (comp.cutout[i]) continue;             // hole: no base
     if (comp.isBase[i]) { bg[i] = 1; continue; }
-    if (comp.cutout[i]) continue;            // recess: nothing behind
-    const d = comp.depthMm[i];
-    if (d >= T) continue;                     // element already full thickness
-    let set = behind.get(d); if (!set) { set = new Uint8Array(cols * rows); behind.set(d, set); }
-    set[i] = 1;
+    const h = baseUnder(comp.depthMm[i]);
+    if (h <= 0) continue;                      // floor reaches the back, nothing beneath
+    const key = h.toFixed(4);
+    let set = behind.get(key); if (!set) { set = { h, m: new Uint8Array(cols * rows) }; behind.set(key, set); }
+    set.m[i] = 1;
   }
   // background: full thickness
   {
     const f = __maskField((c, r) => bg[idx(c, r)] === 1, footprint, cols);
     push(baseHex, orientOutward(fieldFacets(f, cols, rows, pitch, T, smoothTol, 0)));
   }
-  for (const [d, set] of behind) {
-    const f = __maskField((c, r) => set[idx(c, r)] === 1, footprint, cols);
-    push(baseHex, orientOutward(fieldFacets(f, cols, rows, pitch, T - d, smoothTol, 0)));
+  for (const set of behind.values()) {
+    const f = __maskField((c, r) => set.m[idx(c, r)] === 1, footprint, cols);
+    push(baseHex, orientOutward(fieldFacets(f, cols, rows, pitch, set.h, smoothTol, 0)));
   }
 
   // 3) Assemble parts; base first and named "grundplatte".
