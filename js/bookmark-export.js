@@ -133,6 +133,22 @@ function __nearestColor(pal, r, g, b) {
 window.__imagePaletteFromImg = __imagePaletteFromImg;
 window.__nearestColor = __nearestColor;
 
+// A reduce-image element's natural (pre-remap) palette in the user's preferred
+// order: el.reduce.order first (for colors still present), then any new colors
+// appended. Returns uppercase hex strings. Used for both the swatch UI order and
+// the export height stack so they agree.
+function __orderedNaturalHexes(el) {
+  if (!(el.type === "image" && el.colorMode === "reduce" && el._img)) return [];
+  const pal = __imagePaletteFromImg(el._img, el.reduce.method, el.reduce.numColors, el.reduce.levels)
+    .map(c => __hex(c[0], c[1], c[2]));
+  const ord = (el.reduce && el.reduce.order) || [];
+  const out = [];
+  for (const h of ord) { const H = String(h).toUpperCase(); if (pal.indexOf(H) !== -1 && out.indexOf(H) === -1) out.push(H); }
+  for (const h of pal) if (out.indexOf(h) === -1) out.push(h);
+  return out;
+}
+window.__orderedNaturalHexes = __orderedNaturalHexes;
+
 // Build a binary signed field (>0 inside) from a membership predicate, then
 // intersect (min) with the body/hole field so every part shares one outline.
 function __maskField(member, footprint, cols) {
@@ -166,19 +182,32 @@ function buildBookmarkParts(doc) {
   const recessOf = (d) => Math.max(0, Math.min(d, T - floor)); // clamp so floor+base fit
   const baseUnder = (d) => T - recessOf(d) - floor;            // base height beneath floor (>=0)
 
-  // Per-color recess depth from rank in the layer order (front -> back).
+  // Per-color recess depth from rank in the global color order. Colors are
+  // ordered element-by-element front -> back; within a reduce-image element the
+  // order follows the user's palette order (el.reduce.order, set by dragging
+  // swatches). depth = rank x step.
   const step = Math.max(1, doc.colorStepLayers || 2) * doc.layerHeightMm;
-  const ownerColors = new Map(); // ownerIdx -> [hex,...] in first-seen order
+  const ownerEff = new Map(); // ownerIdx -> Set(effective hex actually present)
   for (let i = 0; i < cols * rows; i++) {
     if (comp.isBase[i] || comp.cutout[i] || comp.owner[i] < 0) continue;
     const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
-    let arr = ownerColors.get(comp.owner[i]); if (!arr) ownerColors.set(comp.owner[i], arr = []);
-    if (arr.indexOf(hex) === -1) arr.push(hex);
+    let s = ownerEff.get(comp.owner[i]); if (!s) ownerEff.set(comp.owner[i], s = new Set());
+    s.add(hex);
   }
   const orderedColors = [];
+  const pushC = (h) => { if (orderedColors.indexOf(h) === -1) orderedColors.push(h); };
   for (let ei = doc.elements.length - 1; ei >= 0; ei--) {   // front -> back
-    const arr = ownerColors.get(ei); if (!arr) continue;
-    for (const hex of arr) if (orderedColors.indexOf(hex) === -1) orderedColors.push(hex);
+    const present = ownerEff.get(ei); if (!present) continue;
+    const el = doc.elements[ei];
+    const seq = [];
+    if (el.type === "text" || (el.type === "image" && el.colorMode === "solid")) {
+      const c = hexToRgb(el.color); seq.push(__hex(c[0], c[1], c[2]));
+    } else if (el.type === "image" && el.colorMode === "reduce") {
+      const remap = (el.reduce && el.reduce.remap) || {};
+      for (const nat of __orderedNaturalHexes(el)) { const c = hexToRgb(remap[nat] || nat); seq.push(__hex(c[0], c[1], c[2])); }
+    }
+    for (const h of seq) if (present.has(h)) pushC(h);
+    for (const h of present) pushC(h);   // any present-but-unsequenced color
   }
   const depthByHex = new Map();
   orderedColors.forEach((hex, rank) => depthByHex.set(hex, (rank + 1) * step));

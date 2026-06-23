@@ -278,3 +278,6 @@ body:not(.bookmark-mode) #bmWorkspace { display: none; }
 .bm-swatches .sw-edit { width: 26px; height: 26px; padding: 0; border: 1px solid #0006; border-radius: 4px; cursor: pointer; background: none; }
 .bm-swatches .sw-edit::-webkit-color-swatch-wrapper { padding: 2px; }
 .bm-swatches .sw-edit::-webkit-color-swatch { border: none; border-radius: 3px; }
+.bm-swatches .pal-entry { display: inline-flex; align-items: center; gap: 1px; border-radius: 5px; }
+.bm-swatches .pal-entry.dragging { opacity: .4; }
+.bm-swatches .grip { cursor: grab; color: var(--muted); font-size: 12px; line-height: 1; user-select: none; padding: 0 1px; }

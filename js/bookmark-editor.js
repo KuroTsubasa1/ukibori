@@ -84,7 +84,6 @@ function ensureDisplay(el) {
     // matches the print and remap keys line up.
     const remap = (el.reduce && el.reduce.remap) || {};
     const pal = window.__imagePaletteFromImg(el._img, el.reduce.method, el.reduce.numColors, el.reduce.levels);
-    el._palette = pal.map(c => __hexOf(c[0], c[1], c[2]));
     for (let i = 0; i < n; i++) {
       if (d[i * 4 + 3] < 128) continue;
       const near = window.__nearestColor(pal, d[i*4], d[i*4+1], d[i*4+2]);
@@ -93,7 +92,6 @@ function ensureDisplay(el) {
       o[i*4]=cr; o[i*4+1]=cg; o[i*4+2]=cb; o[i*4+3]=255;
     }
   } else {
-    el._palette = null;
     const col = hexToRgb(el.color);
     for (let i = 0; i < n; i++) {
       let on = d[i * 4 + 3] >= 128;
@@ -106,28 +104,49 @@ function ensureDisplay(el) {
   el._display = cv; el._displayKey = key; return cv;
 }
 
-// The element's natural (pre-remap) extracted palette — stable keys for editing.
+// The element's natural (pre-remap) extracted palette in the user's order.
 function elementPalette(el) {
-  ensureDisplay(el);
-  return el._palette || [];
+  if (el.type !== 'image' || el.colorMode !== 'reduce' || !el._img) return [];
+  return window.__orderedNaturalHexes(el);
 }
-// Editable swatches: a color input per extracted color. Changing one remaps that
-// extracted color to the chosen one (set two to the same color to merge them).
+// Editable + draggable swatches: a color input per extracted color (changing one
+// remaps it; set two equal to merge), with a drag grip to reorder — the order is
+// the colors' height stack (top of list = shallowest).
 function paletteSwatchHTML(el) {
   const remap = (el.reduce && el.reduce.remap) || {};
-  const sw = elementPalette(el).map(nat => {
+  const html = elementPalette(el).map(nat => {
     const eff = remap[nat] || nat;
-    return `<input type="color" class="sw-edit" data-orig="${nat}" value="${eff}" title="${nat} → ${eff}">`;
+    return `<span class="pal-entry" draggable="true" data-orig="${nat}">`
+      + `<span class="grip" aria-hidden="true">⠿</span>`
+      + `<input type="color" class="sw-edit" data-orig="${nat}" value="${eff}" title="${nat} → ${eff}">`
+      + `</span>`;
   }).join('');
-  return sw || '<span class="hint">–</span>';
+  return html || '<span class="hint">–</span>';
 }
 function wireSwatches(el) {
-  document.querySelectorAll('#pPalette .sw-edit').forEach(inp => {
+  const cont = document.getElementById('pPalette'); if (!cont) return;
+  cont.querySelectorAll('.sw-edit').forEach(inp => {
     inp.addEventListener('input', e => {
       el.reduce.remap = el.reduce.remap || {};
       el.reduce.remap[e.target.dataset.orig] = e.target.value;
       e.target.title = e.target.dataset.orig + ' → ' + e.target.value;
       redrawCanvas();
+    });
+  });
+  let dragSrc = null;
+  cont.querySelectorAll('.pal-entry').forEach(entry => {
+    entry.addEventListener('dragstart', e => { dragSrc = entry.dataset.orig; e.dataTransfer.effectAllowed = 'move'; entry.classList.add('dragging'); });
+    entry.addEventListener('dragend', () => { dragSrc = null; entry.classList.remove('dragging'); });
+    entry.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+    entry.addEventListener('drop', e => {
+      e.preventDefault();
+      const tgt = entry.dataset.orig; if (!dragSrc || dragSrc === tgt) return;
+      const ord = elementPalette(el).slice();           // current order
+      const from = ord.indexOf(dragSrc), to = ord.indexOf(tgt);
+      if (from < 0 || to < 0) return;
+      ord.splice(to, 0, ord.splice(from, 1)[0]);
+      el.reduce.order = ord;                              // persists; drives height stack
+      cont.innerHTML = paletteSwatchHTML(el); wireSwatches(el); redrawCanvas();
     });
   });
 }
@@ -297,7 +316,7 @@ function renderProps() {
       html += propRow('Schwellwert', `<input type="range" id="pThresh" min="0" max="255" value="${el.threshold}"> <label class="toggle"><input type="checkbox" id="pInvert" ${el.invert?'checked':''}> invertieren</label>`);
     else {
       html += propRow('Anzahl Farben', `<input type="range" id="pNum" min="2" max="16" value="${el.reduce.numColors}">`);
-      html += propRow('Palette (aus Bild)', `<div id="pPalette" class="bm-swatches">${paletteSwatchHTML(el)}</div>`);
+      html += propRow('Palette (aus Bild)', `<div id="pPalette" class="bm-swatches">${paletteSwatchHTML(el)}</div><span class="hint">Klick = Farbe ändern · ziehen = Höhe ordnen (oben = flachste Gravur)</span>`);
     }
   }
   html += propRow('Breite (mm)', `<input type="range" id="pW" min="2" max="${doc.widthMm}" step="0.5" value="${el.wMm.toFixed(1)}">`);
