@@ -203,6 +203,28 @@ function __maskField(member, footprint, cols) {
   return (c, r) => Math.min(member(c, r) ? 1 : -1, footprint(c, r));
 }
 
+// Build a binary mask (member AND inside the body/hole footprint), trace it with
+// potrace into smooth loops, map to mm (y-flipped to match the extrude
+// convention), normalize orientation (largest loop = outer/CCW), and extrude
+// from z0 by thickness. Replaces marching-squares for crisp, resolution-light
+// vector edges.
+function __tracedFacets(member, footprint, cols, rows, pitch, thickness, z0) {
+  if (thickness <= 0) return [];
+  const data = new Uint8Array(cols * rows);
+  let any = false;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    if (member(c, r) && footprint(c, r) > 0) { data[r * cols + c] = 1; any = true; }
+  }
+  if (!any) return [];
+  let loops = window.traceMaskLoops(data, cols, rows, {})
+    .map(l => l.map(([x, y]) => [x * pitch, (rows - y) * pitch]))
+    .filter(l => l.length >= 3);
+  if (!loops.length) return [];
+  let maxA = 0; for (const l of loops) { const a = polyArea(l); if (Math.abs(a) > Math.abs(maxA)) maxA = a; }
+  if (maxA < 0) loops = loops.map(l => l.slice().reverse());
+  return extrudeLoops(loops, thickness, z0);
+}
+
 function buildBookmarkParts(doc) {
   const { cols, rows } = __gridFor(doc);
   const comp = composeDesign(doc, cols, rows);
@@ -274,8 +296,7 @@ function buildBookmarkParts(doc) {
   }
   for (const grp of groups.values()) {
     const z0 = baseUnder(depthFor(grp.hex));  // floor sits on top of the base block
-    const f = __maskField((c, r) => grp.set[idx(c, r)] === 1, footprint, cols);
-    push(grp.hex, orientOutward(fieldFacets(f, cols, rows, pitch, floor, smoothTol, z0)));
+    push(grp.hex, orientOutward(__tracedFacets((c, r) => grp.set[idx(c, r)] === 1, footprint, cols, rows, pitch, floor, z0)));
   }
 
   // 2) Base plate: full thickness under the background; under each engraved
@@ -295,13 +316,9 @@ function buildBookmarkParts(doc) {
     set.m[i] = 1;
   }
   // background: full thickness
-  {
-    const f = __maskField((c, r) => bg[idx(c, r)] === 1, footprint, cols);
-    push(baseHex, orientOutward(fieldFacets(f, cols, rows, pitch, T, smoothTol, 0)));
-  }
+  push(baseHex, orientOutward(__tracedFacets((c, r) => bg[idx(c, r)] === 1, footprint, cols, rows, pitch, T, 0)));
   for (const set of behind.values()) {
-    const f = __maskField((c, r) => set.m[idx(c, r)] === 1, footprint, cols);
-    push(baseHex, orientOutward(fieldFacets(f, cols, rows, pitch, set.h, smoothTol, 0)));
+    push(baseHex, orientOutward(__tracedFacets((c, r) => set.m[idx(c, r)] === 1, footprint, cols, rows, pitch, set.h, 0)));
   }
 
   // 3) Assemble parts; base first and named "grundplatte".
