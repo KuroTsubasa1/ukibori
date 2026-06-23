@@ -45,7 +45,9 @@ function makeTextElement(props) {
 }
 
 function serializeProject(doc) {
-  return JSON.stringify(doc, (k, v) => (k === "_img" ? undefined : v), 2);
+  // Strip runtime-only fields (decoded image + cached display canvas).
+  const drop = { _img: 1, _display: 1, _displayKey: 1 };
+  return JSON.stringify(doc, (k, v) => (drop[k] ? undefined : v), 2);
 }
 
 function deserializeProject(text) {
