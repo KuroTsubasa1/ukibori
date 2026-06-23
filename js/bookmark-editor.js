@@ -136,6 +136,7 @@ bindRange('bmLayerHeight', 'layerHeightMm', v => v.toFixed(2));
 bindRange('bmHoleD', 'hole.diameterMm', v => String(v));
 bindRange('bmHoleMargin', 'hole.marginTopMm', v => String(v));
 bindRange('bmResolution', 'resolution');
+bindRange('bmColorStep', 'colorStepLayers');
 document.getElementById('bmBaseColor').addEventListener('input', e => { doc.baseColor = e.target.value; bmRender(); });
 
 // ---- Add elements ----
@@ -222,11 +223,10 @@ function renderProps() {
     else
       html += propRow('Anzahl Farben', `<input type="range" id="pNum" min="2" max="16" value="${el.reduce.numColors}">`);
   }
-  html += propRow('Tiefe (Schichten)', `<input type="range" id="pDepth" min="1" max="12" value="${el.depthLayers}"> <span class="badge">${el.depthLayers}</span>`);
   html += propRow('Breite (mm)', `<input type="range" id="pW" min="2" max="${doc.widthMm}" step="0.5" value="${el.wMm.toFixed(1)}">`);
   html += propRow('Höhe (mm)', `<input type="range" id="pH" min="2" max="${doc.heightMm}" step="0.5" value="${el.hMm.toFixed(1)}">`);
   html += propRow('Drehung (°)', `<input type="range" id="pRot" min="-180" max="180" value="${Math.round(el.rotationDeg)}">`);
-  html += propRow('', `<label class="toggle"><input type="checkbox" id="pCut" ${el.cutout?'checked':''}> Aussparung (nichts dahinter)</label>`);
+  html += propRow('', `<label class="toggle"><input type="checkbox" id="pCut" ${el.cutout?'checked':''}> Als Loch ausschneiden (durchgehend)</label>`);
   bm.props.innerHTML = html;
 
   const on = (id, ev, fn) => { const e = document.getElementById(id); if (e) e.addEventListener(ev, fn); };
@@ -239,12 +239,6 @@ function renderProps() {
   on('pThresh', 'input', e => { el.threshold = Number(e.target.value); redrawCanvas(); });
   on('pInvert', 'change', e => { el.invert = e.target.checked; redrawCanvas(); });
   on('pNum', 'input', e => { el.reduce.numColors = Number(e.target.value); redrawCanvas(); });
-  on('pDepth', 'input', e => {
-    el.depthLayers = Number(e.target.value);
-    const badge = e.target.parentElement.querySelector('.badge');
-    if (badge) badge.textContent = el.depthLayers;
-    redrawCanvas();
-  });
   on('pW', 'input', e => { el.wMm = Number(e.target.value); redrawCanvas(); });
   on('pH', 'input', e => { el.hMm = Number(e.target.value); redrawCanvas(); });
   on('pRot', 'input', e => { el.rotationDeg = Number(e.target.value); redrawCanvas(); });
@@ -354,6 +348,7 @@ function bmLoadProjectText(text) {
   set('bmWidth', doc.widthMm); set('bmHeight', doc.heightMm); set('bmCorner', doc.cornerRadiusMm);
   set('bmThickness', Number(doc.thicknessMm).toFixed(1)); set('bmLayerHeight', Number(doc.layerHeightMm).toFixed(2));
   set('bmHoleD', doc.hole.diameterMm); set('bmHoleMargin', doc.hole.marginTopMm); set('bmResolution', doc.resolution);
+  set('bmColorStep', doc.colorStepLayers == null ? 2 : doc.colorStepLayers);
   document.getElementById('bmBaseColor').value = doc.baseColor;
   // re-register custom fonts
   const fonts = doc.fonts || {};

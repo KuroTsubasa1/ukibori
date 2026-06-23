@@ -60,18 +60,19 @@ function composeDesign(doc, cols, rows) {
   const base = hexToRgb(doc.baseColor);
   const r = new Uint8ClampedArray(n), g = new Uint8ClampedArray(n), b = new Uint8ClampedArray(n);
   const depthMm = new Float32Array(n), cutout = new Uint8Array(n), isBase = new Uint8Array(n);
+  const owner = new Int32Array(n).fill(-1); // index of the element owning each pixel (-1 = base)
   for (let i = 0; i < n; i++) { r[i] = base[0]; g[i] = base[1]; b[i] = base[2]; depthMm[i] = doc.thicknessMm; isBase[i] = 1; }
-  for (const el of doc.elements) {
-    if (el.type === "image" && !el._img) continue;
+  doc.elements.forEach((el, ei) => {
+    if (el.type === "image" && !el._img) return;
     const layer = __renderElement(el, doc, cols, rows);
     const d = (el.depthLayers || 0) * doc.layerHeightMm;
     for (let i = 0; i < n; i++) {
       if (!layer.mask[i]) continue;
       r[i] = layer.r[i]; g[i] = layer.g[i]; b[i] = layer.b[i];
-      depthMm[i] = d; cutout[i] = el.cutout ? 1 : 0; isBase[i] = 0;
+      depthMm[i] = d; cutout[i] = el.cutout ? 1 : 0; isBase[i] = 0; owner[i] = ei;
     }
-  }
-  return { r, g, b, depthMm, cutout, isBase };
+  });
+  return { r, g, b, depthMm, cutout, isBase, owner };
 }
 
 window.composeDesign = composeDesign;
@@ -113,29 +114,47 @@ function buildBookmarkParts(doc) {
   };
 
   // Engraved model: a solid base plate at full thickness; each element is carved
-  // INTO the front face by its depth (an air recess), with a thin colored floor
-  // at the bottom of the recess and base beneath it. The surrounding base stands
-  // proud, so elements read as debossed. Cutout elements are cut all the way
-  // through instead (a hole in the shape of the element).
+  // INTO the front face by a recess, with a thin colored floor at the bottom of
+  // the recess and base beneath it. The surrounding base stands proud, so
+  // elements read as debossed. Cutout elements are cut all the way through (a
+  // hole in the element's shape). Each COLOR sits at its own height: a color's
+  // recess depth = (its rank in the layer order) x the color step, so reordering
+  // the Ebenen list restacks the colors. Front-most color = shallowest.
   const floor = Math.min(2 * doc.layerHeightMm, T); // colored-floor thickness (mm)
   const recessOf = (d) => Math.max(0, Math.min(d, T - floor)); // clamp so floor+base fit
   const baseUnder = (d) => T - recessOf(d) - floor;            // base height beneath floor (>=0)
 
-  // 1) Colored recess floors, grouped by (colorHex, depthMm). Skip background and
-  //    cutout (cutout = hole, no color).
-  const groups = new Map(); // key "hex|depth" -> {hex, depth, set:Uint8Array}
+  // Per-color recess depth from rank in the layer order (front -> back).
+  const step = Math.max(1, doc.colorStepLayers || 2) * doc.layerHeightMm;
+  const ownerColors = new Map(); // ownerIdx -> [hex,...] in first-seen order
+  for (let i = 0; i < cols * rows; i++) {
+    if (comp.isBase[i] || comp.cutout[i] || comp.owner[i] < 0) continue;
+    const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
+    let arr = ownerColors.get(comp.owner[i]); if (!arr) ownerColors.set(comp.owner[i], arr = []);
+    if (arr.indexOf(hex) === -1) arr.push(hex);
+  }
+  const orderedColors = [];
+  for (let ei = doc.elements.length - 1; ei >= 0; ei--) {   // front -> back
+    const arr = ownerColors.get(ei); if (!arr) continue;
+    for (const hex of arr) if (orderedColors.indexOf(hex) === -1) orderedColors.push(hex);
+  }
+  const depthByHex = new Map();
+  orderedColors.forEach((hex, rank) => depthByHex.set(hex, (rank + 1) * step));
+  const depthFor = (hex) => depthByHex.get(hex) || step;
+
+  // 1) Colored recess floors, one group per color (its depth set by rank). Skip
+  //    background and cutout (cutout = hole, no color).
+  const groups = new Map(); // hex -> {hex, set:Uint8Array}
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     const i = idx(c, r);
     if (comp.isBase[i] || comp.cutout[i]) continue;
     const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
-    const depth = comp.depthMm[i];
-    const key = hex + "|" + depth.toFixed(4);
-    let grp = groups.get(key);
-    if (!grp) { grp = { hex, depth, set: new Uint8Array(cols * rows) }; groups.set(key, grp); }
+    let grp = groups.get(hex);
+    if (!grp) { grp = { hex, set: new Uint8Array(cols * rows) }; groups.set(hex, grp); }
     grp.set[i] = 1;
   }
   for (const grp of groups.values()) {
-    const z0 = baseUnder(grp.depth);          // floor sits on top of the base block
+    const z0 = baseUnder(depthFor(grp.hex));  // floor sits on top of the base block
     const f = __maskField((c, r) => grp.set[idx(c, r)] === 1, footprint, cols);
     push(grp.hex, orientOutward(fieldFacets(f, cols, rows, pitch, floor, smoothTol, z0)));
   }
@@ -149,7 +168,8 @@ function buildBookmarkParts(doc) {
     const i = idx(c, r);
     if (comp.cutout[i]) continue;             // hole: no base
     if (comp.isBase[i]) { bg[i] = 1; continue; }
-    const h = baseUnder(comp.depthMm[i]);
+    const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
+    const h = baseUnder(depthFor(hex));
     if (h <= 0) continue;                      // floor reaches the back, nothing beneath
     const key = h.toFixed(4);
     let set = behind.get(key); if (!set) { set = { h, m: new Uint8Array(cols * rows) }; behind.set(key, set); }
