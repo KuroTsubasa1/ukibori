@@ -326,3 +326,45 @@ window.bmRender = bmRender;
 window.bmSelect = bmSelect;
 window.bmAddImageFromDataURL = bmAddImageFromDataURL;
 window.bmState = state;
+
+// ---- Project save / load ----
+bm.save.addEventListener('click', () => {
+  const blob = new Blob([serializeProject(doc)], { type: 'application/json' });
+  const a = document.createElement('a'); a.download = 'lesezeichen.json';
+  a.href = URL.createObjectURL(blob); a.click(); URL.revokeObjectURL(a.href);
+  bmStatus('Projekt gespeichert.');
+});
+bm.load.addEventListener('click', () => bm.loadFile.click());
+bm.loadFile.addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const rd = new FileReader(); rd.onload = () => bmLoadProjectText(rd.result); rd.readAsText(f); bm.loadFile.value = '';
+});
+function bmLoadProjectText(text) {
+  try {
+    doc = deserializeProject(text);
+  } catch (err) { bmStatus('Projekt konnte nicht gelesen werden.', true); return; }
+  state.selectedId = null;
+  // sync sidebar inputs to loaded values
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; const b = document.getElementById(id + 'Val'); if (b) b.textContent = v; };
+  set('bmWidth', doc.widthMm); set('bmHeight', doc.heightMm); set('bmCorner', doc.cornerRadiusMm);
+  set('bmThickness', Number(doc.thicknessMm).toFixed(1)); set('bmLayerHeight', Number(doc.layerHeightMm).toFixed(2));
+  set('bmHoleD', doc.hole.diameterMm); set('bmHoleMargin', doc.hole.marginTopMm); set('bmResolution', doc.resolution);
+  document.getElementById('bmBaseColor').value = doc.baseColor;
+  // re-decode images
+  let pending = 0;
+  for (const el of doc.elements) if (el.type === 'image' && el.src) {
+    pending++; const img = new Image(); img.onload = () => { el._img = img; if (--pending === 0) bmRender(); }; img.onerror = () => { if (--pending === 0) bmRender(); }; img.src = el.src;
+  }
+  bmRender();
+  bmStatus('Projekt geladen.');
+}
+window.bmLoadProjectText = bmLoadProjectText;
+
+// ---- Export ----
+bm.exportBtn.addEventListener('click', () => {
+  try {
+    const { parts } = exportBookmark3MF(doc);
+    const tris = parts.reduce((s, p) => s + p.facets.length, 0);
+    bmStatus(`.3mf exportiert: ${parts.length} Teile, ${tris} Dreiecke.`);
+  } catch (err) { bmStatus('Export fehlgeschlagen: ' + err.message, true); }
+});
