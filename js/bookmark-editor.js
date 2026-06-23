@@ -168,10 +168,150 @@ bm.addText.addEventListener('click', () => {
   doc.elements.push(el); state.selectedId = el.id; bmRender();
 });
 
-// Stubs filled in Task 7.
-function renderLayers() {}
-function renderProps() {}
 function bmSelect(id) { state.selectedId = id; bmRender(); }
+
+// ---- Layer list (top of list = top of z-order; doc.elements is back→front) ----
+function renderLayers() {
+  bm.layers.innerHTML = '';
+  for (let i = doc.elements.length - 1; i >= 0; i--) {
+    const el = doc.elements[i];
+    const li = document.createElement('li');
+    if (el.id === state.selectedId) li.classList.add('sel');
+    const sw = document.createElement('span'); sw.className = 'sw'; sw.style.background = el.color || '#888';
+    const name = document.createElement('span'); name.className = 'name';
+    name.textContent = el.type === 'text' ? ('„' + el.text + '"') : 'Bild';
+    const up = document.createElement('button'); up.className = 'lbtn'; up.textContent = '▲'; up.title = 'nach oben';
+    const dn = document.createElement('button'); dn.className = 'lbtn'; dn.textContent = '▼'; dn.title = 'nach unten';
+    const del = document.createElement('button'); del.className = 'lbtn'; del.textContent = '✕'; del.title = 'löschen';
+    li.append(sw, name, up, dn, del);
+    li.addEventListener('click', e => { if (e.target.classList.contains('lbtn')) return; bmSelect(el.id); });
+    up.addEventListener('click', e => { e.stopPropagation(); moveLayer(i, +1); });
+    dn.addEventListener('click', e => { e.stopPropagation(); moveLayer(i, -1); });
+    del.addEventListener('click', e => { e.stopPropagation(); deleteLayer(i); });
+    bm.layers.appendChild(li);
+  }
+}
+function moveLayer(i, dir) {
+  const j = i + dir; if (j < 0 || j >= doc.elements.length) return;
+  const t = doc.elements[i]; doc.elements[i] = doc.elements[j]; doc.elements[j] = t; bmRender();
+}
+function deleteLayer(i) {
+  const el = doc.elements[i]; doc.elements.splice(i, 1);
+  if (state.selectedId === el.id) state.selectedId = null; bmRender();
+}
+
+// ---- Properties panel ----
+function propRow(label, inputHTML) { return `<div class="field"><div class="field-head"><label>${label}</label></div>${inputHTML}</div>`; }
+function renderProps() {
+  const el = selected();
+  if (!el) { bm.props.innerHTML = '<p class="hint">Kein Element ausgewählt.</p>'; return; }
+  let html = '';
+  if (el.type === 'text') {
+    html += propRow('Text', `<input type="text" id="pText" value="${(el.text || '').replace(/"/g, '&quot;')}">`);
+    html += propRow('Schrift', `<select id="pFont">
+      ${['system-ui','serif','monospace','Georgia','Impact','Comic Sans MS'].map(f => `<option ${f===el.fontFamily?'selected':''}>${f}</option>`).join('')}
+      ${el.fontFamily && !['system-ui','serif','monospace','Georgia','Impact','Comic Sans MS'].includes(el.fontFamily) ? `<option selected>${el.fontFamily}</option>` : ''}
+      </select> <button class="btn" id="pFontUpload" type="button">Schrift laden</button>`);
+    html += propRow('Fett', `<label class="toggle"><input type="checkbox" id="pBold" ${el.fontWeight==='bold'?'checked':''}> fett</label>`);
+  }
+  html += propRow('Farbe', `<input type="color" id="pColor" value="${el.color}">`);
+  if (el.type === 'image') {
+    html += propRow('Farbmodus', `<select id="pMode"><option value="solid" ${el.colorMode==='solid'?'selected':''}>Vollfarbe</option><option value="reduce" ${el.colorMode==='reduce'?'selected':''}>Farben reduzieren</option></select>`);
+    if (el.colorMode === 'solid')
+      html += propRow('Schwellwert', `<input type="range" id="pThresh" min="0" max="255" value="${el.threshold}"> <label class="toggle"><input type="checkbox" id="pInvert" ${el.invert?'checked':''}> invertieren</label>`);
+    else
+      html += propRow('Anzahl Farben', `<input type="range" id="pNum" min="2" max="16" value="${el.reduce.numColors}">`);
+  }
+  html += propRow('Tiefe (Schichten)', `<input type="range" id="pDepth" min="1" max="12" value="${el.depthLayers}"> <span class="badge">${el.depthLayers}</span>`);
+  html += propRow('Breite (mm)', `<input type="range" id="pW" min="2" max="${doc.widthMm}" step="0.5" value="${el.wMm.toFixed(1)}">`);
+  html += propRow('Höhe (mm)', `<input type="range" id="pH" min="2" max="${doc.heightMm}" step="0.5" value="${el.hMm.toFixed(1)}">`);
+  html += propRow('Drehung (°)', `<input type="range" id="pRot" min="-180" max="180" value="${Math.round(el.rotationDeg)}">`);
+  html += propRow('', `<label class="toggle"><input type="checkbox" id="pCut" ${el.cutout?'checked':''}> Aussparung (nichts dahinter)</label>`);
+  bm.props.innerHTML = html;
+
+  const on = (id, ev, fn) => { const e = document.getElementById(id); if (e) e.addEventListener(ev, fn); };
+  on('pText', 'input', e => { el.text = e.target.value; bmRender(); });
+  on('pFont', 'change', e => { el.fontFamily = e.target.value; bmRender(); });
+  on('pFontUpload', 'click', () => bm.fontFile.click());
+  on('pBold', 'change', e => { el.fontWeight = e.target.checked ? 'bold' : 'normal'; bmRender(); });
+  on('pColor', 'input', e => { el.color = e.target.value; bmRender(); });
+  on('pMode', 'change', e => { el.colorMode = e.target.value; bmRender(); });
+  on('pThresh', 'input', e => { el.threshold = Number(e.target.value); });
+  on('pInvert', 'change', e => { el.invert = e.target.checked; });
+  on('pNum', 'input', e => { el.reduce.numColors = Number(e.target.value); });
+  on('pDepth', 'input', e => { el.depthLayers = Number(e.target.value); renderProps(); });
+  on('pW', 'input', e => { el.wMm = Number(e.target.value); bmRender(); });
+  on('pH', 'input', e => { el.hMm = Number(e.target.value); bmRender(); });
+  on('pRot', 'input', e => { el.rotationDeg = Number(e.target.value); bmRender(); });
+  on('pCut', 'change', e => { el.cutout = e.target.checked; });
+}
+
+// ---- Custom font loading ----
+function bmLoadFontFile(file) {
+  const rd = new FileReader();
+  rd.onload = () => {
+    const fam = 'bmfont-' + file.name.replace(/\W+/g, '');
+    const ff = new FontFace(fam, rd.result);
+    ff.load().then(loaded => {
+      document.fonts.add(loaded);
+      const el = selected(); if (el && el.type === 'text') { el.fontFamily = fam; }
+      bmRender();
+      bmStatus('Schrift geladen: ' + file.name);
+    }).catch(() => bmStatus('Schrift konnte nicht geladen werden.', true));
+  };
+  rd.readAsArrayBuffer(file);
+}
+bm.fontFile.addEventListener('change', e => { const f = e.target.files[0]; if (f) bmLoadFontFile(f); bm.fontFile.value = ''; });
+window.bmLoadFontFile = bmLoadFontFile;
+
+// ---- Pointer manipulation (move / scale / rotate) ----
+function elemToLocal(el, px, py, s) {
+  const dx = px - el.cxMm * s, dy = py - el.cyMm * s, a = -(el.rotationDeg || 0) * Math.PI / 180;
+  return [dx * Math.cos(a) - dy * Math.sin(a), dx * Math.sin(a) + dy * Math.cos(a)];
+}
+function bmHitTest(px, py) {
+  const s = state.scale;
+  for (let i = doc.elements.length - 1; i >= 0; i--) {
+    const el = doc.elements[i], [lx, ly] = elemToLocal(el, px, py, s), w = el.wMm * s, h = el.hMm * s;
+    if (Math.hypot(lx, ly + h / 2 + 22) <= 9) return { id: el.id, handle: 'rotate' };
+    const corners = { nw:[-w/2,-h/2], ne:[w/2,-h/2], se:[w/2,h/2], sw:[-w/2,h/2] };
+    for (const k in corners) if (Math.hypot(lx - corners[k][0], ly - corners[k][1]) <= 9) return { id: el.id, handle: k };
+    if (Math.abs(lx) <= w / 2 && Math.abs(ly) <= h / 2) return { id: el.id, handle: 'move' };
+  }
+  return null;
+}
+window.bmHitTest = bmHitTest;
+
+let drag = null;
+bm.canvas.addEventListener('pointerdown', e => {
+  const rect = bm.canvas.getBoundingClientRect(), scaleC = bm.canvas.width / rect.width;
+  const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+  const hit = bmHitTest(px, py);
+  if (!hit) { state.selectedId = null; bmRender(); return; }
+  state.selectedId = hit.id;
+  const el = selected();
+  drag = { handle: hit.handle, px, py, start: { cx: el.cxMm, cy: el.cyMm, w: el.wMm, h: el.hMm, rot: el.rotationDeg } };
+  bm.canvas.setPointerCapture(e.pointerId); bmRender();
+});
+bm.canvas.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const rect = bm.canvas.getBoundingClientRect(), scaleC = bm.canvas.width / rect.width, s = state.scale;
+  const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+  const el = selected(); if (!el) return;
+  if (drag.handle === 'move') {
+    el.cxMm = drag.start.cx + (px - drag.px) / s; el.cyMm = drag.start.cy + (py - drag.py) / s;
+  } else if (drag.handle === 'rotate') {
+    const ang = Math.atan2(py - el.cyMm * s, px - el.cxMm * s) * 180 / Math.PI + 90;
+    el.rotationDeg = Math.round(ang);
+  } else {
+    const [lx, ly] = elemToLocal(el, px, py, s);
+    el.wMm = Math.max(2, Math.abs(lx) * 2 / s); el.hMm = Math.max(2, Math.abs(ly) * 2 / s);
+  }
+  bmRender();
+});
+function endDrag() { drag = null; }
+bm.canvas.addEventListener('pointerup', endDrag);
+bm.canvas.addEventListener('pointercancel', endDrag);
 
 window.addEventListener('resize', () => { if (!bm.ws.hidden) bmRender(); });
 
