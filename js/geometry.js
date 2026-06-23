@@ -508,30 +508,33 @@ function roundedRectHoleField(cols, rows, p) {
 window.roundedRectHoleField = roundedRectHoleField;
 
 // Build a 3MF package from parts [{name, color:[r,g,b], facets}] as a Blob.
-// Each part becomes its own <object> (separate mesh) colored via a colorgroup.
+// Each part becomes its own <object> (separate mesh). Colors use the 3MF CORE
+// <basematerials> element (NOT the material extension): the PrusaSlicer family
+// (PrusaSlicer/OrcaSlicer/Bambu Studio) reads it natively and maps each base to
+// a filament, and core-only files import where the m:colorgroup extension is
+// rejected ("no mesh").
 function build3MF(parts) {
   const enc = new TextEncoder();
-  let colors = '', objects = '', items = '';
+  let bases = '', objects = '', items = '';
   parts.forEach((part, i) => {
     const m = facetsToIndexedMesh(part.facets);
     const col = '#' + part.color.map(c => c.toString(16).padStart(2, '0')).join('').toUpperCase() + 'FF';
-    colors += `   <m:color color="${col}" />\n`;
+    const safeName = String(part.name || ('part-' + i)).replace(/[<>&"]/g, '');
+    bases += `   <base name="${safeName}" displaycolor="${col}" />\n`;
     let vs = '';
     for (const v of m.vertices) vs += `     <vertex x="${+v[0].toFixed(4)}" y="${+v[1].toFixed(4)}" z="${+v[2].toFixed(4)}" />\n`;
     let ts = '';
-    // Per-triangle color reference (pid->colorgroup, p1 applies to the whole
-    // triangle) in addition to the object-level pid/pindex — many slicers only
-    // pick up colors from the per-triangle form.
-    for (const t of m.triangles) ts += `     <triangle v1="${t[0]}" v2="${t[1]}" v3="${t[2]}" pid="1" p1="${i}" />\n`;
+    for (const t of m.triangles) ts += `     <triangle v1="${t[0]}" v2="${t[1]}" v3="${t[2]}" />\n`;
     const id = i + 2;
-    objects += `  <object id="${id}" name="${part.name}" type="model" pid="1" pindex="${i}">\n   <mesh>\n    <vertices>\n${vs}    </vertices>\n    <triangles>\n${ts}    </triangles>\n   </mesh>\n  </object>\n`;
+    // Object references the basematerials group (pid=1) at index i -> its color.
+    objects += `  <object id="${id}" name="${safeName}" type="model" pid="1" pindex="${i}">\n   <mesh>\n    <vertices>\n${vs}    </vertices>\n    <triangles>\n${ts}    </triangles>\n   </mesh>\n  </object>\n`;
     items += `  <item objectid="${id}" />\n`;
   });
   const model = `<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
  <resources>
-  <m:colorgroup id="1">
-${colors}  </m:colorgroup>
+  <basematerials id="1">
+${bases}  </basematerials>
 ${objects} </resources>
  <build>
 ${items} </build>
