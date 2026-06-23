@@ -57,6 +57,63 @@ function bodyPath(ctx, s) {
   ctx.arcTo(0, h, 0, 0, rr); ctx.arcTo(0, 0, w, 0, rr); ctx.closePath();
 }
 
+// Processed appearance of an image element: silhouette in its color (solid) or
+// the reduced palette (reduce) — what the .3mf will actually contain. Cached on
+// el._display and rebuilt only when a color-affecting property changes, so drags
+// stay cheap. Computed at a capped natural resolution (fast quantization).
+function elementDisplayKey(el) {
+  return [el.colorMode, el.color, el.threshold, el.invert,
+          el.reduce && el.reduce.method, el.reduce && el.reduce.numColors,
+          el.reduce && el.reduce.levels].join('|');
+}
+function ensureDisplay(el) {
+  if (el.type !== 'image' || !el._img) return null;
+  const key = elementDisplayKey(el);
+  if (el._display && el._displayKey === key) return el._display;
+  const iw = el._img.naturalWidth || el._img.width, ih = el._img.naturalHeight || el._img.height;
+  const scale = Math.min(1, 256 / Math.max(iw, ih, 1));
+  const w = Math.max(1, Math.round(iw * scale)), h = Math.max(1, Math.round(ih * scale)), n = w * h;
+  const src = document.createElement('canvas'); src.width = w; src.height = h;
+  const sx = src.getContext('2d', { willReadFrequently: true });
+  sx.drawImage(el._img, 0, 0, w, h);
+  const img = sx.getImageData(0, 0, w, h), d = img.data;
+  const out = sx.createImageData(w, h), o = out.data;
+  if (el.colorMode === 'reduce') {
+    const idxs = []; for (let i = 0; i < n; i++) if (d[i * 4 + 3] >= 128) idxs.push(i);
+    const strip = new ImageData(Math.max(1, idxs.length), 1);
+    for (let k = 0; k < idxs.length; k++) { const p = idxs[k] * 4; strip.data[k*4]=d[p]; strip.data[k*4+1]=d[p+1]; strip.data[k*4+2]=d[p+2]; strip.data[k*4+3]=255; }
+    if (el.reduce.method === 'palette') quantizeMedianCut(strip, el.reduce.numColors); else posterize(strip, el.reduce.levels);
+    for (let k = 0; k < idxs.length; k++) { const i = idxs[k]; o[i*4]=strip.data[k*4]; o[i*4+1]=strip.data[k*4+1]; o[i*4+2]=strip.data[k*4+2]; o[i*4+3]=255; }
+  } else {
+    const col = hexToRgb(el.color);
+    for (let i = 0; i < n; i++) {
+      let on = d[i * 4 + 3] >= 128;
+      if (on) { const lum = 0.299*d[i*4] + 0.587*d[i*4+1] + 0.114*d[i*4+2]; on = el.invert ? lum >= el.threshold : lum < el.threshold; }
+      if (on) { o[i*4]=col[0]; o[i*4+1]=col[1]; o[i*4+2]=col[2]; o[i*4+3]=255; }
+    }
+  }
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  cv.getContext('2d').putImageData(out, 0, 0);
+  el._display = cv; el._displayKey = key; return cv;
+}
+
+// Distinct colors in an image element's processed display (for palette swatches).
+function elementPalette(el) {
+  const cv = ensureDisplay(el); if (!cv) return [];
+  const data = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+  const seen = new Set(), out = [];
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 128) continue;
+    const hex = '#' + [data[i], data[i+1], data[i+2]].map(x => x.toString(16).padStart(2, '0')).join('');
+    if (!seen.has(hex)) { seen.add(hex); out.push(hex); }
+  }
+  return out;
+}
+function paletteSwatchHTML(el) {
+  const sw = elementPalette(el).map(hex => `<span class="sw" style="background:${hex}" title="${hex}"></span>`).join('');
+  return sw || '<span class="hint">–</span>';
+}
+
 function drawElement(ctx, el, s) {
   ctx.save();
   ctx.translate(el.cxMm * s, el.cyMm * s);
@@ -67,7 +124,7 @@ function drawElement(ctx, el, s) {
     ctx.font = `${el.fontWeight} ${Math.max(1, Math.round(h))}px ${el.fontFamily}`;
     ctx.fillText(el.text, 0, 0);
   } else if (el._img) {
-    ctx.drawImage(el._img, -w / 2, -h / 2, w, h);
+    ctx.drawImage(ensureDisplay(el) || el._img, -w / 2, -h / 2, w, h);
   } else {
     ctx.fillStyle = '#444'; ctx.fillRect(-w / 2, -h / 2, w, h);
   }
@@ -220,8 +277,10 @@ function renderProps() {
     html += propRow('Farbmodus', `<select id="pMode"><option value="solid" ${el.colorMode==='solid'?'selected':''}>Vollfarbe</option><option value="reduce" ${el.colorMode==='reduce'?'selected':''}>Farben reduzieren</option></select>`);
     if (el.colorMode === 'solid')
       html += propRow('Schwellwert', `<input type="range" id="pThresh" min="0" max="255" value="${el.threshold}"> <label class="toggle"><input type="checkbox" id="pInvert" ${el.invert?'checked':''}> invertieren</label>`);
-    else
+    else {
       html += propRow('Anzahl Farben', `<input type="range" id="pNum" min="2" max="16" value="${el.reduce.numColors}">`);
+      html += propRow('Palette (aus Bild)', `<div id="pPalette" class="bm-swatches">${paletteSwatchHTML(el)}</div>`);
+    }
   }
   html += propRow('Breite (mm)', `<input type="range" id="pW" min="2" max="${doc.widthMm}" step="0.5" value="${el.wMm.toFixed(1)}">`);
   html += propRow('Höhe (mm)', `<input type="range" id="pH" min="2" max="${doc.heightMm}" step="0.5" value="${el.hMm.toFixed(1)}">`);
@@ -238,7 +297,10 @@ function renderProps() {
   on('pMode', 'change', e => { el.colorMode = e.target.value; bmRender(); });
   on('pThresh', 'input', e => { el.threshold = Number(e.target.value); redrawCanvas(); });
   on('pInvert', 'change', e => { el.invert = e.target.checked; redrawCanvas(); });
-  on('pNum', 'input', e => { el.reduce.numColors = Number(e.target.value); redrawCanvas(); });
+  on('pNum', 'input', e => {
+    el.reduce.numColors = Number(e.target.value); redrawCanvas();
+    const pal = document.getElementById('pPalette'); if (pal) pal.innerHTML = paletteSwatchHTML(el);
+  });
   on('pW', 'input', e => { el.wMm = Number(e.target.value); redrawCanvas(); });
   on('pH', 'input', e => { el.hMm = Number(e.target.value); redrawCanvas(); });
   on('pRot', 'input', e => { el.rotationDeg = Number(e.target.value); redrawCanvas(); });
