@@ -32,11 +32,24 @@ function __renderElement(el, doc, cols, rows) {
   const r = new Uint8ClampedArray(n), g = new Uint8ClampedArray(n), b = new Uint8ClampedArray(n);
 
   if (el.type === "image" && el.colorMode === "reduce" && el._img) {
-    if (el.reduce.method === "palette") quantizeMedianCut(img, el.reduce.numColors);
-    else posterize(img, el.reduce.levels);
-    const q = img.data;
-    for (let i = 0; i < n; i++) {
-      if (d[i * 4 + 3] >= __ALPHA_CUTOFF) { mask[i] = 1; r[i] = q[i * 4]; g[i] = q[i * 4 + 1]; b[i] = q[i * 4 + 2]; }
+    // Quantize ONLY the element's opaque pixels. The element is drawn into the
+    // full bookmark-sized grid, so a large transparent margin surrounds it; if we
+    // quantized the whole canvas the transparent background would steal palette
+    // slots and muddy the result. Pack the opaque pixels into a compact strip,
+    // quantize that, then scatter the results back (color is position-independent).
+    const idxs = [];
+    for (let i = 0; i < n; i++) if (d[i * 4 + 3] >= __ALPHA_CUTOFF) idxs.push(i);
+    const strip = new ImageData(Math.max(1, idxs.length), 1);
+    for (let k = 0; k < idxs.length; k++) {
+      const p = idxs[k] * 4;
+      strip.data[k * 4] = d[p]; strip.data[k * 4 + 1] = d[p + 1];
+      strip.data[k * 4 + 2] = d[p + 2]; strip.data[k * 4 + 3] = 255;
+    }
+    if (el.reduce.method === "palette") quantizeMedianCut(strip, el.reduce.numColors);
+    else posterize(strip, el.reduce.levels);
+    for (let k = 0; k < idxs.length; k++) {
+      const i = idxs[k];
+      mask[i] = 1; r[i] = strip.data[k * 4]; g[i] = strip.data[k * 4 + 1]; b[i] = strip.data[k * 4 + 2];
     }
     return { mask, r, g, b };
   }
