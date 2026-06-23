@@ -252,19 +252,24 @@ function renderProps() {
 }
 
 // ---- Custom font loading ----
+function registerFont(fam, dataURL) {
+  const ff = new FontFace(fam, 'url(' + dataURL + ')');
+  return ff.load().then(loaded => { document.fonts.add(loaded); return loaded; });
+}
 function bmLoadFontFile(file) {
   const rd = new FileReader();
   rd.onload = () => {
     const fam = 'bmfont-' + file.name.replace(/\W+/g, '');
-    const ff = new FontFace(fam, rd.result);
-    ff.load().then(loaded => {
-      document.fonts.add(loaded);
-      const el = selected(); if (el && el.type === 'text') { el.fontFamily = fam; }
+    const dataURL = rd.result;
+    doc.fonts = doc.fonts || {};
+    doc.fonts[fam] = dataURL;
+    registerFont(fam, dataURL).then(() => {
+      const el = selected(); if (el && el.type === 'text') el.fontFamily = fam;
       bmRender();
       bmStatus('Schrift geladen: ' + file.name);
     }).catch(() => bmStatus('Schrift konnte nicht geladen werden.', true));
   };
-  rd.readAsArrayBuffer(file);
+  rd.readAsDataURL(file);
 }
 bm.fontFile.addEventListener('change', e => { const f = e.target.files[0]; if (f) bmLoadFontFile(f); bm.fontFile.value = ''; });
 window.bmLoadFontFile = bmLoadFontFile;
@@ -314,9 +319,9 @@ bm.canvas.addEventListener('pointermove', e => {
   }
   redrawCanvas();
 });
-function endDrag() { drag = null; bmRender(); }
-bm.canvas.addEventListener('pointerup', endDrag);
-bm.canvas.addEventListener('pointercancel', endDrag);
+function bmEndDrag() { drag = null; bmRender(); }
+bm.canvas.addEventListener('pointerup', bmEndDrag);
+bm.canvas.addEventListener('pointercancel', bmEndDrag);
 
 window.addEventListener('resize', () => { if (!bm.ws.hidden) bmRender(); });
 
@@ -331,7 +336,7 @@ window.bmState = state;
 bm.save.addEventListener('click', () => {
   const blob = new Blob([serializeProject(doc)], { type: 'application/json' });
   const a = document.createElement('a'); a.download = 'lesezeichen.json';
-  a.href = URL.createObjectURL(blob); a.click(); URL.revokeObjectURL(a.href);
+  a.href = URL.createObjectURL(blob); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 0);
   bmStatus('Projekt gespeichert.');
 });
 bm.load.addEventListener('click', () => bm.loadFile.click());
@@ -350,6 +355,11 @@ function bmLoadProjectText(text) {
   set('bmThickness', Number(doc.thicknessMm).toFixed(1)); set('bmLayerHeight', Number(doc.layerHeightMm).toFixed(2));
   set('bmHoleD', doc.hole.diameterMm); set('bmHoleMargin', doc.hole.marginTopMm); set('bmResolution', doc.resolution);
   document.getElementById('bmBaseColor').value = doc.baseColor;
+  // re-register custom fonts
+  const fonts = doc.fonts || {};
+  for (const fam of Object.keys(fonts)) {
+    registerFont(fam, fonts[fam]).then(() => bmRender()).catch(() => {});
+  }
   // re-decode images
   let pending = 0;
   for (const el of doc.elements) if (el.type === 'image' && el.src) {
