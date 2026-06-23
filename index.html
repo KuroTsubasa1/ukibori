@@ -209,14 +209,17 @@
 
   <div id="bmWorkspace" class="workspace" hidden>
     <aside class="sidebar">
-      <div class="bm-actions">
-        <button type="button" id="bmAddImage" class="btn">+ Bild</button>
-        <button type="button" id="bmAddText" class="btn">+ Text</button>
+      <div class="sidebar-head">
+        <div class="bm-actions">
+          <button type="button" id="bmAddImage" class="btn">+ Bild</button>
+          <button type="button" id="bmAddText" class="btn">+ Text</button>
+        </div>
       </div>
       <input id="bmFile" type="file" accept="image/*" hidden>
       <input id="bmFontFile" type="file" accept=".ttf,.otf,font/*" hidden>
       <input id="bmLoadFile" type="file" accept=".json,application/json" hidden>
 
+      <div class="toolbar">
       <details class="acc" open>
         <summary>Lesezeichen</summary>
         <div class="acc-body"><div class="fields">
@@ -250,6 +253,7 @@
         <summary>Element</summary>
         <div class="acc-body"><div id="bmProps" class="fields"><p class="hint">Kein Element ausgewählt.</p></div></div>
       </details>
+      </div>
 
       <div class="sidebar-footer">
         <button id="bmExport" class="btn btn-primary">3D-Modell (.3mf)</button>
