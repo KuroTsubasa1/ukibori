@@ -274,7 +274,7 @@ function buildBookmarkParts(doc) {
   const floor = Math.min(2 * doc.layerHeightMm, T); // colored-floor thickness (mm)
   // Always keep a solid base under every colored floor so engravings never reach
   // the bottom/base layer (clamp recess to leave >= minBase beneath the floor).
-  const minBase = Math.min(Math.max(0.6, 2 * doc.layerHeightMm), Math.max(0, T - floor));
+  const minBase = Math.min(Math.max(0.8, T * 0.34, 2 * doc.layerHeightMm), Math.max(0, T - floor));
   const maxRecess = Math.max(0, T - floor - minBase);
   const recessOf = (d) => Math.max(0, Math.min(d, maxRecess));
   const baseUnder = (d) => T - recessOf(d) - floor;            // base height beneath floor (>= minBase)

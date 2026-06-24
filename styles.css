@@ -284,3 +284,4 @@ body:not(.bookmark-mode) #bmWorkspace { display: none; }
 .bm-swatches .pal-entry { display: inline-flex; align-items: center; gap: 1px; border-radius: 5px; }
 .bm-swatches .pal-entry.dragging { opacity: .4; }
 .bm-swatches .grip { cursor: grab; color: var(--muted); font-size: 12px; line-height: 1; user-select: none; padding: 0 1px; }
+.build-tag { font-size: 11px; font-weight: 600; color: #fff; background: var(--accent); padding: 1px 7px; border-radius: 999px; vertical-align: middle; margin-left: 6px; }
