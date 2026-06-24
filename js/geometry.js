@@ -553,7 +553,11 @@ ${items} </build>
   let objCfg = '';
   parts.forEach((part, i) => { objCfg += `  <object id="${i + 2}">\n   <metadata key="extruder" value="${extruderOf.get(partHex6[i])}"/>\n  </object>\n`; });
   const modelSettings = `<?xml version="1.0" encoding="UTF-8"?>\n<config>\n${objCfg}</config>\n`;
-  const projectSettings = JSON.stringify({ filament_colour: colorList.slice() });
+  const projectSettings = JSON.stringify({
+    filament_colour: colorList.slice(),
+    filament_type: colorList.map(() => "PLA"),
+    filament_settings_id: colorList.map(() => "Generic PLA"),
+  });
 
   const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
