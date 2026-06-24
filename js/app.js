@@ -46,12 +46,22 @@ const els = {
   modelSmooth: document.getElementById('modelSmooth'),
   modelSmoothVal: document.getElementById('modelSmoothVal'),
   modelExport: document.getElementById('modelExport'),
-  download: document.getElementById('download'),
+  openExport: document.getElementById('openExport'),
+  exportModal: document.getElementById('exportModal'),
+  exportClose: document.getElementById('exportClose'),
+  exportName: document.getElementById('exportName'),
+  exportPng: document.getElementById('exportPng'),
+  exportSvg: document.getElementById('exportSvg'),
+  exportMf: document.getElementById('exportMf'),
+  exportStatus: document.getElementById('exportStatus'),
   output: document.getElementById('output'),
   preview: document.getElementById('preview'),
   controls: document.getElementById('controls'),
   status: document.getElementById('status'),
 };
+
+let loadedName = 'ukibori';   // base filename for exports (from the loaded image)
+function safeFileName(s) { return (String(s || '').trim().replace(/[\\/:*?"<>|]+/g, '_').replace(/\.+$/, '') || 'ukibori'); }
 
 let mode = 'bw';            // 'bw' | 'color'
 let colorMethod = 'palette'; // 'palette' | 'posterize'
@@ -73,7 +83,7 @@ function enableControls(on) {
    els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
    els.circleThickness, els.circleColor, els.modelWidth, els.thickBlack,
    els.thickWhite, els.ringThick, els.frameWidth, els.baseThick, els.bodyColor,
-   els.modelRes, els.modelSmooth, els.modelExport, els.download]
+   els.modelRes, els.modelSmooth, els.modelExport, els.openExport]
     .forEach(e => { e.disabled = !on; });
 }
 
@@ -322,7 +332,7 @@ function exportModel() {
   }
   const blob = build3MF(parts);
   const a = document.createElement('a');
-  a.download = 'modell.3mf';
+  a.download = currentExportName() + '.3mf';
   a.href = URL.createObjectURL(blob);
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 0);
@@ -336,6 +346,7 @@ function loadFile(file) {
     setStatus('Bitte eine Bilddatei auswählen.', true);
     return;
   }
+  loadedName = safeFileName((file.name || '').replace(/\.[^.]+$/, '')) || 'ukibori';
   const url = URL.createObjectURL(file);
   const img = new Image();
   img.onload = () => {
@@ -518,17 +529,83 @@ els.modelRes.addEventListener('input', () => { els.modelResVal.textContent = els
 els.modelSmooth.addEventListener('input', () => { els.modelSmoothVal.textContent = Number(els.modelSmooth.value).toFixed(1); });
 els.modelExport.addEventListener('click', exportModel);
 
-els.download.addEventListener('click', () => {
+// ---- Export dialog ----
+function currentExportName() { return safeFileName((els.exportName && els.exportName.value) || loadedName); }
+function downloadBlob(blob, filename) {
+  const a = document.createElement('a');
+  a.download = filename;
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
+}
+function openExportDialog() {
+  if (!processedData) return;
+  els.exportName.value = loadedName;
+  els.exportMf.disabled = (mode !== 'bw');
+  els.exportStatus.textContent = mode === 'bw' ? '' : 'Hinweis: .3mf nur im Schwarz/Weiß-Modus.';
+  els.exportModal.hidden = false;
+}
+function closeExportDialog() { els.exportModal.hidden = true; }
+els.openExport.addEventListener('click', openExportDialog);
+els.exportClose.addEventListener('click', closeExportDialog);
+els.exportModal.addEventListener('click', e => { if (e.target === els.exportModal) closeExportDialog(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !els.exportModal.hidden) closeExportDialog(); });
+
+els.exportPng.addEventListener('click', () => {
   if (!processedData) return;
   const data = exportData();
-  const tmp = document.createElement('canvas');
-  tmp.width = data.width;
-  tmp.height = data.height;
+  const tmp = document.createElement('canvas'); tmp.width = data.width; tmp.height = data.height;
   tmp.getContext('2d').putImageData(data, 0, 0);
-  const a = document.createElement('a');
-  a.download = mode === 'bw' ? 'schwarz-weiss.png' : 'farben-reduziert.png';
-  a.href = tmp.toDataURL('image/png');
-  a.click();
+  tmp.toBlob(b => { downloadBlob(b, currentExportName() + '.png'); els.exportStatus.textContent = 'PNG exportiert.'; }, 'image/png');
 });
+els.exportSvg.addEventListener('click', () => {
+  if (!processedData) return;
+  const svg = buildReliefSVG();
+  if (!svg) { els.exportStatus.textContent = 'Kein Inhalt für SVG.'; return; }
+  downloadBlob(new Blob([svg], { type: 'image/svg+xml' }), currentExportName() + '.svg');
+  els.exportStatus.textContent = 'SVG exportiert.';
+});
+els.exportMf.addEventListener('click', () => { if (mode === 'bw') exportModel(); });
+
+// Vector SVG of the processed result: one filled path per color (potrace-traced),
+// holes handled via fill-rule evenodd; sized in mm from the 3D width.
+function buildReliefSVG() {
+  const data = exportData();
+  const w0 = data.width, h0 = data.height;
+  const maxDim = Math.max(64, Math.min(1024, Number(els.modelRes.value) || 512));
+  let cols, rows;
+  if (w0 >= h0) { cols = Math.min(maxDim, w0); rows = Math.max(1, Math.round(cols * h0 / w0)); }
+  else { rows = Math.min(maxDim, h0); cols = Math.max(1, Math.round(rows * w0 / h0)); }
+  const full = document.createElement('canvas'); full.width = w0; full.height = h0;
+  full.getContext('2d').putImageData(data, 0, 0);
+  const g = document.createElement('canvas'); g.width = cols; g.height = rows;
+  const gx = g.getContext('2d', { willReadFrequently: true });
+  gx.imageSmoothingEnabled = false;
+  gx.drawImage(full, 0, 0, cols, rows);
+  const px = gx.getImageData(0, 0, cols, rows).data, n = cols * rows;
+  const masks = new Map(); // hex -> Uint8Array
+  for (let i = 0; i < n; i++) {
+    if (px[i * 4 + 3] < 128) continue;
+    const hex = '#' + [px[i * 4], px[i * 4 + 1], px[i * 4 + 2]].map(v => v.toString(16).padStart(2, '0')).join('').toUpperCase();
+    let mk = masks.get(hex); if (!mk) masks.set(hex, mk = new Uint8Array(n));
+    mk[i] = 1;
+  }
+  if (!masks.size) return null;
+  const pitch = (Number(els.modelWidth.value) || 80) / cols;
+  const wMm = +(cols * pitch).toFixed(3), hMm = +(rows * pitch).toFixed(3);
+  let paths = '';
+  for (const [hex, mk] of masks) {
+    const loops = window.traceMaskLoops(mk, cols, rows, {});
+    let d = '';
+    for (const lp of loops) {
+      if (lp.length < 3) continue;
+      d += 'M' + lp.map(([x, y]) => (x * pitch).toFixed(3) + ' ' + (y * pitch).toFixed(3)).join(' L') + ' Z ';
+    }
+    if (d) paths += `  <path d="${d.trim()}" fill="${hex}" fill-rule="evenodd" />\n`;
+  }
+  if (!paths) return null;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${wMm}mm" height="${hMm}mm" viewBox="0 0 ${wMm} ${hMm}">\n${paths}</svg>\n`;
+}
+window.buildReliefSVG = buildReliefSVG;
 
 updateControlVisibility();
