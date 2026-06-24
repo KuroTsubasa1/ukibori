@@ -8,13 +8,13 @@
 <meta http-equiv="Expires" content="0">
 <title>Ukibori · 浮彫</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="styles.css?v=11">
+<link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
 <header class="app-header">
   <span class="logo" aria-hidden="true">浮</span>
   <div>
-    <h1>Ukibori <span class="kanji">浮彫</span> <span class="build-tag">Build 11</span></h1>
+    <h1>Ukibori <span class="kanji">浮彫</span> <span class="build-tag">Build 12</span></h1>
     <p class="tagline">Bilder als erhabenes 3D-Relief · Schwarz-Weiß &amp; flache Farben · komplett lokal im Browser</p>
   </div>
 </header>
@@ -199,7 +199,7 @@
       </div>
 
       <div class="sidebar-footer">
-        <button id="download" class="btn btn-primary" disabled>PNG herunterladen</button>
+        <button id="openExport" class="btn btn-primary" disabled>Exportieren …</button>
         <p id="status" class="status">Bereit. Lade ein Bild, um zu starten.</p>
       </div>
     </aside>
@@ -207,6 +207,31 @@
     <section id="preview" class="preview">
       <canvas id="output"></canvas>
     </section>
+  </div>
+
+  <!-- Export dialog (relief) -->
+  <div id="exportModal" class="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
+      <div class="modal-head">
+        <h2 id="exportTitle">Exportieren</h2>
+        <button id="exportClose" class="modal-x" type="button" aria-label="Schließen">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <div class="field-head"><label for="exportName">Dateiname</label></div>
+          <input id="exportName" type="text" class="text-input" value="ukibori">
+        </div>
+        <div class="field">
+          <div class="field-head"><label>Format</label></div>
+          <div class="export-formats">
+            <button id="exportPng" class="btn" type="button">PNG <span class="hint">Bild</span></button>
+            <button id="exportSvg" class="btn" type="button">SVG <span class="hint">Vektor, je Farbe</span></button>
+            <button id="exportMf" class="btn btn-primary" type="button">.3mf <span class="hint">3D · nur S/W</span></button>
+          </div>
+        </div>
+        <p id="exportStatus" class="status"></p>
+      </div>
+    </div>
   </div>
   </div><!-- /#reliefWorkspace -->
 
@@ -279,13 +304,13 @@
 </main>
 
 
-<script src="js/image-ops.js?v=11"></script>
-<script src="js/geometry.js?v=11"></script>
-<script src="js/vendor/potrace.js?v=11"></script>
-<script src="js/trace.js?v=11"></script>
-<script src="js/bookmark-model.js?v=11"></script>
-<script src="js/bookmark-export.js?v=11"></script>
-<script src="js/bookmark-editor.js?v=11"></script>
-<script src="js/app.js?v=11"></script>
+<script src="js/image-ops.js?v=12"></script>
+<script src="js/geometry.js?v=12"></script>
+<script src="js/vendor/potrace.js?v=12"></script>
+<script src="js/trace.js?v=12"></script>
+<script src="js/bookmark-model.js?v=12"></script>
+<script src="js/bookmark-export.js?v=12"></script>
+<script src="js/bookmark-editor.js?v=12"></script>
+<script src="js/app.js?v=12"></script>
 </body>
 </html>
