@@ -296,10 +296,11 @@ function exportModel() {
   if (!processedData || mode !== 'bw') return;
   const maxDim = Number(els.modelRes.value);
   const { cols, rows, pitch, fBase, fBlack, fWhite, fRing } = buildFields(maxDim);
-  const tol = Number(els.modelSmooth.value) * pitch; // slider is in cells
   const baseT = Number(els.baseThick.value);
   const bodyColor = hexToRgb(els.bodyColor.value);
-  const facets = (f, thick, z0) => orientOutward(fieldFacets(f, cols, rows, pitch, thick, tol, z0));
+  // Trace each region with potrace (smooth vector edges), matching the bookmark
+  // exporter, instead of marching squares. A region is where its field is >0.
+  const facets = (f, thick, z0) => orientOutward(window.traceMaskToFacets((c, r) => f(c, r) > 0, cols, rows, pitch, thick, z0));
   const parts = [];
   // Base plate: the full footprint, from z=0 up. Relief + rand sit on top (z0=baseT).
   const baseF = facets(fBase, baseT, 0);
@@ -324,7 +325,7 @@ function exportModel() {
   a.download = 'modell.3mf';
   a.href = URL.createObjectURL(blob);
   a.click();
-  URL.revokeObjectURL(a.href);
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
   const tris = parts.reduce((s, p) => s + p.facets.length, 0);
   setStatus(`3D-Modell (.3mf) exportiert: ${parts.length} Teile, ${tris} Dreiecke.`, false);
 }
