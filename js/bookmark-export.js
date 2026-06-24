@@ -328,31 +328,31 @@ function buildBookmarkParts(doc) {
     if (facets.length) colorParts.push({ name: "farbe-" + (++__cn), color: hexToRgb(grp.hex), facets });
   }
 
-  // 2) Base plate: full thickness under the background; under each engraved
-  //    element a block from the back up to the colored floor (recess = air above).
-  //    Cutout pixels get no base (through-hole).
-  const behind = new Map(); // heightMm -> {h, m:Uint8Array}
-  const bg = new Uint8Array(cols * rows);
+  // 2) Base. One CONTINUOUS bottom slab covers the whole footprint (minus cutout
+  //    holes) from z=0 to minBase — this is the only base solid that reaches the
+  //    bottom, so separately-traced regions can never leave a gap that cuts
+  //    THROUGH the base along an element outline. The background and the blocks
+  //    under each color are risers that sit on top of that slab.
+  const baseAdd = (member, thickness, z0) => {
+    const facets = orientOutward(__tracedFacets(member, footprint, cols, rows, pitch, thickness, z0));
+    if (facets.length) baseParts.push({ name: "grundplatte", color: hexToRgb(baseHex), facets });
+  };
+  // continuous bottom slab (everything except cutout through-holes)
+  baseAdd((c, r) => comp.cutout[idx(c, r)] !== 1, minBase, 0);
+  // background riser: stands full height above the slab
+  baseAdd((c, r) => comp.isBase[idx(c, r)] === 1, T - minBase, minBase);
+  // under-color risers up to each colored floor, grouped by height (above slab)
+  const behind = new Map(); // heightMm -> Uint8Array
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
     const i = idx(c, r);
-    if (comp.cutout[i]) continue;             // hole: no base
-    if (comp.isBase[i]) { bg[i] = 1; continue; }
-    const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
-    const h = baseUnder(depthFor(hex));
-    if (h <= 0) continue;                      // floor reaches the back, nothing beneath
+    if (comp.cutout[i] || comp.isBase[i]) continue;
+    const h = baseUnder(depthFor(__hex(comp.r[i], comp.g[i], comp.b[i])));
+    if (h - minBase <= 1e-6) continue;        // bottom slab already reaches the floor
     const key = h.toFixed(4);
-    let set = behind.get(key); if (!set) { set = { h, m: new Uint8Array(cols * rows) }; behind.set(key, set); }
+    let set = behind.get(key); if (!set) behind.set(key, set = { h, m: new Uint8Array(cols * rows) });
     set.m[i] = 1;
   }
-  // background: full thickness (its own object)
-  {
-    const facets = orientOutward(__tracedFacets((c, r) => bg[idx(c, r)] === 1, footprint, cols, rows, pitch, T, 0));
-    if (facets.length) baseParts.push({ name: "grundplatte", color: hexToRgb(baseHex), facets });
-  }
-  for (const set of behind.values()) {
-    const facets = orientOutward(__tracedFacets((c, r) => set.m[idx(c, r)] === 1, footprint, cols, rows, pitch, set.h, 0));
-    if (facets.length) baseParts.push({ name: "grundplatte", color: hexToRgb(baseHex), facets });
-  }
+  for (const set of behind.values()) baseAdd((c, r) => set.m[idx(c, r)] === 1, set.h - minBase, minBase);
 
   // Each extruded solid is its own object: slicers handle multiple touching
   // bodies fine, whereas merging them into one mesh makes it non-manifold

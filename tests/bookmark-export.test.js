@@ -51,12 +51,15 @@
     return cv;
   }
 
-  test("parts: empty doc yields a single base part", () => {
+  test("parts: empty doc yields only base parts (continuous bottom slab + riser)", () => {
     const d = defaultBookmark(); d.resolution = 64;
     const parts = buildBookmarkParts(d);
-    assertEqual(parts.length, 1, "one part");
-    assertEqual(parts[0].name, "grundplatte", "base part name");
-    assert(parts[0].facets.length > 0, "base has facets");
+    assert(parts.length >= 1, "at least one part");
+    assert(parts.every(p => p.name === "grundplatte"), "all parts are base");
+    assert(parts.every(p => p.facets.length > 0), "all parts have facets");
+    // exactly one solid reaches the bottom (z=0): the continuous slab
+    const reachesZero = parts.filter(p => p.facets.some(t => t.some(v => v[2] < 1e-6)));
+    assertEqual(reachesZero.length, 1, "exactly one solid reaches the base");
   });
 
   test("parts: a green element adds a second colored part with outward volume", () => {
