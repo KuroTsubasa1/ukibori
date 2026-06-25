@@ -47,6 +47,7 @@ const els = {
   modelSmoothVal: document.getElementById('modelSmoothVal'),
   modelExport: document.getElementById('modelExport'),
   stlExport: document.getElementById('stlExport'),
+  dims: document.getElementById('dims'),
   download: document.getElementById('download'),
   output: document.getElementById('output'),
   preview: document.getElementById('preview'),
@@ -194,6 +195,7 @@ function paint() {
     }
   }
   els.preview.classList.add('ready');
+  updateDims();
 }
 
 // Full recompute (mode + cleanup), cache it to a canvas, then repaint.
@@ -317,6 +319,27 @@ function buildParts() {
   return { parts, stats: { tris } };
 }
 window.buildParts = buildParts;
+
+// Final physical dimensions in mm: width from the slider, height from the
+// model grid aspect, total thickness = base + tallest relief layer.
+function computeDimensions() {
+  if (!processedData) return null;
+  const { cols, rows } = buildFields(Number(els.modelRes.value));
+  const w = Number(els.modelWidth.value);
+  const h = w * (rows / cols);
+  const t = Number(els.baseThick.value) + Math.max(
+    Number(els.thickBlack.value), Number(els.thickWhite.value),
+    (els.circleEnable.checked || Number(els.frameWidth.value) > 0) ? Number(els.ringThick.value) : 0
+  );
+  return { w, h, t };
+}
+window.computeDimensions = computeDimensions;
+
+function updateDims() {
+  const d = computeDimensions();
+  els.dims.textContent = d ? `${d.w.toFixed(0)} × ${d.h.toFixed(0)} × ${d.t.toFixed(1)} mm` : '—';
+}
+window.updateDims = updateDims;
 
 // Builds the model from buildParts() and downloads it as a .3mf.
 function exportModel() {
@@ -446,11 +469,12 @@ els.smooth.addEventListener('input', () => {
   els.smoothVal.textContent = els.smooth.value;
   render();
 });
-els.circleEnable.addEventListener('change', () => { updateCircleCursor(); paint(); });
+els.circleEnable.addEventListener('change', () => { updateCircleCursor(); paint(); updateDims(); });
 els.circleSize.addEventListener('input', () => {
   circle.r = Number(els.circleSize.value);
   els.circleSizeVal.textContent = els.circleSize.value;
   paint();
+  updateDims();
 });
 els.circleThickness.addEventListener('input', () => {
   els.circleThicknessVal.textContent = els.circleThickness.value;
@@ -512,13 +536,13 @@ els.modeColor.addEventListener('click', () => setMode('color'));
 els.methPalette.addEventListener('click', () => setColorMethod('palette'));
 els.methPosterize.addEventListener('click', () => setColorMethod('posterize'));
 
-els.modelWidth.addEventListener('input', () => { els.modelWidthVal.textContent = els.modelWidth.value; });
-els.thickBlack.addEventListener('input', () => { els.thickBlackVal.textContent = Number(els.thickBlack.value).toFixed(1); });
-els.thickWhite.addEventListener('input', () => { els.thickWhiteVal.textContent = Number(els.thickWhite.value).toFixed(1); });
-els.ringThick.addEventListener('input', () => { els.ringThickVal.textContent = Number(els.ringThick.value).toFixed(1); });
-els.frameWidth.addEventListener('input', () => { els.frameWidthVal.textContent = els.frameWidth.value; });
-els.baseThick.addEventListener('input', () => { els.baseThickVal.textContent = Number(els.baseThick.value).toFixed(1); });
-els.modelRes.addEventListener('input', () => { els.modelResVal.textContent = els.modelRes.value; });
+els.modelWidth.addEventListener('input', () => { els.modelWidthVal.textContent = els.modelWidth.value; updateDims(); });
+els.thickBlack.addEventListener('input', () => { els.thickBlackVal.textContent = Number(els.thickBlack.value).toFixed(1); updateDims(); });
+els.thickWhite.addEventListener('input', () => { els.thickWhiteVal.textContent = Number(els.thickWhite.value).toFixed(1); updateDims(); });
+els.ringThick.addEventListener('input', () => { els.ringThickVal.textContent = Number(els.ringThick.value).toFixed(1); updateDims(); });
+els.frameWidth.addEventListener('input', () => { els.frameWidthVal.textContent = els.frameWidth.value; updateDims(); });
+els.baseThick.addEventListener('input', () => { els.baseThickVal.textContent = Number(els.baseThick.value).toFixed(1); updateDims(); });
+els.modelRes.addEventListener('input', () => { els.modelResVal.textContent = els.modelRes.value; updateDims(); });
 els.modelSmooth.addEventListener('input', () => { els.modelSmoothVal.textContent = Number(els.modelSmooth.value).toFixed(1); });
 els.modelExport.addEventListener('click', exportModel);
 
