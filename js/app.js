@@ -47,6 +47,7 @@ const els = {
   modelSmoothVal: document.getElementById('modelSmoothVal'),
   modelExport: document.getElementById('modelExport'),
   stlExport: document.getElementById('stlExport'),
+  stampMode: document.getElementById('stampMode'),
   dims: document.getElementById('dims'),
   download: document.getElementById('download'),
   output: document.getElementById('output'),
@@ -75,7 +76,7 @@ function enableControls(on) {
    els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
    els.circleThickness, els.circleColor, els.modelWidth, els.thickBlack,
    els.thickWhite, els.ringThick, els.frameWidth, els.baseThick, els.bodyColor,
-   els.modelRes, els.modelSmooth, els.modelExport, els.stlExport, els.download]
+   els.modelRes, els.modelSmooth, els.modelExport, els.stlExport, els.stampMode, els.download]
     .forEach(e => { e.disabled = !on; });
 }
 
@@ -175,7 +176,8 @@ function paint() {
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, f.fw, f.fh);
   }
-  ctx.drawImage(processedCanvas, -f.x0, -f.y0);
+  if (stampActive()) { ctx.save(); ctx.translate(f.fw, 0); ctx.scale(-1, 1); ctx.drawImage(processedCanvas, f.x0, -f.y0); ctx.restore(); }
+  else ctx.drawImage(processedCanvas, -f.x0, -f.y0);
   if (els.circleEnable.checked) {
     const cx = circle.cx - f.x0, cy = circle.cy - f.y0, r = circle.r;
     const t = Number(els.circleThickness.value);
@@ -232,7 +234,8 @@ function exportData() {
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, fw, fh);
   }
-  ctx.drawImage(processedCanvas, -x0, -y0);
+  if (stampActive()) { ctx.save(); ctx.translate(fw, 0); ctx.scale(-1, 1); ctx.drawImage(processedCanvas, x0, -y0); ctx.restore(); }
+  else ctx.drawImage(processedCanvas, -x0, -y0);
   const data = ctx.getImageData(0, 0, fw, fh);
   applyCircleMask(data, Number(els.circleThickness.value),
     hexToRgb(els.circleColor.value), circle.cx - x0, circle.cy - y0, r, keepAlpha);
@@ -242,6 +245,9 @@ function exportData() {
 function updateCircleCursor() {
   els.output.style.cursor = els.circleEnable.checked ? 'grab' : 'default';
 }
+
+function stampActive() { return els.stampMode && els.stampMode.checked; }
+window.stampActive = stampActive;
 
 // Builds continuous signed fields (>0 inside) for each part on a cols x rows
 // grid, sampled from the processed B/W result. These feed marching-squares so
@@ -269,6 +275,18 @@ function buildFields(maxDim) {
   for (let i = 0; i < gray.length; i++) gray[i] = 0.299 * gd[i * 4] + 0.587 * gd[i * 4 + 1] + 0.114 * gd[i * 4 + 2];
   let alpha = null;
   if (keepAlpha) { const ad = sample(false); alpha = new Float64Array(cols * rows); for (let i = 0; i < alpha.length; i++) alpha[i] = ad[i * 4 + 3]; }
+  if (stampActive()) {
+    const mirrorRow = (arr) => {
+      for (let r = 0; r < rows; r++) {
+        const base = r * cols;
+        for (let c = 0; c < cols >> 1; c++) {
+          const t = arr[base + c]; arr[base + c] = arr[base + cols - 1 - c]; arr[base + cols - 1 - c] = t;
+        }
+      }
+    };
+    mirrorRow(gray);
+    if (alpha) mirrorRow(alpha);
+  }
   const BIG = 1e9, ix = (c, r) => r * cols + c;
   const ccx = cols / 2, ccy = rows / 2, cr = Math.min(cols, rows) / 2;
   const ringCells = (enabled && Number(els.circleThickness.value) > 0 && Number(els.ringThick.value) > 0)
@@ -288,7 +306,9 @@ function buildFields(maxDim) {
   let fRing = null;
   if (ringCells > 0) fRing = (c, r) => Math.min(dist(c, r) - innerR, cr - dist(c, r), fAlpha(c, r));
   else if (frameCells > 0) fRing = (c, r) => Math.min(frameCells - edge(c, r), fAlpha(c, r));
-  return { cols, rows, pitch: Number(els.modelWidth.value) / cols, fBase, fBlack, fWhite, fRing };
+  const result = { cols, rows, pitch: Number(els.modelWidth.value) / cols, fBase, fBlack, fWhite, fRing };
+  if (stampActive()) { const tmp = result.fBlack; result.fBlack = result.fWhite; result.fWhite = tmp; }
+  return result;
 }
 window.buildFields = buildFields;
 
@@ -531,6 +551,7 @@ function setColorMethod(m) {
   updateControlVisibility();
   render();
 }
+els.stampMode.addEventListener('change', render);
 els.modeBw.addEventListener('click', () => setMode('bw'));
 els.modeColor.addEventListener('click', () => setMode('color'));
 els.methPalette.addEventListener('click', () => setColorMethod('palette'));
