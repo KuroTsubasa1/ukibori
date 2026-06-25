@@ -6,8 +6,8 @@
   const els = window.els;
 
   const PRESET_CONTROLS = [
-    'keepAlpha', 'thresh', 'island', 'invert', 'numColors', 'levels',
-    'colorIsland', 'smooth', 'circleEnable', 'circleSize', 'circleThickness',
+    'keepAlpha', 'island', 'invert', 'numColors', 'levels',
+    'colorIsland', 'smooth', 'circleEnable', 'circleThickness',
     'circleColor', 'modelWidth', 'thickBlack', 'thickWhite', 'ringThick',
     'frameWidth', 'baseThick', 'bodyColor', 'modelRes', 'modelSmooth',
   ];

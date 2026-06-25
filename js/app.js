@@ -601,7 +601,8 @@ function initPresets() {
   sel.addEventListener('change', () => { if (sel.value && loadPreset(sel.value)) render(); });
   document.getElementById('presetSave').addEventListener('click', () => {
     const name = prompt('Vorlagenname:');
-    if (name) { savePreset(name); refreshPresetSelect(); }
+    const trimmed = name && name.trim();
+    if (trimmed) { savePreset(trimmed); refreshPresetSelect(); }
   });
   document.getElementById('presetDelete').addEventListener('click', () => {
     if (sel.value) { deletePreset(sel.value); refreshPresetSelect(); }
