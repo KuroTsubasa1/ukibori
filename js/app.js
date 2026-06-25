@@ -324,12 +324,14 @@ function buildParts() {
   const bodyColor = hexToRgb(els.bodyColor.value);
   const facets = (f, thick, z0) => orientOutward(fieldFacets(f, cols, rows, pitch, thick, tol, z0));
   const parts = [];
+  // Base plate: the full footprint, from z=0 up. Relief + rand sit on top (z0=baseT).
   const baseF = facets(fBase, baseT, 0);
   if (baseF.length) parts.push({ name: 'grundplatte', color: bodyColor, facets: baseF });
   const blackF = facets(fBlack, Number(els.thickBlack.value), baseT);
   if (blackF.length) parts.push({ name: 'schwarz', color: [0, 0, 0], facets: blackF });
   const whiteF = facets(fWhite, Number(els.thickWhite.value), baseT);
   if (whiteF.length) parts.push({ name: 'weiss', color: [255, 255, 255], facets: whiteF });
+  // Rand color: the circle ring keeps its own colour, the rectangle frame uses the shared body colour.
   if (fRing) {
     const randColor = els.circleEnable.checked ? hexToRgb(els.circleColor.value) : bodyColor;
     const ringF = facets(fRing, Number(els.ringThick.value), baseT);
@@ -347,6 +349,7 @@ function computeDimensions() {
   const { cols, rows } = buildFields(Number(els.modelRes.value));
   const w = Number(els.modelWidth.value);
   const h = w * (rows / cols);
+  // NOTE: t is re-derived here independently of buildParts(); keep in sync if per-part thickness becomes asymmetric.
   const t = Number(els.baseThick.value) + Math.max(
     Number(els.thickBlack.value), Number(els.thickWhite.value),
     (els.circleEnable.checked || Number(els.frameWidth.value) > 0) ? Number(els.ringThick.value) : 0
@@ -397,7 +400,6 @@ function loadFile(file) {
       return;
     }
     enableControls(true);
-    restoreLastState();
     document.body.classList.add('has-image');
     setThreshold(computeOtsuThreshold(originalData)); // start at the auto value
     // Default circle: largest centered circle that fits the image.
@@ -411,6 +413,7 @@ function loadFile(file) {
     els.circleSizeVal.textContent = Math.round(circle.r);
     updateCircleCursor();
     setStatus(`Geladen: ${img.naturalWidth}×${img.naturalHeight}px`, false);
+    restoreLastState();
     render();
   };
   img.onerror = () => {
