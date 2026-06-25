@@ -377,6 +377,7 @@ function loadFile(file) {
       return;
     }
     enableControls(true);
+    restoreLastState();
     document.body.classList.add('has-image');
     setThreshold(computeOtsuThreshold(originalData)); // start at the auto value
     // Default circle: largest centered circle that fits the image.
@@ -576,5 +577,40 @@ els.download.addEventListener('click', () => {
   a.href = tmp.toDataURL('image/png');
   a.click();
 });
+
+// --- presets / persistence -------------------------------------------------
+function refreshPresetSelect() {
+  const sel = document.getElementById('presetSelect');
+  if (!sel) return;
+  sel.textContent = ''; // clear existing options safely
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = 'Vorlage…';
+  sel.appendChild(placeholder);
+  for (const name of Object.keys(listPresets())) {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  }
+}
+function initPresets() {
+  seedBuiltinPresets();
+  refreshPresetSelect();
+  const sel = document.getElementById('presetSelect');
+  sel.addEventListener('change', () => { if (sel.value && loadPreset(sel.value)) render(); });
+  document.getElementById('presetSave').addEventListener('click', () => {
+    const name = prompt('Vorlagenname:');
+    if (name) { savePreset(name); refreshPresetSelect(); }
+  });
+  document.getElementById('presetDelete').addEventListener('click', () => {
+    if (sel.value) { deletePreset(sel.value); refreshPresetSelect(); }
+  });
+  // Persist on any control change (debounced).
+  let t = null;
+  document.addEventListener('input', () => { clearTimeout(t); t = setTimeout(saveLastState, 300); });
+  document.addEventListener('change', () => { clearTimeout(t); t = setTimeout(saveLastState, 300); });
+}
+window.initPresets = initPresets;
 
 updateControlVisibility();
