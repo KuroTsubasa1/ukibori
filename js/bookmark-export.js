@@ -209,48 +209,10 @@ function __maskField(member, footprint, cols) {
 // from z0 by thickness. Replaces marching-squares for crisp, resolution-light
 // vector edges.
 function __tracedFacets(member, footprint, cols, rows, pitch, thickness, z0) {
-  if (thickness <= 0) return [];
-  const data = new Uint8Array(cols * rows);
-  let any = false;
-  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
-    if (member(c, r) && footprint(c, r) > 0) { data[r * cols + c] = 1; any = true; }
-  }
-  if (!any) return [];
-  // Clean each loop so the extrude has no zero-area walls/caps (which make the
-  // mesh non-manifold and some slicers reject it as "no mesh"): drop near-
-  // duplicate consecutive points, then drop collinear points (potrace emits
-  // collinear vertices along straight runs, which earcut turns into zero-area
-  // cap triangles).
-  const EPS = 1e-4;        // mm, coincident-point threshold
-  const AREA_EPS = 1e-4;   // mm^2, collinearity threshold (2*triangle area)
-  const clean = (l) => {
-    let p = [];
-    for (const q of l) { const last = p[p.length - 1]; if (!last || Math.hypot(q[0] - last[0], q[1] - last[1]) > EPS) p.push(q); }
-    while (p.length > 2 && Math.hypot(p[0][0] - p[p.length - 1][0], p[0][1] - p[p.length - 1][1]) <= EPS) p.pop();
-    if (p.length < 3) return p;
-    const n = p.length, out = [];
-    for (let i = 0; i < n; i++) {
-      const a = p[(i - 1 + n) % n], b = p[i], c = p[(i + 1) % n];
-      const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-      if (Math.abs(cross) > AREA_EPS) out.push(b); // keep only true corners/curve points
-    }
-    return out.length >= 3 ? out : p;
-  };
-  let loops = window.traceMaskLoops(data, cols, rows, {})
-    .map(l => l.map(([x, y]) => [x * pitch, (rows - y) * pitch]))
-    .map(clean)
-    .filter(l => l.length >= 3);
-  if (!loops.length) return [];
-  let maxA = 0; for (const l of loops) { const a = polyArea(l); if (Math.abs(a) > Math.abs(maxA)) maxA = a; }
-  if (maxA < 0) loops = loops.map(l => l.slice().reverse());
-  // Sub-micron deterministic jitter to break exact x/y coincidences and
-  // collinearities between loops that make earcut leave open cap edges (potrace's
-  // optimized loops align vertices exactly). 1e-5 mm is far below print scale.
-  loops = loops.map((l, li) => l.map((p, pi) => [
-    p[0] + (((li * 131 + pi * 31) % 13) - 6) * 1e-5,
-    p[1] + (((li * 71 + pi * 17) % 13) - 6) * 1e-5,
-  ]));
-  return extrudeLoops(loops, thickness, z0);
+  // Region = member AND inside the body/hole footprint. Shared tracer does the
+  // rest (clean loops, orient, jitter, extrude).
+  return window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0,
+    cols, rows, pitch, thickness, z0);
 }
 
 function buildBookmarkParts(doc) {

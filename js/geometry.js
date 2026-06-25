@@ -516,9 +516,14 @@ window.roundedRectHoleField = roundedRectHoleField;
 function build3MF(parts) {
   const enc = new TextEncoder();
   let bases = '', objects = '', items = '';
+  const partHex6 = [];                 // #RRGGBB per part
+  const colorList = [], extruderOf = new Map(); // distinct color -> 1-based extruder
   parts.forEach((part, i) => {
     const m = facetsToIndexedMesh(part.facets);
-    const col = '#' + part.color.map(c => c.toString(16).padStart(2, '0')).join('').toUpperCase() + 'FF';
+    const hex6 = '#' + part.color.map(c => c.toString(16).padStart(2, '0')).join('').toUpperCase();
+    partHex6.push(hex6);
+    if (!extruderOf.has(hex6)) { colorList.push(hex6); extruderOf.set(hex6, colorList.length); }
+    const col = hex6 + 'FF';
     const safeName = String(part.name || ('part-' + i)).replace(/[<>&"]/g, '');
     bases += `   <base name="${safeName}" displaycolor="${col}" />\n`;
     let vs = '';
@@ -540,10 +545,25 @@ ${objects} </resources>
 ${items} </build>
 </model>
 `;
+  // OrcaSlicer / Bambu Studio multicolor: they color/print by per-object filament
+  // (extruder), stored in their own config files — they do NOT apply a generic
+  // 3MF's basematerials colors. Group parts by color -> one filament each, assign
+  // each object its extruder, and write the filament colors so the design's
+  // colors come through on import.
+  let objCfg = '';
+  parts.forEach((part, i) => { objCfg += `  <object id="${i + 2}">\n   <metadata key="extruder" value="${extruderOf.get(partHex6[i])}"/>\n  </object>\n`; });
+  const modelSettings = `<?xml version="1.0" encoding="UTF-8"?>\n<config>\n${objCfg}</config>\n`;
+  const projectSettings = JSON.stringify({
+    filament_colour: colorList.slice(),
+    filament_type: colorList.map(() => "PLA"),
+    filament_settings_id: colorList.map(() => "Generic PLA"),
+  });
+
   const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" />
  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml" />
+ <Default Extension="config" ContentType="application/xml" />
 </Types>
 `;
   const rels = `<?xml version="1.0" encoding="UTF-8"?>
@@ -555,6 +575,8 @@ ${items} </build>
     { name: '[Content_Types].xml', bytes: enc.encode(contentTypes) },
     { name: '_rels/.rels', bytes: enc.encode(rels) },
     { name: '3D/3dmodel.model', bytes: enc.encode(model) },
+    { name: 'Metadata/model_settings.config', bytes: enc.encode(modelSettings) },
+    { name: 'Metadata/project_settings.config', bytes: enc.encode(projectSettings) },
   ]);
   return new Blob([zip], { type: 'model/3mf' });
 }
