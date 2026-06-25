@@ -3,6 +3,12 @@
 // that flows through the same pipeline as an uploaded image. Wrapped in an
 // IIFE so its helpers don't collide in the shared classic-script scope.
 (function () {
+  // The vendored lib defaults to latin1 byte encoding, which corrupts umlauts/
+  // emoji/non-ASCII URLs. Force its bundled UTF-8 encoder so QR payloads are correct.
+  if (window.qrcode && window.qrcode.stringToBytesFuncs && window.qrcode.stringToBytesFuncs['UTF-8']) {
+    window.qrcode.stringToBytes = window.qrcode.stringToBytesFuncs['UTF-8'];
+  }
+
   // Render typed text as black-on-white ImageData. Multi-line via "\n".
   function renderText({ text, fontSize = 80, bold = true }) {
     const lines = String(text == null ? '' : text).split('\n');
