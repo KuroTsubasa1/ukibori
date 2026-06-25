@@ -2,6 +2,18 @@
 
 const els = {
   drop: document.getElementById('drop'),
+  srcBild: document.getElementById('srcBild'),
+  srcText: document.getElementById('srcText'),
+  srcQR: document.getElementById('srcQR'),
+  textPanel: document.getElementById('textPanel'),
+  qrPanel: document.getElementById('qrPanel'),
+  textInput: document.getElementById('textInput'),
+  textBold: document.getElementById('textBold'),
+  textSize: document.getElementById('textSize'),
+  textApply: document.getElementById('textApply'),
+  qrInput: document.getElementById('qrInput'),
+  qrEc: document.getElementById('qrEc'),
+  qrApply: document.getElementById('qrApply'),
   file: document.getElementById('file'),
   keepAlpha: document.getElementById('keepAlpha'),
   thresh: document.getElementById('thresh'),
@@ -455,6 +467,42 @@ window.crc32 = crc32;
 Object.defineProperty(window, 'originalData', {
   get() { return originalData; },
   set(v) { originalData = v; },
+});
+
+// --- input source tabs ------------------------------------------------------
+function setSource(which) {
+  els.drop.hidden = which !== 'bild';
+  els.textPanel.hidden = which !== 'text';
+  els.qrPanel.hidden = which !== 'qr';
+  els.srcBild.classList.toggle('seg-active', which === 'bild');
+  els.srcText.classList.toggle('seg-active', which === 'text');
+  els.srcQR.classList.toggle('seg-active', which === 'qr');
+}
+window.setSource = setSource;
+els.srcBild.addEventListener('click', () => setSource('bild'));
+els.srcText.addEventListener('click', () => setSource('text'));
+els.srcQR.addEventListener('click', () => setSource('qr'));
+
+els.textApply.addEventListener('click', () => {
+  try {
+    const data = renderText({
+      text: els.textInput.value,
+      fontSize: Number(els.textSize.value),
+      bold: els.textBold.checked,
+    });
+    adoptImageData(data, `Text übernommen: ${data.width}×${data.height}px`);
+  } catch (e) {
+    setStatus(e.message || 'Text konnte nicht erzeugt werden.', true);
+  }
+});
+
+els.qrApply.addEventListener('click', () => {
+  try {
+    const data = qrToImageData({ text: els.qrInput.value, ecLevel: els.qrEc.value });
+    adoptImageData(data, `QR-Code übernommen: ${data.width}×${data.height}px`);
+  } catch (e) {
+    setStatus(e.message || 'QR-Code konnte nicht erzeugt werden.', true);
+  }
 });
 
 els.drop.addEventListener('click', () => els.file.click());

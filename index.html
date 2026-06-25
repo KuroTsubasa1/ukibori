@@ -17,6 +17,12 @@
 </header>
 
 <main>
+  <div id="sourceTabs" class="seg-group source-tabs" role="tablist" aria-label="Quelle">
+    <button type="button" id="srcBild" class="seg seg-active">Bild</button>
+    <button type="button" id="srcText" class="seg">Text</button>
+    <button type="button" id="srcQR" class="seg">QR</button>
+  </div>
+
   <section id="drop" class="dropzone" tabindex="0">
     <div class="drop-full">
       <div class="drop-icon" aria-hidden="true">⬆</div>
@@ -25,6 +31,30 @@
     </div>
     <div class="drop-compact">↻ Anderes Bild laden — ziehen oder klicken</div>
     <input id="file" type="file" accept="image/*" hidden>
+  </section>
+
+  <section id="textPanel" class="source-panel" hidden>
+    <textarea id="textInput" rows="2" placeholder="Text eingeben… (Zeilenumbruch erlaubt)"></textarea>
+    <div class="source-row">
+      <label class="toggle"><input id="textBold" type="checkbox" checked> Fett</label>
+      <label class="source-size">Größe <input id="textSize" type="range" min="24" max="200" value="80"></label>
+      <button id="textApply" type="button" class="btn btn-primary">Anwenden</button>
+    </div>
+  </section>
+
+  <section id="qrPanel" class="source-panel" hidden>
+    <input id="qrInput" type="text" placeholder="Text oder URL…">
+    <div class="source-row">
+      <label class="source-size">Fehlerkorrektur
+        <select id="qrEc">
+          <option value="L">L</option>
+          <option value="M" selected>M</option>
+          <option value="Q">Q</option>
+          <option value="H">H</option>
+        </select>
+      </label>
+      <button id="qrApply" type="button" class="btn btn-primary">Anwenden</button>
+    </div>
   </section>
 
   <div class="workspace">
