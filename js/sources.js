@@ -42,7 +42,8 @@
   }
 
   function qrToImageData({ text, ecLevel = 'M', scale = 8, quiet = 4 }) {
-    if (!String(text == null ? '' : text).length) throw new Error('Kein Text.');
+    if (!String(text == null ? '' : text).trim().length) throw new Error('Kein Text.');
+    if (!['L', 'M', 'Q', 'H'].includes(ecLevel)) throw new Error('Ungültiger EC-Level.');
     const qr = makeQr(String(text), ecLevel);
     const n = qr.getModuleCount();
     const dim = (n + quiet * 2) * scale;
