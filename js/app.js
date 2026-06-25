@@ -381,6 +381,29 @@ function exportModel() {
 }
 window.exportModel = exportModel;
 
+// Adopts an ImageData as the working source (from a file, text, or QR) and
+// runs the shared post-load setup. `label` is the status message to show.
+function adoptImageData(imageData, label) {
+  originalData = imageData;
+  enableControls(true);
+  document.body.classList.add('has-image');
+  setThreshold(computeOtsuThreshold(originalData)); // start at the auto value
+  // Default circle: largest centered circle that fits the image.
+  const w = originalData.width, h = originalData.height;
+  circle.cx = w / 2;
+  circle.cy = h / 2;
+  circle.r = Math.min(w, h) / 2;
+  els.circleSize.min = 10;
+  els.circleSize.max = Math.round(Math.hypot(w, h) / 2);
+  els.circleSize.value = Math.round(circle.r);
+  els.circleSizeVal.textContent = Math.round(circle.r);
+  updateCircleCursor();
+  setStatus(label, false);
+  restoreLastState();
+  render();
+}
+window.adoptImageData = adoptImageData;
+
 function loadFile(file) {
   if (!file || !file.type.startsWith('image/')) {
     setStatus('Bitte eine Bilddatei auswählen.', true);
@@ -390,31 +413,17 @@ function loadFile(file) {
   const img = new Image();
   img.onload = () => {
     URL.revokeObjectURL(url);
+    let data;
     try {
       offscreen.width = img.naturalWidth;
       offscreen.height = img.naturalHeight;
       offCtx.drawImage(img, 0, 0);
-      originalData = offCtx.getImageData(0, 0, offscreen.width, offscreen.height);
+      data = offCtx.getImageData(0, 0, offscreen.width, offscreen.height);
     } catch (e) {
       setStatus('Bild ist zu groß zum Verarbeiten.', true);
       return;
     }
-    enableControls(true);
-    document.body.classList.add('has-image');
-    setThreshold(computeOtsuThreshold(originalData)); // start at the auto value
-    // Default circle: largest centered circle that fits the image.
-    const w = originalData.width, h = originalData.height;
-    circle.cx = w / 2;
-    circle.cy = h / 2;
-    circle.r = Math.min(w, h) / 2;
-    els.circleSize.min = 10;
-    els.circleSize.max = Math.round(Math.hypot(w, h) / 2);
-    els.circleSize.value = Math.round(circle.r);
-    els.circleSizeVal.textContent = Math.round(circle.r);
-    updateCircleCursor();
-    setStatus(`Geladen: ${img.naturalWidth}×${img.naturalHeight}px`, false);
-    restoreLastState();
-    render();
+    adoptImageData(data, `Geladen: ${img.naturalWidth}×${img.naturalHeight}px`);
   };
   img.onerror = () => {
     URL.revokeObjectURL(url);
