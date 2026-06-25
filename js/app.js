@@ -469,12 +469,11 @@ els.smooth.addEventListener('input', () => {
   els.smoothVal.textContent = els.smooth.value;
   render();
 });
-els.circleEnable.addEventListener('change', () => { updateCircleCursor(); paint(); updateDims(); });
+els.circleEnable.addEventListener('change', () => { updateCircleCursor(); paint(); });
 els.circleSize.addEventListener('input', () => {
   circle.r = Number(els.circleSize.value);
   els.circleSizeVal.textContent = els.circleSize.value;
   paint();
-  updateDims();
 });
 els.circleThickness.addEventListener('input', () => {
   els.circleThicknessVal.textContent = els.circleThickness.value;
