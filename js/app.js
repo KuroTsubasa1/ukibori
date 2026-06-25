@@ -289,11 +289,11 @@ function buildFields(maxDim) {
 }
 window.buildFields = buildFields;
 
-// Builds the extruded model from the current B/W result and downloads it as a
-// 3MF with each color as its own object. Works with or without the circle crop.
-// Contours are sub-pixel smooth (marching squares on the fields from buildFields).
-function exportModel() {
-  if (!processedData || mode !== 'bw') return;
+// Builds the colored parts for the current B/W result. Shared by .3mf, STL,
+// and the 3D preview so preview == print. Returns empty parts when there is
+// nothing to build (no image, or not in B/W mode).
+function buildParts() {
+  if (!processedData || mode !== 'bw') return { parts: [], stats: { tris: 0 } };
   const maxDim = Number(els.modelRes.value);
   const { cols, rows, pitch, fBase, fBlack, fWhite, fRing } = buildFields(maxDim);
   const tol = Number(els.modelSmooth.value) * pitch; // slider is in cells
@@ -301,20 +301,25 @@ function exportModel() {
   const bodyColor = hexToRgb(els.bodyColor.value);
   const facets = (f, thick, z0) => orientOutward(fieldFacets(f, cols, rows, pitch, thick, tol, z0));
   const parts = [];
-  // Base plate: the full footprint, from z=0 up. Relief + rand sit on top (z0=baseT).
   const baseF = facets(fBase, baseT, 0);
   if (baseF.length) parts.push({ name: 'grundplatte', color: bodyColor, facets: baseF });
   const blackF = facets(fBlack, Number(els.thickBlack.value), baseT);
   if (blackF.length) parts.push({ name: 'schwarz', color: [0, 0, 0], facets: blackF });
   const whiteF = facets(fWhite, Number(els.thickWhite.value), baseT);
   if (whiteF.length) parts.push({ name: 'weiss', color: [255, 255, 255], facets: whiteF });
-  // Rand color: the circle ring keeps its own colour, the rectangle frame uses
-  // the shared body colour.
   if (fRing) {
     const randColor = els.circleEnable.checked ? hexToRgb(els.circleColor.value) : bodyColor;
     const ringF = facets(fRing, Number(els.ringThick.value), baseT);
     if (ringF.length) parts.push({ name: 'rand', color: randColor, facets: ringF });
   }
+  const tris = parts.reduce((s, p) => s + p.facets.length, 0);
+  return { parts, stats: { tris } };
+}
+window.buildParts = buildParts;
+
+// Builds the model from buildParts() and downloads it as a .3mf.
+function exportModel() {
+  const { parts, stats } = buildParts();
   if (!parts.length) {
     setStatus('Kein 3D-Modell: keine passenden Flächen gefunden.', true);
     return;
@@ -325,8 +330,7 @@ function exportModel() {
   a.href = URL.createObjectURL(blob);
   a.click();
   URL.revokeObjectURL(a.href);
-  const tris = parts.reduce((s, p) => s + p.facets.length, 0);
-  setStatus(`3D-Modell (.3mf) exportiert: ${parts.length} Teile, ${tris} Dreiecke.`, false);
+  setStatus(`3D-Modell (.3mf) exportiert: ${parts.length} Teile, ${stats.tris} Dreiecke.`, false);
 }
 window.exportModel = exportModel;
 
