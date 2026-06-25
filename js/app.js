@@ -46,6 +46,7 @@ const els = {
   modelSmooth: document.getElementById('modelSmooth'),
   modelSmoothVal: document.getElementById('modelSmoothVal'),
   modelExport: document.getElementById('modelExport'),
+  stlExport: document.getElementById('stlExport'),
   download: document.getElementById('download'),
   output: document.getElementById('output'),
   preview: document.getElementById('preview'),
@@ -73,7 +74,7 @@ function enableControls(on) {
    els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
    els.circleThickness, els.circleColor, els.modelWidth, els.thickBlack,
    els.thickWhite, els.ringThick, els.frameWidth, els.baseThick, els.bodyColor,
-   els.modelRes, els.modelSmooth, els.modelExport, els.download]
+   els.modelRes, els.modelSmooth, els.modelExport, els.stlExport, els.download]
     .forEach(e => { e.disabled = !on; });
 }
 
@@ -520,6 +521,25 @@ els.baseThick.addEventListener('input', () => { els.baseThickVal.textContent = N
 els.modelRes.addEventListener('input', () => { els.modelResVal.textContent = els.modelRes.value; });
 els.modelSmooth.addEventListener('input', () => { els.modelSmoothVal.textContent = Number(els.modelSmooth.value).toFixed(1); });
 els.modelExport.addEventListener('click', exportModel);
+
+function exportSTL() {
+  const { parts, stats } = buildParts();
+  if (!parts.length) {
+    setStatus('Kein 3D-Modell: keine passenden Flächen gefunden.', true);
+    return;
+  }
+  const all = [];
+  for (const p of parts) for (const f of p.facets) all.push(f);
+  const blob = new Blob([facetsToBinarySTL(all)], { type: 'model/stl' });
+  const a = document.createElement('a');
+  a.download = 'modell.stl';
+  a.href = URL.createObjectURL(blob);
+  a.click();
+  URL.revokeObjectURL(a.href);
+  setStatus(`3D-Modell (.stl) exportiert: ${stats.tris} Dreiecke.`, false);
+}
+window.exportSTL = exportSTL;
+els.stlExport.addEventListener('click', exportSTL);
 
 els.download.addEventListener('click', () => {
   if (!processedData) return;

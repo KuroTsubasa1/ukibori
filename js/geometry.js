@@ -529,3 +529,30 @@ ${items} </build>
   ]);
   return new Blob([zip], { type: 'model/3mf' });
 }
+
+// Serialize a flat list of triangle facets ([[x,y,z]x3]) to binary STL bytes.
+// STL is colorless: callers union all parts' facets. Normals are computed
+// per facet (right-hand rule); slicers tolerate/recompute them anyway.
+function facetsToBinarySTL(facets) {
+  const buf = new ArrayBuffer(84 + 50 * facets.length);
+  const dv = new DataView(buf);
+  dv.setUint32(80, facets.length, true);
+  let o = 84;
+  for (const f of facets) {
+    const [a, b, c] = f;
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    dv.setFloat32(o, nx, true); dv.setFloat32(o + 4, ny, true); dv.setFloat32(o + 8, nz, true);
+    o += 12;
+    for (const v of f) {
+      dv.setFloat32(o, v[0], true); dv.setFloat32(o + 4, v[1], true); dv.setFloat32(o + 8, v[2], true);
+      o += 12;
+    }
+    dv.setUint16(o, 0, true); o += 2;
+  }
+  return new Uint8Array(buf);
+}
+window.facetsToBinarySTL = facetsToBinarySTL;
