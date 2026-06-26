@@ -94,11 +94,13 @@
     const w = canvasEl.clientWidth || 480, h = canvasEl.clientHeight || 360;
     renderer.setSize(w, h, false);
     camera.aspect = w / h; camera.updateProjectionMatrix();
+    renderOnce();
   }
 
   api.show = async function (canvas, getParts) {
-    await api.loadThree();
     canvasEl = canvas; getPartsFn = getParts; active = true;
+    await api.loadThree();
+    if (!active) { canvas.hidden = true; return; }
     if (!renderer) {
       renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
       camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000);
@@ -106,12 +108,15 @@
     }
     canvas.hidden = false;
     resize();
+    window.addEventListener('resize', resize);
     const parts = (getParts() || {}).parts || [];
     current = api.buildPreviewScene(parts);
     fitCamera(current);
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
     loop();
   };
-  api.hide = function () { active = false; if (raf) cancelAnimationFrame(raf); raf = 0; if (canvasEl) canvasEl.hidden = true; };
+  api.hide = function () { active = false; if (raf) cancelAnimationFrame(raf); raf = 0; window.removeEventListener('resize', resize); if (canvasEl) canvasEl.hidden = true; };
   api.isActive = function () { return active; };
 
   function attachOrbit(canvas) {
