@@ -325,6 +325,94 @@ function buildFields(maxDim) {
 }
 window.buildFields = buildFields;
 
+// Color-mode analogue of buildFields: one anti-aliased coverage field per
+// distinct palette color in processedData, intersected with the same
+// alpha/circle/frame fields. Reuses the mask→downsample→coverage−128 trick so
+// per-color contours are sub-pixel smooth (not a per-pixel staircase).
+function buildColorFields(maxDim) {
+  const enabled = els.circleEnable.checked;
+  const keepAlpha = els.keepAlpha.checked;
+  let sx, sy, sw, sh;
+  if (enabled) { const r = circle.r; sx = circle.cx - r; sy = circle.cy - r; sw = 2 * r; sh = 2 * r; }
+  else { sx = 0; sy = 0; sw = processedCanvas.width; sh = processedCanvas.height; }
+  let cols, rows;
+  if (sw >= sh) { cols = Math.max(2, Math.min(maxDim, Math.round(sw))); rows = Math.max(2, Math.round(cols * sh / sw)); }
+  else { rows = Math.max(2, Math.min(maxDim, Math.round(sh))); cols = Math.max(2, Math.round(rows * sw / sh)); }
+
+  // Distinct opaque colors, most-frequent first, capped at 32.
+  const pd = processedData.data;
+  const counts = new Map();
+  for (let i = 0; i < pd.length; i += 4) {
+    if (keepAlpha && pd[i + 3] < 128) continue;
+    const key = (pd[i] << 16) | (pd[i + 1] << 8) | pd[i + 2];
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const colors = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 32)
+    .map(([key]) => [(key >> 16) & 255, (key >> 8) & 255, key & 255]);
+
+  // Per-color coverage: full-res white-where-matching mask, downsampled to grid.
+  const fullW = processedData.width, fullH = processedData.height;
+  const coverageOf = (color) => {
+    const mask = new Uint8ClampedArray(pd.length);
+    for (let i = 0; i < pd.length; i += 4) {
+      const on = pd[i] === color[0] && pd[i + 1] === color[1] && pd[i + 2] === color[2]
+        && (!keepAlpha || pd[i + 3] >= 128);
+      mask[i] = mask[i + 1] = mask[i + 2] = on ? 255 : 0; mask[i + 3] = 255;
+    }
+    const full = document.createElement('canvas'); full.width = fullW; full.height = fullH;
+    full.getContext('2d').putImageData(new ImageData(mask, fullW, fullH), 0, 0);
+    const cv = document.createElement('canvas'); cv.width = cols; cv.height = rows;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    cx.drawImage(full, sx, sy, sw, sh, 0, 0, cols, rows);
+    const d = cx.getImageData(0, 0, cols, rows).data;
+    const cov = new Float64Array(cols * rows);
+    for (let i = 0; i < cov.length; i++) cov[i] = d[i * 4];
+    return cov;
+  };
+
+  // Alpha field (coverage) when keeping transparency.
+  let alpha = null;
+  if (keepAlpha) {
+    const cv = document.createElement('canvas'); cv.width = cols; cv.height = rows;
+    const cx = cv.getContext('2d', { willReadFrequently: true });
+    cx.drawImage(processedCanvas, sx, sy, sw, sh, 0, 0, cols, rows);
+    const ad = cx.getImageData(0, 0, cols, rows).data;
+    alpha = new Float64Array(cols * rows);
+    for (let i = 0; i < alpha.length; i++) alpha[i] = ad[i * 4 + 3];
+  }
+
+  const ix = (c, r) => r * cols + c;
+  const mirrorRow = (arr) => {
+    for (let r = 0; r < rows; r++) { const b = r * cols; for (let c = 0; c < cols >> 1; c++) { const t = arr[b + c]; arr[b + c] = arr[b + cols - 1 - c]; arr[b + cols - 1 - c] = t; } }
+  };
+  if (stampActive() && alpha) mirrorRow(alpha);
+  const coverage = colors.map(c => { const cov = coverageOf(c); if (stampActive()) mirrorRow(cov); return cov; });
+
+  const BIG = 1e9;
+  const ccx = cols / 2, ccy = rows / 2, cr = Math.min(cols, rows) / 2;
+  const ringCells = (enabled && Number(els.circleThickness.value) > 0 && Number(els.ringThick.value) > 0)
+    ? Number(els.circleThickness.value) * (cols / sw) : 0;
+  const frameCells = (!enabled && Number(els.frameWidth.value) > 0 && Number(els.ringThick.value) > 0)
+    ? Number(els.frameWidth.value) * (cols / sw) : 0;
+  const innerR = cr - ringCells;
+  const dist = (c, r) => Math.hypot(c + 0.5 - ccx, r + 0.5 - ccy);
+  const edge = (c, r) => Math.min(c, r, cols - 1 - c, rows - 1 - r);
+  const fAlpha = (c, r) => keepAlpha ? (alpha[ix(c, r)] - 128) : BIG;
+  const fCircle = (c, r) => enabled ? (cr - dist(c, r)) : BIG;
+  const fInner = (c, r) => enabled ? (innerR - dist(c, r)) : (frameCells > 0 ? (edge(c, r) - frameCells) : BIG);
+  const fBase = (c, r) => Math.min(fAlpha(c, r), fCircle(c, r));
+  let fRing = null;
+  if (ringCells > 0) fRing = (c, r) => Math.min(dist(c, r) - innerR, cr - dist(c, r), fAlpha(c, r));
+  else if (frameCells > 0) fRing = (c, r) => Math.min(frameCells - edge(c, r), fAlpha(c, r));
+
+  const colorFields = colors.map((c, k) => ({
+    color: c,
+    field: (cc, rr) => Math.min(coverage[k][ix(cc, rr)] - 128, fAlpha(cc, rr), fInner(cc, rr)),
+  }));
+  return { cols, rows, pitch: Number(els.modelWidth.value) / cols, colorFields, fBase, fRing };
+}
+window.buildColorFields = buildColorFields;
+
 // Builds the colored parts for the current B/W result. Shared by .3mf, STL,
 // and the 3D preview so preview == print. Returns empty parts when there is
 // nothing to build (no image, or not in B/W mode).
@@ -625,6 +713,7 @@ function setMode(m) {
   updateControlVisibility();
   render();
 }
+window.setMode = setMode;
 function setColorMethod(m) {
   colorMethod = m;
   updateControlVisibility();
