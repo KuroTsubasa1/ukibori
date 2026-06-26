@@ -181,7 +181,7 @@
           </div>
         </details>
 
-        <details class="acc mode-bw">
+        <details class="acc">
           <summary>3D-Modell</summary>
           <div class="acc-body">
             <div class="fields threed-row">
@@ -189,13 +189,17 @@
                 <div class="field-head"><label for="modelWidth">3D-Breite (mm)</label><span id="modelWidthVal" class="badge">80</span></div>
                 <input id="modelWidth" type="range" min="20" max="300" value="80" step="1" disabled>
               </div>
-              <div class="field">
+              <div class="field mode-bw">
                 <div class="field-head"><label for="thickBlack">Dicke Schwarz (mm)</label><span id="thickBlackVal" class="badge">3.0</span></div>
                 <input id="thickBlack" type="range" min="0" max="10" value="3" step="0.2" disabled>
               </div>
-              <div class="field">
+              <div class="field mode-bw">
                 <div class="field-head"><label for="thickWhite">Dicke Weiß (mm)</label><span id="thickWhiteVal" class="badge">3.0</span></div>
                 <input id="thickWhite" type="range" min="0" max="10" value="3" step="0.2" disabled>
+              </div>
+              <div class="field mode-color" hidden>
+                <div class="field-head"><label for="colorRelief">Relief-Höhe (mm)</label><span id="colorReliefVal" class="badge">3.0</span></div>
+                <input id="colorRelief" type="range" min="0" max="10" value="3" step="0.2" disabled>
               </div>
               <div class="field">
                 <div class="field-head"><label for="ringThick">Dicke Rand (mm)</label><span id="ringThickVal" class="badge">4.0</span></div>

@@ -60,6 +60,8 @@ const els = {
   modelSmoothVal: document.getElementById('modelSmoothVal'),
   modelExport: document.getElementById('modelExport'),
   stlExport: document.getElementById('stlExport'),
+  colorRelief: document.getElementById('colorRelief'),
+  colorReliefVal: document.getElementById('colorReliefVal'),
   stampMode: document.getElementById('stampMode'),
   dims: document.getElementById('dims'),
   download: document.getElementById('download'),
@@ -89,7 +91,7 @@ function enableControls(on) {
    els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
    els.circleThickness, els.circleColor, els.modelWidth, els.thickBlack,
    els.thickWhite, els.ringThick, els.frameWidth, els.baseThick, els.bodyColor,
-   els.modelRes, els.modelSmooth, els.modelExport, els.stlExport, els.stampMode, els.download]
+   els.modelRes, els.modelSmooth, els.modelExport, els.stlExport, els.colorRelief, els.stampMode, els.download]
     .forEach(e => { e.disabled = !on; });
 }
 
@@ -415,9 +417,10 @@ window.buildColorFields = buildColorFields;
 
 // Builds the colored parts for the current B/W result. Shared by .3mf, STL,
 // and the 3D preview so preview == print. Returns empty parts when there is
-// nothing to build (no image, or not in B/W mode).
+// nothing to build (no image). In color mode, delegates to buildColorParts().
 function buildParts() {
-  if (!processedData || mode !== 'bw') return { parts: [], stats: { tris: 0 } };
+  if (!processedData) return { parts: [], stats: { tris: 0 } };
+  if (mode !== 'bw') return buildColorParts();
   const maxDim = Number(els.modelRes.value);
   const { cols, rows, pitch, fBase, fBlack, fWhite, fRing } = buildFields(maxDim);
   const tol = Number(els.modelSmooth.value) * pitch; // slider is in cells
@@ -443,16 +446,48 @@ function buildParts() {
 }
 window.buildParts = buildParts;
 
+// Color-mode parts: one object per palette color at a uniform relief height,
+// on a shared base, plus the ring/frame. Consumed by .3mf and STL like the B/W
+// parts. (Brightness→height is added in a later task.)
+function buildColorParts() {
+  const maxDim = Number(els.modelRes.value);
+  const { cols, rows, pitch, colorFields, fBase, fRing } = buildColorFields(maxDim);
+  const tol = Number(els.modelSmooth.value) * pitch;
+  const baseT = Number(els.baseThick.value);
+  const bodyColor = hexToRgb(els.bodyColor.value);
+  const facets = (f, thick, z0) => orientOutward(fieldFacets(f, cols, rows, pitch, thick, tol, z0));
+  const parts = [];
+  const baseF = facets(fBase, baseT, 0);
+  if (baseF.length) parts.push({ name: 'grundplatte', color: bodyColor, facets: baseF });
+  const reliefH = Number(els.colorRelief.value);
+  colorFields.forEach((cf, k) => {
+    if (reliefH <= 0) return;
+    const ff = facets(cf.field, reliefH, baseT);
+    if (ff.length) parts.push({ name: 'farbe' + k, color: cf.color, facets: ff });
+  });
+  if (fRing) {
+    const randColor = els.circleEnable.checked ? hexToRgb(els.circleColor.value) : bodyColor;
+    const ringF = facets(fRing, Number(els.ringThick.value), baseT);
+    if (ringF.length) parts.push({ name: 'rand', color: randColor, facets: ringF });
+  }
+  const tris = parts.reduce((s, p) => s + p.facets.length, 0);
+  return { parts, stats: { tris } };
+}
+window.buildColorParts = buildColorParts;
+
 // Final physical dimensions in mm: width from the slider, height from the
 // model grid aspect, total thickness = base + tallest relief layer.
 function computeDimensions() {
   if (!processedData) return null;
-  const { cols, rows } = buildFields(Number(els.modelRes.value));
+  const { cols, rows } = mode === 'bw' ? buildFields(Number(els.modelRes.value)) : buildColorFields(Number(els.modelRes.value));
   const w = Number(els.modelWidth.value);
   const h = w * (rows / cols);
   // NOTE: t is re-derived here independently of buildParts(); keep in sync if per-part thickness becomes asymmetric.
+  const reliefMax = mode === 'bw'
+    ? Math.max(Number(els.thickBlack.value), Number(els.thickWhite.value))
+    : Number(els.colorRelief.value);
   const t = Number(els.baseThick.value) + Math.max(
-    Number(els.thickBlack.value), Number(els.thickWhite.value),
+    reliefMax,
     (els.circleEnable.checked || Number(els.frameWidth.value) > 0) ? Number(els.ringThick.value) : 0
   );
   return { w, h, t };
@@ -726,6 +761,7 @@ els.methPalette.addEventListener('click', () => setColorMethod('palette'));
 els.methPosterize.addEventListener('click', () => setColorMethod('posterize'));
 
 els.modelWidth.addEventListener('input', () => { els.modelWidthVal.textContent = els.modelWidth.value; updateDims(); });
+els.colorRelief.addEventListener('input', () => { els.colorReliefVal.textContent = Number(els.colorRelief.value).toFixed(1); updateDims(); });
 els.thickBlack.addEventListener('input', () => { els.thickBlackVal.textContent = Number(els.thickBlack.value).toFixed(1); updateDims(); });
 els.thickWhite.addEventListener('input', () => { els.thickWhiteVal.textContent = Number(els.thickWhite.value).toFixed(1); updateDims(); });
 els.ringThick.addEventListener('input', () => { els.ringThickVal.textContent = Number(els.ringThick.value).toFixed(1); updateDims(); });
