@@ -28,7 +28,10 @@
       return window.ort.InferenceSession.create('vendor/u2netp.onnx', { executionProviders: ['wasm'] });
     }).catch((e) => {
       sessionPromise = null; // allow a later retry
-      throw new Error('KI-Modell konnte nicht geladen werden (Modell/Laufzeit fehlt?).');
+      // Preserve an already-specific German error (e.g. ort.min.js load failure);
+      // wrap only unknown errors.
+      if (e && /konnte nicht/.test(e.message || '')) throw e;
+      throw new Error('KI-Modell konnte nicht geladen werden: ' + ((e && e.message) || e));
     });
     return sessionPromise;
   }
@@ -47,6 +50,7 @@
     if (mx === 0) mx = 1;
     const plane = SIZE * SIZE;
     const out = new Float32Array(3 * plane);
+    // j steps through source RGBA (stride 4); p steps through plane pixels (stride 1)
     for (let p = 0, j = 0; p < plane; p++, j += 4) {
       out[p]           = (d[j] / mx     - MEAN[0]) / STD[0];
       out[plane + p]   = (d[j+1] / mx   - MEAN[1]) / STD[1];
@@ -86,6 +90,7 @@
     const results = await sess.run(feeds);
     const out = results[sess.outputNames[0]];
     if (!out || !out.data) throw new Error('KI-Freistellung fehlgeschlagen.');
+    if (out.data.length !== SIZE * SIZE) throw new Error('KI-Freistellung: unerwartete Modellausgabe.');
     return applyMatte(out.data, imageData);
   }
   window.removeBackground = removeBackground;
