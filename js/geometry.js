@@ -484,37 +484,86 @@ function zipStore(files) {
   return buf;
 }
 
+// Analytic signed field (>0 inside the rounded-rect body AND outside the hole),
+// in cell units, for a cols×rows grid spanning widthMm×heightMm. Cell centers
+// map to mm via (c+0.5)/(cols/widthMm), (r+0.5)/(rows/heightMm); r=0 is the top.
+// The hole is horizontally centered, its center marginTopMm+radius from the top.
+function roundedRectHoleField(cols, rows, p) {
+  const sx = cols / p.widthMm, sy = rows / p.heightMm; // cells per mm
+  const s = (sx + sy) / 2;                              // ~uniform scale for radii
+  const hw = p.widthMm / 2, hh = p.heightMm / 2;
+  const rr = Math.min(p.cornerRadiusMm, hw, hh);
+  const holeR = p.hole.diameterMm / 2;
+  const holeCx = p.widthMm / 2, holeCy = p.hole.marginTopMm + holeR;
+  return (c, r) => {
+    const x = (c + 0.5) / sx, y = (r + 0.5) / sy;       // mm, origin top-left
+    // rounded-rect SDF (centered): >0 outside, <0 inside
+    const qx = Math.abs(x - hw) - (hw - rr), qy = Math.abs(y - hh) - (hh - rr);
+    const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - rr;
+    const bodyInside = -outside;                         // >0 inside body, mm
+    const holeOutside = Math.hypot(x - holeCx, y - holeCy) - holeR; // >0 outside hole, mm
+    return Math.min(bodyInside, holeOutside) * s;        // mm -> cells
+  };
+}
+window.roundedRectHoleField = roundedRectHoleField;
+
 // Build a 3MF package from parts [{name, color:[r,g,b], facets}] as a Blob.
-// Each part becomes its own <object> (separate mesh) colored via a colorgroup.
+// Each part becomes its own <object> (separate mesh). Colors use the 3MF CORE
+// <basematerials> element (NOT the material extension): the PrusaSlicer family
+// (PrusaSlicer/OrcaSlicer/Bambu Studio) reads it natively and maps each base to
+// a filament, and core-only files import where the m:colorgroup extension is
+// rejected ("no mesh").
 function build3MF(parts) {
   const enc = new TextEncoder();
-  let colors = '', objects = '', items = '';
+  let bases = '', objects = '', items = '';
+  const partHex6 = [];                 // #RRGGBB per part
+  const colorList = [], extruderOf = new Map(); // distinct color -> 1-based extruder
   parts.forEach((part, i) => {
     const m = facetsToIndexedMesh(part.facets);
-    const col = '#' + part.color.map(c => c.toString(16).padStart(2, '0')).join('').toUpperCase() + 'FF';
-    colors += `   <m:color color="${col}" />\n`;
+    const hex6 = '#' + part.color.map(c => c.toString(16).padStart(2, '0')).join('').toUpperCase();
+    partHex6.push(hex6);
+    if (!extruderOf.has(hex6)) { colorList.push(hex6); extruderOf.set(hex6, colorList.length); }
+    const col = hex6 + 'FF';
+    const safeName = String(part.name || ('part-' + i)).replace(/[<>&"]/g, '');
+    bases += `   <base name="${safeName}" displaycolor="${col}" />\n`;
     let vs = '';
     for (const v of m.vertices) vs += `     <vertex x="${+v[0].toFixed(4)}" y="${+v[1].toFixed(4)}" z="${+v[2].toFixed(4)}" />\n`;
     let ts = '';
     for (const t of m.triangles) ts += `     <triangle v1="${t[0]}" v2="${t[1]}" v3="${t[2]}" />\n`;
     const id = i + 2;
-    objects += `  <object id="${id}" name="${part.name}" type="model" pid="1" pindex="${i}">\n   <mesh>\n    <vertices>\n${vs}    </vertices>\n    <triangles>\n${ts}    </triangles>\n   </mesh>\n  </object>\n`;
+    // Object references the basematerials group (pid=1) at index i -> its color.
+    objects += `  <object id="${id}" name="${safeName}" type="model" pid="1" pindex="${i}">\n   <mesh>\n    <vertices>\n${vs}    </vertices>\n    <triangles>\n${ts}    </triangles>\n   </mesh>\n  </object>\n`;
     items += `  <item objectid="${id}" />\n`;
   });
   const model = `<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:m="http://schemas.microsoft.com/3dmanufacturing/material/2015/02">
+<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
  <resources>
-  <m:colorgroup id="1">
-${colors}  </m:colorgroup>
+  <basematerials id="1">
+${bases}  </basematerials>
 ${objects} </resources>
  <build>
 ${items} </build>
 </model>
 `;
+  // OrcaSlicer / Bambu Studio multicolor: they color/print by per-object filament
+  // (extruder), stored in their own config files — they do NOT apply a generic
+  // 3MF's basematerials colors. Group parts by color -> one filament each, assign
+  // each object its extruder, and write the filament colors so the design's
+  // colors come through on import.
+  let objCfg = '';
+  parts.forEach((part, i) => { objCfg += `  <object id="${i + 2}">\n   <metadata key="extruder" value="${extruderOf.get(partHex6[i])}"/>\n  </object>\n`; });
+  const modelSettings = `<?xml version="1.0" encoding="UTF-8"?>\n<config>\n${objCfg}</config>\n`;
+  const projectSettings = JSON.stringify({
+    filament_colour: colorList.slice(),
+    filament_type: colorList.map(() => "PLA"),
+    filament_settings_id: colorList.map(() => "Generic PLA"),
+  });
+
   const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" />
  <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml" />
+ <Default Extension="config" ContentType="application/xml" />
 </Types>
 `;
   const rels = `<?xml version="1.0" encoding="UTF-8"?>
@@ -526,6 +575,8 @@ ${items} </build>
     { name: '[Content_Types].xml', bytes: enc.encode(contentTypes) },
     { name: '_rels/.rels', bytes: enc.encode(rels) },
     { name: '3D/3dmodel.model', bytes: enc.encode(model) },
+    { name: 'Metadata/model_settings.config', bytes: enc.encode(modelSettings) },
+    { name: 'Metadata/project_settings.config', bytes: enc.encode(projectSettings) },
   ]);
   return new Blob([zip], { type: 'model/3mf' });
 }

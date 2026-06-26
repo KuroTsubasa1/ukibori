@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Ukibori tests</title></head>
+<body>
+<pre id="out">running…</pre>
+<script src="harness.js"></script>
+<!-- sources under test -->
+<script src="../js/image-ops.js"></script>
+<script src="../js/geometry.js"></script>
+<script src="../js/vendor/potrace.js"></script>
+<script src="../js/trace.js"></script>
+<script src="../js/bookmark-model.js"></script>
+<script src="../js/bookmark-export.js"></script>
+<!-- tests -->
+<script src="geometry-sdf.test.js"></script>
+<script src="bookmark-model.test.js"></script>
+<script src="bookmark-export.test.js"></script>
+<script>
+window.__ready().then(r => {
+  document.getElementById("out").textContent =
+    `pass: ${r.pass}  fail: ${r.fail}\n` + r.failures.map(f => "FAIL " + f).join("\n");
+});
+</script>
+</body></html>
