@@ -53,6 +53,14 @@ const els = {
   frameWidthVal: document.getElementById('frameWidthVal'),
   baseThick: document.getElementById('baseThick'),
   baseThickVal: document.getElementById('baseThickVal'),
+  mountKein: document.getElementById('mountKein'),
+  mountLoch: document.getElementById('mountLoch'),
+  mountOese: document.getElementById('mountOese'),
+  mountType: document.getElementById('mountType'),
+  mountDia: document.getElementById('mountDia'),
+  mountDiaVal: document.getElementById('mountDiaVal'),
+  mountBoss: document.getElementById('mountBoss'),
+  mountBossVal: document.getElementById('mountBossVal'),
   bodyColor: document.getElementById('bodyColor'),
   modelRes: document.getElementById('modelRes'),
   modelResVal: document.getElementById('modelResVal'),
@@ -106,7 +114,8 @@ function enableControls(on) {
   els.controls.classList.toggle('disabled', !on);
   [els.keepAlpha, els.bgRemove, els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels,
    els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
-   els.circleThickness, els.circleColor, els.modelWidth, els.thickBlack,
+   els.circleThickness, els.circleColor, els.mountDia, els.mountBoss,
+   els.modelWidth, els.thickBlack,
    els.thickWhite, els.ringThick, els.frameWidth, els.baseThick, els.bodyColor,
    els.modelRes, els.modelSmooth, els.openExport, els.colorRelief, els.colorMaxH, els.colorDarkTall, els.stampMode]
     .forEach(e => { e.disabled = !on; });
@@ -132,6 +141,10 @@ function updateControlVisibility() {
 }
 
 const circle = { cx: 0, cy: 0, r: 0 }; // selection in image coordinates
+const mount = { x: 0, y: 0 }; // mounting hole/loop center, in image coordinates
+function mountActive() { return els.mountType && els.mountType.value !== 'kein'; }
+window.mount = mount;
+window.mountActive = mountActive;
 
 // A source pixel counts as transparent below this alpha (fixed, binary edge).
 const ALPHA_CUTOFF = 128;
@@ -338,7 +351,21 @@ function buildFields(maxDim) {
   let fRing = null;
   if (ringCells > 0) fRing = (c, r) => Math.min(dist(c, r) - innerR, cr - dist(c, r), fAlpha(c, r));
   else if (frameCells > 0) fRing = (c, r) => Math.min(frameCells - edge(c, r), fAlpha(c, r));
-  const result = { cols, rows, pitch: Number(els.modelWidth.value) / cols, fBase, fBlack, fWhite, fRing };
+  let fBlack2 = fBlack, fWhite2 = fWhite, fBase2 = fBase, fRing2 = fRing, fBoss = null;
+  if (mountActive()) {
+    const holeCol = (mount.x - sx) / sw * cols, holeRow = (mount.y - sy) / sh * rows;
+    const pitchMm = Number(els.modelWidth.value) / cols;
+    const holeRc = (Number(els.mountDia.value) / 2) / pitchMm;
+    const distH = (c, r) => Math.hypot(c + 0.5 - holeCol, r + 0.5 - holeRow);
+    const dOut = (c, r) => distH(c, r) - holeRc; // >0 outside the hole
+    const carve = (f) => f ? (c, r) => Math.min(f(c, r), dOut(c, r)) : null;
+    fBase2 = carve(fBase); fBlack2 = carve(fBlack); fWhite2 = carve(fWhite); fRing2 = carve(fRing);
+    if (els.mountType.value === 'oese') {
+      const bossRc = holeRc + Number(els.mountBoss.value) / pitchMm;
+      fBoss = (c, r) => Math.min(dOut(c, r), bossRc - distH(c, r), fAlpha(c, r));
+    }
+  }
+  const result = { cols, rows, pitch: Number(els.modelWidth.value) / cols, fBase: fBase2, fBlack: fBlack2, fWhite: fWhite2, fRing: fRing2, fBoss };
   if (stampActive()) { const tmp = result.fBlack; result.fBlack = result.fWhite; result.fWhite = tmp; }
   return result;
 }
@@ -428,7 +455,22 @@ function buildColorFields(maxDim) {
     color: c,
     field: (cc, rr) => Math.min(coverage[k][ix(cc, rr)] - 128, fAlpha(cc, rr), fInner(cc, rr)),
   }));
-  return { cols, rows, pitch: Number(els.modelWidth.value) / cols, colorFields, fBase, fRing };
+  let fBase2 = fBase, fRing2 = fRing, colorFields2 = colorFields, fBoss = null;
+  if (mountActive()) {
+    const holeCol = (mount.x - sx) / sw * cols, holeRow = (mount.y - sy) / sh * rows;
+    const pitchMm = Number(els.modelWidth.value) / cols;
+    const holeRc = (Number(els.mountDia.value) / 2) / pitchMm;
+    const distH = (c, r) => Math.hypot(c + 0.5 - holeCol, r + 0.5 - holeRow);
+    const dOut = (c, r) => distH(c, r) - holeRc;
+    const carve = (f) => f ? (c, r) => Math.min(f(c, r), dOut(c, r)) : null;
+    fBase2 = carve(fBase); fRing2 = carve(fRing);
+    colorFields2 = colorFields.map(cf => ({ color: cf.color, field: carve(cf.field) }));
+    if (els.mountType.value === 'oese') {
+      const bossRc = holeRc + Number(els.mountBoss.value) / pitchMm;
+      fBoss = (c, r) => Math.min(dOut(c, r), bossRc - distH(c, r), fAlpha(c, r));
+    }
+  }
+  return { cols, rows, pitch: Number(els.modelWidth.value) / cols, colorFields: colorFields2, fBase: fBase2, fRing: fRing2, fBoss };
 }
 window.buildColorFields = buildColorFields;
 
@@ -439,7 +481,7 @@ function buildParts() {
   if (!processedData) return { parts: [], stats: { tris: 0 } };
   if (mode !== 'bw') return buildColorParts();
   const maxDim = Number(els.modelRes.value);
-  const { cols, rows, pitch, fBase, fBlack, fWhite, fRing } = buildFields(maxDim);
+  const { cols, rows, pitch, fBase, fBlack, fWhite, fRing, fBoss } = buildFields(maxDim);
   const baseT = Number(els.baseThick.value);
   const bodyColor = hexToRgb(els.bodyColor.value);
   // Trace each region with potrace (smooth vector edges), matching the bookmark
@@ -459,6 +501,11 @@ function buildParts() {
     const ringF = facets(fRing, Number(els.ringThick.value), baseT);
     if (ringF.length) parts.push({ name: 'rand', color: randColor, facets: ringF });
   }
+  if (fBoss) {
+    const bossH = Math.max(Number(els.thickBlack.value), Number(els.thickWhite.value)) || baseT;
+    const bossF = facets(fBoss, bossH, baseT);
+    if (bossF.length) parts.push({ name: 'oese', color: bodyColor, facets: bossF });
+  }
   const tris = parts.reduce((s, p) => s + p.facets.length, 0);
   return { parts, stats: { tris } };
 }
@@ -469,7 +516,7 @@ window.buildParts = buildParts;
 // parts. (Brightness→height is added in a later task.)
 function buildColorParts() {
   const maxDim = Number(els.modelRes.value);
-  const { cols, rows, pitch, colorFields, fBase, fRing } = buildColorFields(maxDim);
+  const { cols, rows, pitch, colorFields, fBase, fRing, fBoss } = buildColorFields(maxDim);
   const tol = Number(els.modelSmooth.value) * pitch;
   const baseT = Number(els.baseThick.value);
   const bodyColor = hexToRgb(els.bodyColor.value);
@@ -495,6 +542,11 @@ function buildColorParts() {
     const randColor = els.circleEnable.checked ? hexToRgb(els.circleColor.value) : bodyColor;
     const ringF = facets(fRing, Number(els.ringThick.value), baseT);
     if (ringF.length) parts.push({ name: 'rand', color: randColor, facets: ringF });
+  }
+  if (fBoss) {
+    const bossH = (colorHeightMode() === 'brightness' ? Number(els.colorMaxH.value) : Number(els.colorRelief.value)) || baseT;
+    const bossF = facets(fBoss, bossH, baseT);
+    if (bossF.length) parts.push({ name: 'oese', color: bodyColor, facets: bossF });
   }
   const tris = parts.reduce((s, p) => s + p.facets.length, 0);
   return { parts, stats: { tris } };
@@ -559,6 +611,8 @@ function adoptImageData(imageData, label) {
   els.circleSize.max = Math.round(Math.hypot(w, h) / 2);
   els.circleSize.value = Math.round(circle.r);
   els.circleSizeVal.textContent = Math.round(circle.r);
+  mount.x = originalData.width / 2;
+  mount.y = originalData.height * 0.15;
   updateCircleCursor();
   setStatus(label, false);
   restoreLastState();
@@ -796,6 +850,23 @@ els.colorHeightUniform.addEventListener('click', () => setColorHeight('uniform')
 els.colorHeightBrightness.addEventListener('click', () => setColorHeight('brightness'));
 els.colorMaxH.addEventListener('input', () => { els.colorMaxHVal.textContent = Number(els.colorMaxH.value).toFixed(1); updateDims(); });
 els.colorDarkTall.addEventListener('change', () => updateDims());
+
+function setMountType(t) {
+  els.mountType.value = t;
+  els.mountKein.classList.toggle('seg-active', t === 'kein');
+  els.mountLoch.classList.toggle('seg-active', t === 'loch');
+  els.mountOese.classList.toggle('seg-active', t === 'oese');
+  document.querySelectorAll('.mount-on').forEach(e => { e.hidden = t === 'kein'; });
+  document.querySelectorAll('.mount-oese').forEach(e => { e.hidden = t !== 'oese'; });
+  updateCircleCursor();
+  paint();
+}
+window.setMountType = setMountType;
+els.mountKein.addEventListener('click', () => setMountType('kein'));
+els.mountLoch.addEventListener('click', () => setMountType('loch'));
+els.mountOese.addEventListener('click', () => setMountType('oese'));
+els.mountDia.addEventListener('input', () => { els.mountDiaVal.textContent = Number(els.mountDia.value).toFixed(1); paint(); });
+els.mountBoss.addEventListener('input', () => { els.mountBossVal.textContent = Number(els.mountBoss.value).toFixed(1); paint(); });
 
 els.stampMode.addEventListener('change', render);
 els.modeBw.addEventListener('click', () => setMode('bw'));

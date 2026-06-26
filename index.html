@@ -189,6 +189,32 @@
         </details>
 
         <details class="acc">
+          <summary>Befestigung</summary>
+          <div class="acc-body">
+            <div class="fields">
+              <div class="field">
+                <div class="field-head"><label>Typ</label></div>
+                <div class="seg-group seg-sm" role="tablist" aria-label="Befestigung">
+                  <button type="button" id="mountKein" class="seg seg-active">Kein</button>
+                  <button type="button" id="mountLoch" class="seg">Loch</button>
+                  <button type="button" id="mountOese" class="seg">Öse</button>
+                </div>
+                <input id="mountType" type="hidden" value="kein">
+                <span class="hint">Im Bild ziehen, um die Position zu setzen</span>
+              </div>
+              <div class="field mount-on" hidden>
+                <div class="field-head"><label for="mountDia">Lochdurchmesser (mm)</label><span id="mountDiaVal" class="badge">5.0</span></div>
+                <input id="mountDia" type="range" min="1" max="30" value="5" step="0.5" disabled>
+              </div>
+              <div class="field mount-oese" hidden>
+                <div class="field-head"><label for="mountBoss">Ringbreite (mm)</label><span id="mountBossVal" class="badge">3.0</span></div>
+                <input id="mountBoss" type="range" min="0.5" max="15" value="3" step="0.5" disabled>
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <details class="acc">
           <summary>3D-Modell</summary>
           <div class="acc-body">
             <div class="fields threed-row">
