@@ -1076,8 +1076,5 @@ function maybeRebuild3d() {
 }
 document.addEventListener('input', maybeRebuild3d);
 
-// Hide 3D when switching to bookmark mode.
-if (els.appModeBookmark) els.appModeBookmark.addEventListener('click', () => { if (window.preview3d) preview3d.hide(); });
-
 updateControlVisibility();
 setColorHeight('uniform');
