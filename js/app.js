@@ -762,6 +762,7 @@ els.output.addEventListener('wheel', e => {
 function setMode(m) {
   mode = m;
   updateControlVisibility();
+  if (typeof setColorHeight === 'function') setColorHeight(colorHeight);
   render();
 }
 window.setMode = setMode;
@@ -783,7 +784,7 @@ window.setColorHeight = setColorHeight;
 els.colorHeightUniform.addEventListener('click', () => setColorHeight('uniform'));
 els.colorHeightBrightness.addEventListener('click', () => setColorHeight('brightness'));
 els.colorMaxH.addEventListener('input', () => { els.colorMaxHVal.textContent = Number(els.colorMaxH.value).toFixed(1); updateDims(); });
-els.colorDarkTall.addEventListener('change', () => {});
+els.colorDarkTall.addEventListener('change', () => updateDims());
 
 els.stampMode.addEventListener('change', render);
 els.modeBw.addEventListener('click', () => setMode('bw'));
