@@ -48,7 +48,8 @@
     scene.add(dir);
     const box = new THREE.Box3().setFromObject(scene);
     const c = new THREE.Vector3(), s = new THREE.Vector3();
-    box.getCenter(c); box.getSize(s);
+    if (box.isEmpty()) { c.set(0, 0, 0); s.set(0, 0, 0); }
+    else { box.getCenter(c); box.getSize(s); }
     return { scene, meshCount, center: [c.x, c.y, c.z], size: [s.x, s.y, s.z] };
   };
 
