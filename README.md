@@ -6,13 +6,13 @@
 
 **Verwandle jedes Bild in ein erhabenes 3D-Relief — direkt im Browser.**
 
-Schwarz-Weiß & flache Farben · druckfertiger `.3mf`-Export · 100 % lokal.
+Bild · Text · QR → Relief · Schwarz-Weiß & Farbe · KI-Freistellung · 3D-Vorschau · 100 % lokal.
 
 ![lokal](https://img.shields.io/badge/100%25-lokal%20im%20Browser-4f46e5)
 ![Build](https://img.shields.io/badge/Build-keiner-16161a)
-![Dependencies](https://img.shields.io/badge/Dependencies-0-2f8f6b)
+![offline](https://img.shields.io/badge/100%25-offline-2f8f6b)
 ![Vanilla JS](https://img.shields.io/badge/Vanilla-JS-f7df1e?logo=javascript&logoColor=000)
-![Export](https://img.shields.io/badge/Export-PNG%20%26%20.3mf-6b4fb0)
+![Export](https://img.shields.io/badge/Export-PNG%20·%20.3mf%20·%20.stl%20·%20.svg-6b4fb0)
 
 <img src="assets/hero.png" width="820" alt="Ukibori Oberfläche">
 
@@ -33,10 +33,12 @@ Schwarz-Weiß & flache Farben · druckfertiger `.3mf`-Export · 100 % lokal.
   saubere runde Ränder — auch bei niedriger Auflösung (siehe [Technik](#-wie-es-funktioniert)).
 - 🔒 **Deine Bilder bleiben deine.** Alles rechnet im Browser. Kein Upload,
   kein Server, kein Tracking — funktioniert sogar offline.
-- ⚡ **Null Installation.** Eine `index.html`. Kein Build, keine Abhängigkeiten,
-  keine Toolchain.
+- ⚡ **Kein Build, kein CDN.** Läuft aus statischen Dateien ohne Toolchain. Die
+  genutzten Bibliotheken (three.js, ONNX-Laufzeit + Freistell-Modell, QR-Encoder,
+  potrace) sind **lokal mitgeliefert** — zur Laufzeit wird nichts nachgeladen, alles
+  funktioniert offline.
 
-**Wofür?** Untersetzer · Tür- & Regalschilder · Logo-Plaketten · Kühlschrank­magnete · Stempel-Vorlagen · Deko-Reliefs.
+**Wofür?** Untersetzer · Tür- & Regalschilder · Logo-Plaketten · Kühlschrank­magnete · Schlüsselanhänger · Namens- & WLAN-QR-Schilder · Stempel-Vorlagen · Deko-Reliefs.
 
 ---
 
@@ -47,16 +49,29 @@ Schwarz-Weiß & flache Farben · druckfertiger `.3mf`-Export · 100 % lokal.
 | ![S/W](assets/hero.png) | ![Farben](assets/color.png) | ![Kreis](assets/circle.png) |
 | Schwellwert · Auto (Otsu) · Invertieren · Inseln entfernen | Palette (Median-Cut) oder Posterize · Kanten glätten | Verschieb- & zoombarer Kreis · Rahmen in Wunschfarbe |
 
+- **Drei Eingabequellen** — **Bild** laden, **Text** tippen oder einen **QR-Code**
+  erzeugen; alle drei fließen in dieselbe Relief-Pipeline.
 - **Zwei Konvertierungsmodi** — kontrastreiches Schwarz-Weiß oder flache,
   poster­artige Farbflächen.
+- **KI-Freistellung** — lokales Modell (u2netp via onnxruntime-web) entfernt den
+  Hintergrund direkt im Browser; das Bild verlässt das Gerät nicht.
 - **Kreis-Zuschnitt** mit erhabenem Rand — der klassische runde Untersetzer.
+- **Befestigung** — **Loch** zum Aufhängen/Verschrauben oder **Öse** (verstärkter
+  Ring), per ziehbarem Marker frei platziert.
+- **Stempel-Modus** — gespiegelt & erhaben, damit der Abdruck seitenrichtig wird.
 - **Transparenz erhalten** — freigestellte Motive bleiben transparent (Vorschau,
   PNG **und** 3D: transparente Bereiche werden ausgespart).
-- **3D-Relief-Export (`.3mf`)** — einstellbare Dicken für Schwarz/Weiß,
-  **Grundplatte**, **Rand/Rahmen** (rund oder rechteckig), Auflösung und
-  Glättung; mit und ohne Kreis-Zuschnitt.
-- **PNG-Export** der umgewandelten Grafik.
-- **Live-Vorschau** mit Karomuster für Transparenz, responsives Layout.
+- **3D-Export** — **`.3mf`** (jede Farbe als eigenes Objekt für Mehrfarb-/AMS-Druck),
+  universelles **`.stl`** und vektorisiertes **`.svg`** (potrace) — über den
+  Export-Dialog mit eigenem Dateinamen.
+- **Farb-3D** — wahlweise gleichmäßige Höhe oder **Helligkeit → Höhe** (gestuftes
+  Mehrfarb-Relief).
+- **Live-3D-Vorschau** — dreh- & zoombare three.js-Ansicht des exakten Druck­modells
+  (2D⇄3D-Umschalter).
+- **Vorlagen** — Einstellungen werden gespeichert; mitgelieferte Presets
+  (Untersetzer / Schild / Magnet).
+- **Lesezeichen-Modus** — separater Editor zum Komponieren mehrteiliger Designs.
+- **PNG-Export** der umgewandelten Grafik · Live-Vorschau mit Transparenz-Karomuster.
 
 ---
 
@@ -124,21 +139,30 @@ flowchart TD
 | Datei | Rolle |
 | --- | --- |
 | `index.html` | Markup, Einbindung von CSS/JS, Favicon |
-| `styles.css` | Layout, Sidebar, Akkordeon-Optionen |
+| `styles.css` | Layout, Sidebar, Akkordeon-Optionen, Export-Dialog |
 | `js/image-ops.js` | Schwellwert, Otsu, Inseln, Posterize, Median-Cut, Kreismaske |
-| `js/geometry.js` | Sub-Pixel-Konturen, Triangulation (earcut), ZIP/3MF-Erzeugung |
+| `js/geometry.js` | Sub-Pixel-Konturen, Triangulation (earcut), 3MF/STL-Erzeugung |
+| `js/sources.js` | Text- & QR-Eingabe → ImageData |
+| `js/bg-removal.js` | KI-Freistellung (u2netp via onnxruntime-web) |
+| `js/preview3d.js` | Live-3D-Vorschau (three.js, Szene aus `buildParts()`) |
+| `js/presets.js` | Vorlagen & gespeicherte Einstellungen (localStorage) |
+| `js/trace.js`, `js/bookmark-*.js` | Lesezeichen-Modus (Editor, Modell, Export, potrace-Tracing) |
 | `js/app.js` | DOM, Zustand, Render-Pipeline, Events, Export |
+| `vendor/` | lokal mitgelieferte Bibliotheken: three.js, onnxruntime-web + `u2netp.onnx`, qrcode, potrace |
 | `favicon.svg` | Marken-Favicon (Kanji 浮, geprägt) |
-| `docs/superpowers/specs/` | Design-Dokumente je Feature |
+| `docs/superpowers/specs/` · `docs/superpowers/plans/` | Design- & Umsetzungs-Dokumente je Feature |
 
-Reines HTML/CSS/JavaScript — keine Frameworks, keine externen Bibliotheken.
+Reines HTML/CSS/JavaScript, **kein Build-Schritt und kein CDN**. Einige Funktionen
+(3D-Vorschau, KI-Freistellung, QR, SVG-Tracing) nutzen Bibliotheken, die **lokal unter
+`vendor/` mitgeliefert** werden — zur Laufzeit wird nichts nachgeladen.
 
 ---
 
 ## 🔒 Datenschutz
 
 Die gesamte Verarbeitung passiert lokal im Browser. Bilder werden **nicht**
-hochgeladen, gespeichert oder an Dritte gesendet. Die App funktioniert auch
+hochgeladen, gespeichert oder an Dritte gesendet — auch die **KI-Freistellung**
+läuft mit einem lokal mitgelieferten Modell direkt im Browser. Die App funktioniert
 vollständig offline.
 
 ---
