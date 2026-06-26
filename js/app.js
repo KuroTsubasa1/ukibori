@@ -241,6 +241,16 @@ function paint() {
       ctx.stroke();
     }
   }
+  if (mountActive()) {
+    const mx = mount.x - f.x0, my = mount.y - f.y0;
+    const pitchMm = Number(els.modelWidth.value) / Math.max(1, processedData.width); // approx px→mm for preview ring
+    const rPx = (Number(els.mountDia.value) / 2) / pitchMm;
+    ctx.save();
+    ctx.strokeStyle = '#e0245e'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(mx, my, Math.max(3, rPx), 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(mx - 6, my); ctx.lineTo(mx + 6, my); ctx.moveTo(mx, my - 6); ctx.lineTo(mx, my + 6); ctx.stroke();
+    ctx.restore();
+  }
   els.preview.classList.add('ready');
   updateDims();
 }
@@ -288,7 +298,7 @@ function exportData() {
 }
 
 function updateCircleCursor() {
-  els.output.style.cursor = els.circleEnable.checked ? 'grab' : 'default';
+  els.output.style.cursor = mountActive() ? 'crosshair' : (els.circleEnable.checked ? 'grab' : 'default');
 }
 
 function stampActive() { return els.stampMode && els.stampMode.checked; }
@@ -787,8 +797,29 @@ els.circleColor.addEventListener('input', paint);
 
 // Drag on the preview to move the circle; wheel to zoom its radius.
 let dragging = false, lastX = 0, lastY = 0;
+let dragTarget = null; // 'circle' | 'mount'
+
+function pointerToImage(e) {
+  const rect = els.output.getBoundingClientRect();
+  const scale = rect.width > 0 ? els.output.width / rect.width : 1; // frame px per client px (== image units)
+  const f = circleFrame();
+  return { x: (e.clientX - rect.left) * scale + f.x0, y: (e.clientY - rect.top) * scale + f.y0 };
+}
+
 els.output.addEventListener('pointerdown', e => {
-  if (!els.circleEnable.checked || !processedData) return;
+  if (!processedData) return;
+  if (mountActive()) {
+    dragTarget = 'mount';
+    const p = pointerToImage(e);
+    mount.x = Math.max(0, Math.min(processedData.width, p.x));
+    mount.y = Math.max(0, Math.min(processedData.height, p.y));
+    els.output.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    paint();
+    return;
+  }
+  if (!els.circleEnable.checked) return;
+  dragTarget = 'circle';
   dragging = true;
   lastX = e.clientX; lastY = e.clientY;
   els.output.setPointerCapture(e.pointerId);
@@ -796,19 +827,25 @@ els.output.addEventListener('pointerdown', e => {
   e.preventDefault();
 });
 els.output.addEventListener('pointermove', e => {
+  if (dragTarget === 'mount') {
+    const p = pointerToImage(e);
+    mount.x = Math.max(0, Math.min(processedData.width, p.x));
+    mount.y = Math.max(0, Math.min(processedData.height, p.y));
+    paint();
+    return;
+  }
   if (!dragging) return;
   const rect = els.output.getBoundingClientRect();
-  const scale = els.output.width / rect.width; // frame px per client px (1:1 with image units)
-  // Clamp the center to the image so the circle always overlaps it; the frame
-  // extends to fit whatever part of the circle pokes past the edges.
+  const scale = els.output.width / rect.width;
   circle.cx = Math.max(0, Math.min(processedData.width, circle.cx + (e.clientX - lastX) * scale));
   circle.cy = Math.max(0, Math.min(processedData.height, circle.cy + (e.clientY - lastY) * scale));
   lastX = e.clientX; lastY = e.clientY;
   paint();
 });
 function endDrag() {
-  if (!dragging) return;
+  if (!dragging && dragTarget !== 'mount') return;
   dragging = false;
+  dragTarget = null;
   updateCircleCursor();
 }
 els.output.addEventListener('pointerup', endDrag);

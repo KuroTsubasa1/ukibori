@@ -29,6 +29,8 @@ function selected() { return doc.elements.find(e => e.id === state.selectedId) |
 
 // ---- Mode switch ----
 function setAppMode(bookmark) {
+  if (bookmark === 'relief') bookmark = false;
+  else if (bookmark === 'bookmark') bookmark = true;
   document.body.classList.toggle('bookmark-mode', bookmark);
   bm.ws.hidden = !bookmark;
   bm.preview.classList.toggle('ready', bookmark);
