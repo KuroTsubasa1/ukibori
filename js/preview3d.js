@@ -65,5 +65,73 @@
     camera.lookAt(center.x, center.y, center.z);
   };
 
+  let renderer = null, camera = null, current = null, raf = 0, active = false;
+  let getPartsFn = null, canvasEl = null;
+  const orbit = { theta: 0.9, phi: 1.0, radius: 100, center: null }; // center set in fitCamera (after THREE loads)
+
+  function renderOnce() {
+    if (renderer && current) renderer.render(current.scene, camera);
+  }
+  function loop() { if (!active) return; renderOnce(); raf = requestAnimationFrame(loop); }
+
+  function fitCamera(built) {
+    const c = new THREE.Vector3(built.center[0], built.center[1], built.center[2]);
+    const maxDim = Math.max(built.size[0], built.size[1], built.size[2]) || 50;
+    orbit.center = c; orbit.radius = maxDim * 2.2;
+    api.orbitCamera(camera, c, orbit.radius, orbit.theta, orbit.phi);
+  }
+
+  api.rebuild = function () {
+    if (!active || !getPartsFn) return;
+    const parts = (getPartsFn() || {}).parts || [];
+    current = api.buildPreviewScene(parts);
+    if (!orbit.center) fitCamera(current); else api.orbitCamera(camera, orbit.center, orbit.radius, orbit.theta, orbit.phi);
+    renderOnce();
+  };
+
+  function resize() {
+    if (!renderer || !canvasEl) return;
+    const w = canvasEl.clientWidth || 480, h = canvasEl.clientHeight || 360;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+
+  api.show = async function (canvas, getParts) {
+    await api.loadThree();
+    canvasEl = canvas; getPartsFn = getParts; active = true;
+    if (!renderer) {
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000);
+      attachOrbit(canvas);
+    }
+    canvas.hidden = false;
+    resize();
+    const parts = (getParts() || {}).parts || [];
+    current = api.buildPreviewScene(parts);
+    fitCamera(current);
+    loop();
+  };
+  api.hide = function () { active = false; if (raf) cancelAnimationFrame(raf); raf = 0; if (canvasEl) canvasEl.hidden = true; };
+  api.isActive = function () { return active; };
+
+  function attachOrbit(canvas) {
+    let dragging = false, lx = 0, ly = 0;
+    canvas.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId); });
+    canvas.addEventListener('pointermove', e => {
+      if (!dragging || !orbit.center) return;
+      orbit.theta -= (e.clientX - lx) * 0.01; orbit.phi -= (e.clientY - ly) * 0.01;
+      orbit.phi = Math.max(0.05, Math.min(Math.PI - 0.05, orbit.phi));
+      lx = e.clientX; ly = e.clientY;
+      api.orbitCamera(camera, orbit.center, orbit.radius, orbit.theta, orbit.phi); renderOnce();
+    });
+    const end = () => { dragging = false; };
+    canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
+    canvas.addEventListener('wheel', e => {
+      e.preventDefault(); if (!orbit.center) return;
+      orbit.radius = Math.max(1, orbit.radius * (e.deltaY < 0 ? 0.92 : 1.08));
+      api.orbitCamera(camera, orbit.center, orbit.radius, orbit.theta, orbit.phi); renderOnce();
+    }, { passive: false });
+  }
+
   window.preview3d = api;
 })();

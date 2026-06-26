@@ -88,6 +88,9 @@ const els = {
   preview: document.getElementById('preview'),
   controls: document.getElementById('controls'),
   status: document.getElementById('status'),
+  view2dBtn: document.getElementById('view2dBtn'),
+  view3dBtn: document.getElementById('view3dBtn'),
+  preview3dCanvas: document.getElementById('preview3dCanvas'),
 };
 
 let loadedName = 'ukibori';   // base filename for exports (from the loaded image)
@@ -1047,6 +1050,34 @@ function initPresets() {
   document.addEventListener('change', () => { clearTimeout(t); t = setTimeout(saveLastState, 300); });
 }
 window.initPresets = initPresets;
+
+// --- 2D/3D preview toggle ---------------------------------------------------
+function showView3d() {
+  els.view2dBtn.classList.remove('seg-active'); els.view3dBtn.classList.add('seg-active');
+  els.output.hidden = true;
+  preview3d.show(els.preview3dCanvas, () => (processedData ? buildParts() : { parts: [] }))
+    .catch(e => { setStatus(e.message || '3D-Vorschau nicht verfügbar.', true); showView2d(); });
+}
+function showView2d() {
+  els.view3dBtn.classList.remove('seg-active'); els.view2dBtn.classList.add('seg-active');
+  if (window.preview3d) preview3d.hide();
+  els.output.hidden = false;
+  paint();
+}
+window.showView3d = showView3d; window.showView2d = showView2d;
+els.view3dBtn.addEventListener('click', showView3d);
+els.view2dBtn.addEventListener('click', showView2d);
+
+// Rebuild the 3D scene (debounced) when a geometry-affecting control changes while 3D is shown.
+let rebuild3dT = null;
+function maybeRebuild3d() {
+  if (!window.preview3d || !preview3d.isActive()) return;
+  clearTimeout(rebuild3dT); rebuild3dT = setTimeout(() => preview3d.rebuild(), 150);
+}
+document.addEventListener('input', maybeRebuild3d);
+
+// Hide 3D when switching to bookmark mode.
+if (els.appModeBookmark) els.appModeBookmark.addEventListener('click', () => { if (window.preview3d) preview3d.hide(); });
 
 updateControlVisibility();
 setColorHeight('uniform');

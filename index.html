@@ -288,7 +288,12 @@
     </aside>
 
     <section id="preview" class="preview">
+      <div class="view-toggle seg-group seg-sm" role="tablist" aria-label="Ansicht">
+        <button type="button" id="view2dBtn" class="seg seg-active">2D</button>
+        <button type="button" id="view3dBtn" class="seg">3D</button>
+      </div>
       <canvas id="output"></canvas>
+      <canvas id="preview3dCanvas" hidden></canvas>
     </section>
   </div>
 
