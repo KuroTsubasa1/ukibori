@@ -828,6 +828,7 @@ els.output.addEventListener('pointerdown', e => {
 });
 els.output.addEventListener('pointermove', e => {
   if (dragTarget === 'mount') {
+    if (!processedData) { return; }
     const p = pointerToImage(e);
     mount.x = Math.max(0, Math.min(processedData.width, p.x));
     mount.y = Math.max(0, Math.min(processedData.height, p.y));
