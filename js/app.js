@@ -16,6 +16,7 @@ const els = {
   qrApply: document.getElementById('qrApply'),
   file: document.getElementById('file'),
   keepAlpha: document.getElementById('keepAlpha'),
+  bgRemove: document.getElementById('bgRemove'),
   thresh: document.getElementById('thresh'),
   threshVal: document.getElementById('threshVal'),
   island: document.getElementById('island'),
@@ -84,7 +85,7 @@ function setStatus(msg, isError) {
 
 function enableControls(on) {
   els.controls.classList.toggle('disabled', !on);
-  [els.keepAlpha, els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels,
+  [els.keepAlpha, els.bgRemove, els.thresh, els.island, els.otsu, els.invert, els.numColors, els.levels,
    els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
    els.circleThickness, els.circleColor, els.modelWidth, els.thickBlack,
    els.thickWhite, els.ringThick, els.frameWidth, els.baseThick, els.bodyColor,
@@ -532,6 +533,24 @@ els.otsu.addEventListener('click', () => {
   if (!originalData) return;
   setThreshold(computeOtsuThreshold(originalData));
   render();
+});
+
+els.bgRemove.addEventListener('click', async () => {
+  if (!originalData) return;
+  els.bgRemove.disabled = true;
+  setStatus('KI-Freistellung läuft… (Modell wird ggf. geladen)', false);
+  try {
+    const cut = await removeBackground(originalData);
+    originalData = cut;
+    els.keepAlpha.checked = true;
+    document.body.classList.add('alpha');
+    setStatus(`Hintergrund entfernt: ${cut.width}×${cut.height}px`, false);
+    render();
+  } catch (e) {
+    setStatus(e.message || 'KI-Freistellung nicht verfügbar.', true);
+  } finally {
+    els.bgRemove.disabled = false;
+  }
 });
 
 els.numColors.addEventListener('input', () => {
