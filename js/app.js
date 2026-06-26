@@ -62,6 +62,11 @@ const els = {
   stlExport: document.getElementById('stlExport'),
   colorRelief: document.getElementById('colorRelief'),
   colorReliefVal: document.getElementById('colorReliefVal'),
+  colorHeightUniform: document.getElementById('colorHeightUniform'),
+  colorHeightBrightness: document.getElementById('colorHeightBrightness'),
+  colorMaxH: document.getElementById('colorMaxH'),
+  colorMaxHVal: document.getElementById('colorMaxHVal'),
+  colorDarkTall: document.getElementById('colorDarkTall'),
   stampMode: document.getElementById('stampMode'),
   dims: document.getElementById('dims'),
   download: document.getElementById('download'),
@@ -73,6 +78,9 @@ const els = {
 
 let mode = 'bw';            // 'bw' | 'color'
 let colorMethod = 'palette'; // 'palette' | 'posterize'
+let colorHeight = 'uniform'; // 'uniform' | 'brightness'
+function colorHeightMode() { return colorHeight; }
+window.colorHeightMode = colorHeightMode;
 
 const offscreen = document.createElement('canvas');
 const offCtx = offscreen.getContext('2d', { willReadFrequently: true });
@@ -91,7 +99,7 @@ function enableControls(on) {
    els.colorIsland, els.smooth, els.circleEnable, els.circleSize,
    els.circleThickness, els.circleColor, els.modelWidth, els.thickBlack,
    els.thickWhite, els.ringThick, els.frameWidth, els.baseThick, els.bodyColor,
-   els.modelRes, els.modelSmooth, els.modelExport, els.stlExport, els.colorRelief, els.stampMode, els.download]
+   els.modelRes, els.modelSmooth, els.modelExport, els.stlExport, els.colorRelief, els.colorMaxH, els.colorDarkTall, els.stampMode, els.download]
     .forEach(e => { e.disabled = !on; });
 }
 
@@ -459,10 +467,18 @@ function buildColorParts() {
   const parts = [];
   const baseF = facets(fBase, baseT, 0);
   if (baseF.length) parts.push({ name: 'grundplatte', color: bodyColor, facets: baseF });
+  const brightness = colorHeightMode() === 'brightness';
   const reliefH = Number(els.colorRelief.value);
+  const maxH = Number(els.colorMaxH.value);
+  const darkTall = els.colorDarkTall.checked;
   colorFields.forEach((cf, k) => {
-    if (reliefH <= 0) return;
-    const ff = facets(cf.field, reliefH, baseT);
+    let thick = reliefH;
+    if (brightness) {
+      const lum = 0.299 * cf.color[0] + 0.587 * cf.color[1] + 0.114 * cf.color[2];
+      thick = maxH * (darkTall ? (1 - lum / 255) : (lum / 255));
+    }
+    if (thick <= 0) return;
+    const ff = facets(cf.field, thick, baseT);
     if (ff.length) parts.push({ name: 'farbe' + k, color: cf.color, facets: ff });
   });
   if (fRing) {
@@ -485,7 +501,7 @@ function computeDimensions() {
   // NOTE: t is re-derived here independently of buildParts(); keep in sync if per-part thickness becomes asymmetric.
   const reliefMax = mode === 'bw'
     ? Math.max(Number(els.thickBlack.value), Number(els.thickWhite.value))
-    : Number(els.colorRelief.value);
+    : (colorHeightMode() === 'brightness' ? Number(els.colorMaxH.value) : Number(els.colorRelief.value));
   const t = Number(els.baseThick.value) + Math.max(
     reliefMax,
     (els.circleEnable.checked || Number(els.frameWidth.value) > 0) ? Number(els.ringThick.value) : 0
@@ -754,6 +770,21 @@ function setColorMethod(m) {
   updateControlVisibility();
   render();
 }
+function setColorHeight(m) {
+  colorHeight = m;
+  els.colorHeightUniform.classList.toggle('seg-active', m === 'uniform');
+  els.colorHeightBrightness.classList.toggle('seg-active', m === 'brightness');
+  document.querySelectorAll('.color-brightness').forEach(e => { e.hidden = m !== 'brightness'; });
+  // the uniform relief slider is only relevant in uniform mode
+  els.colorRelief.closest('.field').hidden = (m === 'brightness') || mode !== 'color';
+  updateDims();
+}
+window.setColorHeight = setColorHeight;
+els.colorHeightUniform.addEventListener('click', () => setColorHeight('uniform'));
+els.colorHeightBrightness.addEventListener('click', () => setColorHeight('brightness'));
+els.colorMaxH.addEventListener('input', () => { els.colorMaxHVal.textContent = Number(els.colorMaxH.value).toFixed(1); updateDims(); });
+els.colorDarkTall.addEventListener('change', () => {});
+
 els.stampMode.addEventListener('change', render);
 els.modeBw.addEventListener('click', () => setMode('bw'));
 els.modeColor.addEventListener('click', () => setMode('color'));
@@ -840,3 +871,4 @@ function initPresets() {
 window.initPresets = initPresets;
 
 updateControlVisibility();
+setColorHeight('uniform');

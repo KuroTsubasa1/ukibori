@@ -198,8 +198,22 @@
                 <input id="thickWhite" type="range" min="0" max="10" value="3" step="0.2" disabled>
               </div>
               <div class="field mode-color" hidden>
+                <div class="field-head"><label>Höhenmodus</label></div>
+                <div class="seg-group seg-sm" role="tablist" aria-label="Höhenmodus">
+                  <button type="button" id="colorHeightUniform" class="seg seg-active">Gleichmäßig</button>
+                  <button type="button" id="colorHeightBrightness" class="seg">Helligkeit → Höhe</button>
+                </div>
+              </div>
+              <div class="field mode-color" hidden>
                 <div class="field-head"><label for="colorRelief">Relief-Höhe (mm)</label><span id="colorReliefVal" class="badge">3.0</span></div>
                 <input id="colorRelief" type="range" min="0" max="10" value="3" step="0.2" disabled>
+              </div>
+              <div class="field mode-color color-brightness" hidden>
+                <div class="field-head"><label for="colorMaxH">Max. Höhe (mm)</label><span id="colorMaxHVal" class="badge">6.0</span></div>
+                <input id="colorMaxH" type="range" min="0" max="12" value="6" step="0.2" disabled>
+              </div>
+              <div class="field mode-color color-brightness" hidden>
+                <label class="toggle"><input id="colorDarkTall" type="checkbox" checked disabled> Dunkle Farben höher</label>
               </div>
               <div class="field">
                 <div class="field-head"><label for="ringThick">Dicke Rand (mm)</label><span id="ringThickVal" class="badge">4.0</span></div>
