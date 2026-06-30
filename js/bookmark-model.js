@@ -87,7 +87,8 @@ function defaultDoc() {
       thicknessMm: 3, layerHeightMm: 0.2, baseColor: "#000000",
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
-    mount: { type: "none", xMm: 25, yMm: 8, diameterMm: 5, ringThicknessMm: 0, marginMm: 8 },
+    // xMm/yMm = hole/loop CENTER (see migrateProject); yMm = marginMm + diameterMm/2.
+    mount: { type: "none", xMm: 25, yMm: 10.5, diameterMm: 5, ringThicknessMm: 0, marginMm: 8 },
     resolution: 1024, colorStepLayers: 2,
     elements: [], fonts: {},
   };
@@ -134,10 +135,13 @@ function migrateProject(doc) {
       baseColor: doc.baseColor || "#000000",
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
+    // mount.xMm/yMm are the hole/loop CENTER (matches js/geometry.js roundedRectHoleField:
+    // holeCx = widthMm/2, holeCy = marginTopMm + diameterMm/2). marginMm keeps the original
+    // top-margin UI value so the editor can still present a "distance from top" control.
     mount: hole
-      ? { type: "hole", xMm: doc.widthMm / 2, yMm: hole.marginTopMm,
+      ? { type: "hole", xMm: doc.widthMm / 2, yMm: hole.marginTopMm + hole.diameterMm / 2,
           diameterMm: hole.diameterMm, ringThicknessMm: 0, marginMm: hole.marginTopMm }
-      : { type: "none", xMm: (doc.widthMm || 0) / 2, yMm: 8, diameterMm: 5, ringThicknessMm: 0, marginMm: 8 },
+      : { type: "none", xMm: (doc.widthMm || 0) / 2, yMm: 10.5, diameterMm: 5, ringThicknessMm: 0, marginMm: 8 },
     resolution: doc.resolution != null ? doc.resolution : 1024,
     colorStepLayers: doc.colorStepLayers != null ? doc.colorStepLayers : 2,
     elements: (doc.elements || []).map(el => migrateElement(el, doc, layerH)),

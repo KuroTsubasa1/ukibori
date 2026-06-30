@@ -40,8 +40,15 @@
     assertEqual(v2.body.layerHeightMm, 0.2, "layerHeight carried");
     assertEqual(v2.mount.type, "hole", "v1 hole -> mount hole");
     assertEqual(v2.mount.diameterMm, 5, "hole diameter");
-    assertEqual(v2.mount.yMm, 8, "hole y from marginTop");
+    assertClose(v2.mount.yMm, 10.5, 1e-9, "hole CENTER y = marginTop + radius");
+    assertEqual(v2.mount.marginMm, 8, "marginMm keeps the original top-margin");
     assertClose(v2.mount.xMm, 25, 1e-9, "hole centered x");
+  });
+
+  test("migrate: v1 doc without a hole -> mount.type none", () => {
+    const v1 = defaultBookmark(); delete v1.hole;
+    const m = migrateProject(v1).mount;
+    assertEqual(m.type, "none", "no hole -> mount none");
   });
 
   test("migrate: reduce image -> colorLayers engraved, v1 keys folded", () => {
