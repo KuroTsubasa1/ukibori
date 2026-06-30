@@ -93,6 +93,58 @@ function defaultDoc() {
   };
 }
 
+function migrateElement(el, doc, layerHmm) {
+  const isReduce = el.type === "image" && el.colorMode === "reduce";
+  const depth = {
+    mode: isReduce ? "colorLayers" : "solid",
+    direction: "engraved",                       // v1 composer engraved colors into the front
+    heightMm: (el.depthLayers != null ? el.depthLayers : 2) * layerHmm,
+    stepLayers: doc.colorStepLayers != null ? doc.colorStepLayers : 2,
+    reduce: el.reduce
+      ? { method: el.reduce.method || "palette", numColors: el.reduce.numColors || 8,
+          levels: el.reduce.levels || 4, remap: el.reduce.remap || {}, order: el.reduce.order || [] }
+      : { method: "palette", numColors: 8, levels: 4, remap: {}, order: [] },
+    threshold: el.threshold != null ? el.threshold : 128,
+    invert: !!el.invert,
+    smooth: doc.smooth != null ? doc.smooth : 0.5,
+    baseFloorMm: 0,
+  };
+  const out = {
+    id: el.id, type: el.type,
+    cxMm: el.cxMm, cyMm: el.cyMm, wMm: el.wMm, hMm: el.hMm, rotationDeg: el.rotationDeg || 0,
+    cutout: !!el.cutout, color: el.color, depth,
+  };
+  if (el.type === "image") { out.src = el.src; out._img = null; }
+  if (el.type === "text") { out.text = el.text; out.fontFamily = el.fontFamily; out.fontWeight = el.fontWeight; }
+  if (el.type === "qr") { out.qrData = el.qrData; out.qrEcLevel = el.qrEcLevel; }
+  return out;
+}
+
+function migrateProject(doc) {
+  if (!doc || doc.version === DOC_VERSION) return doc;
+  const layerH = doc.layerHeightMm != null ? doc.layerHeightMm : 0.2;
+  const hole = doc.hole || null;
+  return {
+    version: DOC_VERSION,
+    body: {
+      shape: "rect",
+      widthMm: doc.widthMm, heightMm: doc.heightMm,
+      cornerRadiusMm: doc.cornerRadiusMm != null ? doc.cornerRadiusMm : 0,
+      thicknessMm: doc.thicknessMm, layerHeightMm: layerH,
+      baseColor: doc.baseColor || "#000000",
+      autoSizeFromElementId: null, freeOutlineFromElementId: null,
+    },
+    mount: hole
+      ? { type: "hole", xMm: doc.widthMm / 2, yMm: hole.marginTopMm,
+          diameterMm: hole.diameterMm, ringThicknessMm: 0, marginMm: hole.marginTopMm }
+      : { type: "none", xMm: (doc.widthMm || 0) / 2, yMm: 8, diameterMm: 5, ringThicknessMm: 0, marginMm: 8 },
+    resolution: doc.resolution != null ? doc.resolution : 1024,
+    colorStepLayers: doc.colorStepLayers != null ? doc.colorStepLayers : 2,
+    elements: (doc.elements || []).map(el => migrateElement(el, doc, layerH)),
+    fonts: doc.fonts || {},
+  };
+}
+
 window.defaultBookmark = defaultBookmark;
 window.makeImageElement = makeImageElement;
 window.makeTextElement = makeTextElement;
@@ -101,3 +153,4 @@ window.deserializeProject = deserializeProject;
 window.DOC_VERSION = DOC_VERSION;
 window.defaultDepth = defaultDepth;
 window.defaultDoc = defaultDoc;
+window.migrateProject = migrateProject;
