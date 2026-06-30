@@ -110,7 +110,113 @@
     return { r, g, b, depthMm, cutout, isBase, owner };
   }
 
+  function __hex(r, g, b) {
+    return ("#" + [r, g, b].map(x => x.toString(16).padStart(2, "0")).join("")).toUpperCase();
+  }
+
+  // v2 analogue of bookmark-export __orderedNaturalHexes: a reduce-image element's
+  // natural palette in the user's preferred order (el.depth.reduce.order first, then
+  // any new colors). Reads el.depth.reduce (v1 read el.reduce).
+  function __orderedNaturalHexesV2(el) {
+    if (!(el.type === "image" && el.depth && el.depth.mode === "colorLayers" && el._img)) return [];
+    const red = el.depth.reduce || {};
+    const pal = window.__imagePaletteFromImg(el._img, red.method, red.numColors, red.levels)
+      .map(c => __hex(c[0], c[1], c[2]));
+    const ord = red.order || [];
+    const out = [];
+    for (const h of ord) { const H = String(h).toUpperCase(); if (pal.indexOf(H) !== -1 && out.indexOf(H) === -1) out.push(H); }
+    for (const h of pal) if (out.indexOf(h) === -1) out.push(h);
+    return out;
+  }
+
+  // Engraved model for a v2 doc: a v2 port of buildBookmarkParts. Solid base plate;
+  // each color is a recess floor whose depth = rank * step (front-most = shallowest);
+  // continuous bottom slab + background/under-color risers keep it manifold. Reuses
+  // the same slab+riser construction as the bookmark builder (so a migrated v1 doc
+  // reproduces buildBookmarkParts output). Raised/heightmap directions are separate
+  // builders (later tasks); this is the engraved path.
+  function buildEngravedParts(doc) {
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const comp = composeDesignV2(doc, cols, rows);
+    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
+    const baseHex = doc.body.baseColor.toUpperCase();
+    const idx = (c, r) => r * cols + c;
+    const colorParts = [], baseParts = [];
+    const tracedFacets = (member, thickness, z0) => window.orientOutward(
+      window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
+
+    const floor = Math.min(2 * layerH, T);
+    const minBase = Math.min(Math.max(0.8, T * 0.34, 2 * layerH), Math.max(0, T - floor));
+    const maxRecess = Math.max(0, T - floor - minBase);
+    const recessOf = (d) => Math.max(0, Math.min(d, maxRecess));
+    const baseUnder = (d) => T - recessOf(d) - floor;
+
+    const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
+    const ownerEff = new Map();
+    for (let i = 0; i < cols * rows; i++) {
+      if (comp.isBase[i] || comp.cutout[i] || comp.owner[i] < 0) continue;
+      const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
+      let s = ownerEff.get(comp.owner[i]); if (!s) ownerEff.set(comp.owner[i], s = new Set());
+      s.add(hex);
+    }
+    const orderedColors = [];
+    const pushC = (h) => { if (orderedColors.indexOf(h) === -1) orderedColors.push(h); };
+    for (let ei = doc.elements.length - 1; ei >= 0; ei--) {
+      const present = ownerEff.get(ei); if (!present) continue;
+      const el = doc.elements[ei], mode = el.depth && el.depth.mode;
+      const seq = [];
+      if (el.type === "text" || (el.type === "image" && mode !== "colorLayers")) {
+        const c = window.hexToRgb(el.color); seq.push(__hex(c[0], c[1], c[2]));
+      } else if (el.type === "image" && mode === "colorLayers") {
+        const remap = (el.depth.reduce && el.depth.reduce.remap) || {};
+        for (const nat of __orderedNaturalHexesV2(el)) { const c = window.hexToRgb(remap[nat] || nat); seq.push(__hex(c[0], c[1], c[2])); }
+      }
+      for (const h of seq) if (present.has(h)) pushC(h);
+      for (const h of present) pushC(h);
+    }
+    const depthByHex = new Map();
+    orderedColors.forEach((hex, rank) => depthByHex.set(hex, (rank + 1) * step));
+    const depthFor = (hex) => depthByHex.get(hex) || step;
+
+    const groups = new Map();
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const i = idx(c, r);
+      if (comp.isBase[i] || comp.cutout[i]) continue;
+      const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
+      let grp = groups.get(hex); if (!grp) groups.set(hex, grp = { hex, set: new Uint8Array(cols * rows) });
+      grp.set[i] = 1;
+    }
+    let cn = 0;
+    for (const grp of groups.values()) {
+      const z0 = baseUnder(depthFor(grp.hex));
+      const facets = tracedFacets((c, r) => grp.set[idx(c, r)] === 1, floor, z0);
+      if (facets.length) colorParts.push({ name: "farbe-" + (++cn), color: window.hexToRgb(grp.hex), facets });
+    }
+
+    const baseAdd = (member, thickness, z0) => {
+      const facets = tracedFacets(member, thickness, z0);
+      if (facets.length) baseParts.push({ name: "grundplatte", color: window.hexToRgb(baseHex), facets });
+    };
+    baseAdd((c, r) => comp.cutout[idx(c, r)] !== 1, minBase, 0);
+    baseAdd((c, r) => comp.isBase[idx(c, r)] === 1, T - minBase, minBase);
+    const behind = new Map();
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const i = idx(c, r);
+      if (comp.cutout[i] || comp.isBase[i]) continue;
+      const h = baseUnder(depthFor(__hex(comp.r[i], comp.g[i], comp.b[i])));
+      if (h - minBase <= 1e-6) continue;
+      const key = h.toFixed(4);
+      let set = behind.get(key); if (!set) behind.set(key, set = { h, m: new Uint8Array(cols * rows) });
+      set.m[i] = 1;
+    }
+    for (const set of behind.values()) baseAdd((c, r) => set.m[idx(c, r)] === 1, set.h - minBase, minBase);
+
+    return [...baseParts, ...colorParts];
+  }
+
   window.gridForBody = gridForBody;
   window.buildBaseParts = buildBaseParts;
   window.composeDesignV2 = composeDesignV2;
+  window.buildEngravedParts = buildEngravedParts;
 })();
