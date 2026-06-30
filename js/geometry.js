@@ -507,6 +507,41 @@ function roundedRectHoleField(cols, rows, p) {
 }
 window.roundedRectHoleField = roundedRectHoleField;
 
+// Generalized footprint field for the unified engine: >0 inside the body AND
+// outside any mount hole, in cell units (same convention as roundedRectHoleField).
+// body={shape:'rect'|'circle', widthMm, heightMm, cornerRadiusMm}. mount.xMm/yMm
+// are the hole CENTER. The through-hole is cut for type 'hole' AND 'loop' (the
+// loop's raised ring is built separately). Non-'circle' shapes use the rounded
+// rectangle; free-outline bodies use a dedicated builder (later task).
+function shapeFootprintField(cols, rows, body, mount) {
+  const W = body.widthMm, H = body.heightMm;
+  const sx = cols / W, sy = rows / H;            // cells per mm
+  const s = (sx + sy) / 2;                       // ~uniform mm -> cells
+  const hw = W / 2, hh = H / 2;
+  const isCircle = body.shape === "circle";
+  const rr = Math.min(body.cornerRadiusMm || 0, hw, hh);
+  const bodyR = Math.min(hw, hh);                // inscribed circle radius
+  const m = mount || { type: "none" };
+  const hasHole = m.type === "hole" || m.type === "loop";
+  const holeR = hasHole ? (m.diameterMm || 0) / 2 : 0;
+  const holeCx = hasHole ? m.xMm : 0, holeCy = hasHole ? m.yMm : 0;
+  return (c, r) => {
+    const x = (c + 0.5) / sx, y = (r + 0.5) / sy;        // mm, origin top-left
+    let bodyInside;
+    if (isCircle) {
+      bodyInside = bodyR - Math.hypot(x - hw, y - hh);   // >0 inside circle, mm
+    } else {
+      const qx = Math.abs(x - hw) - (hw - rr), qy = Math.abs(y - hh) - (hh - rr);
+      const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - rr;
+      bodyInside = -outside;                             // >0 inside rounded-rect, mm
+    }
+    if (!hasHole) return bodyInside * s;
+    const holeOutside = Math.hypot(x - holeCx, y - holeCy) - holeR; // >0 outside hole
+    return Math.min(bodyInside, holeOutside) * s;        // mm -> cells
+  };
+}
+window.shapeFootprintField = shapeFootprintField;
+
 // Build a 3MF package from parts [{name, color:[r,g,b], facets}] as a Blob.
 // Each part becomes its own <object> (separate mesh). Colors use the 3MF CORE
 // <basematerials> element (NOT the material extension): the PrusaSlicer family
