@@ -55,7 +55,11 @@ doc = {
   },
   mount: {
     type: 'none' | 'hole' | 'loop',
-    xMm, yMm, diameterMm, ringThicknessMm, marginMm,
+    xMm, yMm,            // hole/loop CENTER (xMm/yMm), not top-margin
+    diameterMm,
+    ringThicknessMm,     // loop only: in-plane ring wall thickness
+    ringHeightMm,        // loop only: how far the ring stands proud above the base top face
+    marginMm,            // original top-margin UI value (yMm = marginMm + diameterMm/2)
   },
   resolution,          // composition grid resolution (cols×rows derived from body aspect)
   colorStepLayers,     // default discrete step thickness in layers
