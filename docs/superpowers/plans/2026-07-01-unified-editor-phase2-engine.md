@@ -219,6 +219,207 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
+### Task 2: `buildEngravedParts(doc)` — v2 engraved model + parity vs `buildBookmarkParts`
+
+**Files:**
+- Modify: `js/build-parts.js` (inside the IIFE; add `__hex`, `__orderedNaturalHexesV2`, `buildEngravedParts`; export `window.buildEngravedParts`)
+- Create: `tests/engraved-parity.test.js`
+- Modify: `tests/run.html` (add the test script)
+
+**Background:** This is a faithful v2 port of `buildBookmarkParts` (`js/bookmark-export.js:218–323`). It reuses that proven **slab + riser engraved base** construction (NOT the full-solid `buildBaseParts`, which is raised-only). For a *migrated v1 doc*, the footprint (`shapeFootprintField` with `mount.yMm = marginTopMm + diameterMm/2`) and the composition (`composeDesignV2`) are identical to the v1 path, so the output parts should match `buildBookmarkParts` to a tight tolerance — the parity test is the safety net that catches any port error.
+
+**Interfaces:**
+- Consumes: `gridForBody`, `composeDesignV2` (this file); `window.shapeFootprintField`, `window.traceMaskToFacets`, `window.orientOutward`, `window.hexToRgb`, `window.__imagePaletteFromImg`. Reads v2 `doc.body.*`, `doc.colorStepLayers`, `el.depth.{mode,reduce,color via el.color}`.
+- Produces: `buildEngravedParts(doc) -> PART[]` = `[...baseParts, ...colorParts]` (same contract/order as `buildBookmarkParts`). Internal helpers `__hex(r,g,b)` and `__orderedNaturalHexesV2(el)` (v2 analogue of `__orderedNaturalHexes`, reading `el.depth.reduce`).
+
+- [ ] **Step 1: Write the failing parity test**
+
+Create `tests/engraved-parity.test.js`:
+
+```javascript
+"use strict";
+(function () {
+  function signedVol(facets) {
+    let v = 0;
+    for (const t of facets) { const [a,b,c]=t;
+      v += (a[0]*(b[1]*c[2]-b[2]*c[1]) - a[1]*(b[0]*c[2]-b[2]*c[0]) + a[2]*(b[0]*c[1]-b[1]*c[0]))/6; }
+    return v;
+  }
+  const totalVol = (parts) => parts.reduce((s,p)=>s+Math.abs(signedVol(p.facets)),0);
+  async function solidImg(hex, w, h) {
+    const cv=document.createElement("canvas"); cv.width=w; cv.height=h;
+    const cx=cv.getContext("2d"); cx.fillStyle=hex; cx.fillRect(0,0,w,h);
+    const img=new Image(); await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=cv.toDataURL("image/png");});
+    return img;
+  }
+
+  test("engraved parity: solid element — buildEngravedParts(migrated) == buildBookmarkParts(v1)", async () => {
+    const img = await solidImg("#ffffff", 8, 8);
+    const v1 = defaultBookmark();
+    v1.widthMm = 40; v1.heightMm = 80; v1.resolution = 220; v1.baseColor = "#000000";
+    const e = makeImageElement({ src:"a", colorMode:"solid", color:"#ff0000", cxMm:20, cyMm:40, wMm:24, hMm:24, depthLayers:2 });
+    v1.elements = [e]; e._img = img;
+    const ref = buildBookmarkParts(v1);          // v1 reference
+    const v2 = migrateProject(v1); v2.elements[0]._img = img;
+    const got = buildEngravedParts(v2);          // unified v2
+    assertEqual(got.length, ref.length, "same number of parts");
+    const eps = Math.max(1e-6, totalVol(ref) * 1e-3);
+    assertClose(totalVol(got), totalVol(ref), eps, "total |volume| matches v1 within 0.1%");
+    assert(got.every(p => Math.abs(signedVol(p.facets)) > 0), "every part has positive volume (watertight)");
+  });
+
+  test("engraved parity: empty doc — base only, matches v1", async () => {
+    const v1 = defaultBookmark(); v1.widthMm = 30; v1.heightMm = 30; v1.resolution = 160; v1.baseColor = "#202020";
+    const ref = buildBookmarkParts(v1);
+    const got = buildEngravedParts(migrateProject(v1));
+    assertEqual(got.length, ref.length, "same part count (base only)");
+    const eps = Math.max(1e-6, totalVol(ref) * 1e-3);
+    assertClose(totalVol(got), totalVol(ref), eps, "base volume matches v1");
+  });
+})();
+```
+
+Add to `tests/run.html` after the `compose-v2.test.js` tag:
+```html
+<script src="engraved-parity.test.js"></script>
+```
+
+- [ ] **Step 2: Run the tests; verify the new ones FAIL**
+
+`python3 -m http.server 8022`; load `tests/run.html`; `window.__ready()`.
+Expected: `fail: 2`, `buildEngravedParts is not defined`. All 35 prior tests still pass.
+
+- [ ] **Step 3: Implement in `js/build-parts.js`**
+
+Inside the IIFE (before the `window.* =` exports), add:
+
+```javascript
+  function __hex(r, g, b) {
+    return ("#" + [r, g, b].map(x => x.toString(16).padStart(2, "0")).join("")).toUpperCase();
+  }
+
+  // v2 analogue of bookmark-export __orderedNaturalHexes: a reduce-image element's
+  // natural palette in the user's preferred order (el.depth.reduce.order first, then
+  // any new colors). Reads el.depth.reduce (v1 read el.reduce).
+  function __orderedNaturalHexesV2(el) {
+    if (!(el.type === "image" && el.depth && el.depth.mode === "colorLayers" && el._img)) return [];
+    const red = el.depth.reduce || {};
+    const pal = window.__imagePaletteFromImg(el._img, red.method, red.numColors, red.levels)
+      .map(c => __hex(c[0], c[1], c[2]));
+    const ord = red.order || [];
+    const out = [];
+    for (const h of ord) { const H = String(h).toUpperCase(); if (pal.indexOf(H) !== -1 && out.indexOf(H) === -1) out.push(H); }
+    for (const h of pal) if (out.indexOf(h) === -1) out.push(h);
+    return out;
+  }
+
+  // Engraved model for a v2 doc: a v2 port of buildBookmarkParts. Solid base plate;
+  // each color is a recess floor whose depth = rank * step (front-most = shallowest);
+  // continuous bottom slab + background/under-color risers keep it manifold. Reuses
+  // the same slab+riser construction as the bookmark builder (so a migrated v1 doc
+  // reproduces buildBookmarkParts output). Raised/heightmap directions are separate
+  // builders (later tasks); this is the engraved path.
+  function buildEngravedParts(doc) {
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const comp = composeDesignV2(doc, cols, rows);
+    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
+    const baseHex = doc.body.baseColor.toUpperCase();
+    const idx = (c, r) => r * cols + c;
+    const colorParts = [], baseParts = [];
+    const tracedFacets = (member, thickness, z0) => window.orientOutward(
+      window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
+
+    const floor = Math.min(2 * layerH, T);
+    const minBase = Math.min(Math.max(0.8, T * 0.34, 2 * layerH), Math.max(0, T - floor));
+    const maxRecess = Math.max(0, T - floor - minBase);
+    const recessOf = (d) => Math.max(0, Math.min(d, maxRecess));
+    const baseUnder = (d) => T - recessOf(d) - floor;
+
+    const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
+    const ownerEff = new Map();
+    for (let i = 0; i < cols * rows; i++) {
+      if (comp.isBase[i] || comp.cutout[i] || comp.owner[i] < 0) continue;
+      const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
+      let s = ownerEff.get(comp.owner[i]); if (!s) ownerEff.set(comp.owner[i], s = new Set());
+      s.add(hex);
+    }
+    const orderedColors = [];
+    const pushC = (h) => { if (orderedColors.indexOf(h) === -1) orderedColors.push(h); };
+    for (let ei = doc.elements.length - 1; ei >= 0; ei--) {
+      const present = ownerEff.get(ei); if (!present) continue;
+      const el = doc.elements[ei], mode = el.depth && el.depth.mode;
+      const seq = [];
+      if (el.type === "text" || (el.type === "image" && mode !== "colorLayers")) {
+        const c = window.hexToRgb(el.color); seq.push(__hex(c[0], c[1], c[2]));
+      } else if (el.type === "image" && mode === "colorLayers") {
+        const remap = (el.depth.reduce && el.depth.reduce.remap) || {};
+        for (const nat of __orderedNaturalHexesV2(el)) { const c = window.hexToRgb(remap[nat] || nat); seq.push(__hex(c[0], c[1], c[2])); }
+      }
+      for (const h of seq) if (present.has(h)) pushC(h);
+      for (const h of present) pushC(h);
+    }
+    const depthByHex = new Map();
+    orderedColors.forEach((hex, rank) => depthByHex.set(hex, (rank + 1) * step));
+    const depthFor = (hex) => depthByHex.get(hex) || step;
+
+    const groups = new Map();
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const i = idx(c, r);
+      if (comp.isBase[i] || comp.cutout[i]) continue;
+      const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
+      let grp = groups.get(hex); if (!grp) groups.set(hex, grp = { hex, set: new Uint8Array(cols * rows) });
+      grp.set[i] = 1;
+    }
+    let cn = 0;
+    for (const grp of groups.values()) {
+      const z0 = baseUnder(depthFor(grp.hex));
+      const facets = tracedFacets((c, r) => grp.set[idx(c, r)] === 1, floor, z0);
+      if (facets.length) colorParts.push({ name: "farbe-" + (++cn), color: window.hexToRgb(grp.hex), facets });
+    }
+
+    const baseAdd = (member, thickness, z0) => {
+      const facets = tracedFacets(member, thickness, z0);
+      if (facets.length) baseParts.push({ name: "grundplatte", color: window.hexToRgb(baseHex), facets });
+    };
+    baseAdd((c, r) => comp.cutout[idx(c, r)] !== 1, minBase, 0);
+    baseAdd((c, r) => comp.isBase[idx(c, r)] === 1, T - minBase, minBase);
+    const behind = new Map();
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const i = idx(c, r);
+      if (comp.cutout[i] || comp.isBase[i]) continue;
+      const h = baseUnder(depthFor(__hex(comp.r[i], comp.g[i], comp.b[i])));
+      if (h - minBase <= 1e-6) continue;
+      const key = h.toFixed(4);
+      let set = behind.get(key); if (!set) behind.set(key, set = { h, m: new Uint8Array(cols * rows) });
+      set.m[i] = 1;
+    }
+    for (const set of behind.values()) baseAdd((c, r) => set.m[idx(c, r)] === 1, set.h - minBase, minBase);
+
+    return [...baseParts, ...colorParts];
+  }
+```
+
+Add to the `window.* =` export block:
+```javascript
+  window.buildEngravedParts = buildEngravedParts;
+```
+
+- [ ] **Step 4: Run the tests; verify all pass**
+
+Reload on a fresh port (`python3 -m http.server 8023`). Expected: `fail: 0`; the 2 parity tests pass (the migrated-doc engraved output matches `buildBookmarkParts` within 0.1%); all 35 prior tests still pass (37 total). If a parity test FAILS, the port has a bug — fix the port until it matches; do NOT loosen the tolerance.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add js/build-parts.js tests/engraved-parity.test.js tests/run.html
+git commit -m "feat(geometry): buildEngravedParts(doc) — v2 engraved model, parity vs bookmark
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage:** Implements the spec's § "Geometry engine" step 1 ("Rasterize each element to the resolution grid … reusing the composer's composeDesign/__renderElement + image-ops + bg-removal") for v2, reading `element.depth`. Steps 2–4 (per-mode/direction part emission, base recesses, assembly) are the follow-on tasks.
