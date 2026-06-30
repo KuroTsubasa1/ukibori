@@ -58,8 +58,46 @@ function deserializeProject(text) {
   return doc;
 }
 
+// === v2 unified document schema =========================================
+// Additive: the live editor still uses the v1 functions above. migrateProject()
+// (Task 2) bridges saved v1 projects to this shape; the UI merge phase will
+// switch the editor over to defaultDoc()/migrateProject().
+const DOC_VERSION = 2;
+
+function defaultDepth(type) {
+  return {
+    mode: "solid",                 // text/qr are always solid; images may change later
+    direction: "raised",
+    heightMm: 1.0,
+    stepLayers: 2,
+    reduce: { method: "palette", numColors: 8, levels: 4, remap: {}, order: [] },
+    threshold: 128,
+    invert: false,
+    smooth: 0.5,
+    baseFloorMm: 0,
+  };
+}
+
+function defaultDoc() {
+  return {
+    version: DOC_VERSION,
+    body: {
+      shape: "rect",
+      widthMm: 50, heightMm: 150, cornerRadiusMm: 4,
+      thicknessMm: 3, layerHeightMm: 0.2, baseColor: "#000000",
+      autoSizeFromElementId: null, freeOutlineFromElementId: null,
+    },
+    mount: { type: "none", xMm: 25, yMm: 8, diameterMm: 5, ringThicknessMm: 0, marginMm: 8 },
+    resolution: 1024, colorStepLayers: 2,
+    elements: [], fonts: {},
+  };
+}
+
 window.defaultBookmark = defaultBookmark;
 window.makeImageElement = makeImageElement;
 window.makeTextElement = makeTextElement;
 window.serializeProject = serializeProject;
 window.deserializeProject = deserializeProject;
+window.DOC_VERSION = DOC_VERSION;
+window.defaultDepth = defaultDepth;
+window.defaultDoc = defaultDoc;
