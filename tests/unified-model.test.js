@@ -13,6 +13,7 @@
     assertEqual(d.body.autoSizeFromElementId, null, "autoSize null");
     assertEqual(d.body.freeOutlineFromElementId, null, "freeOutline null");
     assertEqual(d.mount.type, "none", "mount none by default");
+    assertEqual(d.mount.ringHeightMm, 2, "ring height default");
     assertEqual(d.resolution, 1024, "resolution");
     assertEqual(d.colorStepLayers, 2, "colorStepLayers");
     assertEqual(d.elements.length, 0, "no elements");
@@ -42,6 +43,7 @@
     assertEqual(v2.mount.diameterMm, 5, "hole diameter");
     assertClose(v2.mount.yMm, 10.5, 1e-9, "hole CENTER y = marginTop + radius");
     assertEqual(v2.mount.marginMm, 8, "marginMm keeps the original top-margin");
+    assertEqual(v2.mount.ringHeightMm, 2, "migrated mount has ring height");
     assertClose(v2.mount.xMm, 25, 1e-9, "hole centered x");
   });
 

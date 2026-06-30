@@ -64,5 +64,6 @@
     assert(signedVol(parts[0].facets) > 0, "circle base outward-oriented");
     const bb = bbox(parts[0].facets);
     assertClose(bb.mxz, 2, 1e-6, "circle base top at thicknessMm");
+    assertClose(bb.mnz, 0, 1e-6, "circle base bottom at z=0");
   });
 })();

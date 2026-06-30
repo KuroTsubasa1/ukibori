@@ -36,4 +36,11 @@
     const f = shapeFootprintField(50, 150, body, { type: "none" });
     assert(f(24.5, 10) > 0, "no hole -> still inside the body");
   });
+
+  test("footprint: mount null behaves like type none", () => {
+    const body = { shape: "rect", widthMm: 50, heightMm: 150, cornerRadiusMm: 4 };
+    const f = shapeFootprintField(50, 150, body, null);
+    assertClose(f(24.5, 74.5), 25, 1e-6, "null mount -> full body depth (== type none)");
+    assert(f(24.5, 10) > 0, "null mount -> no hole carved");
+  });
 })();

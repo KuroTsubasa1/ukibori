@@ -88,7 +88,9 @@ function defaultDoc() {
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
     // xMm/yMm = hole/loop CENTER (see migrateProject); yMm = marginMm + diameterMm/2.
-    mount: { type: "none", xMm: 25, yMm: 10.5, diameterMm: 5, ringThicknessMm: 0, marginMm: 8 },
+    // ringThicknessMm = in-plane loop wall thickness; ringHeightMm = how far the loop
+    // ring stands proud above the base top face (mm). Both used only when type === 'loop'.
+    mount: { type: "none", xMm: 25, yMm: 10.5, diameterMm: 5, ringThicknessMm: 0, ringHeightMm: 2, marginMm: 8 },
     resolution: 1024, colorStepLayers: 2,
     elements: [], fonts: {},
   };
@@ -140,8 +142,8 @@ function migrateProject(doc) {
     // top-margin UI value so the editor can still present a "distance from top" control.
     mount: hole
       ? { type: "hole", xMm: doc.widthMm / 2, yMm: hole.marginTopMm + hole.diameterMm / 2,
-          diameterMm: hole.diameterMm, ringThicknessMm: 0, marginMm: hole.marginTopMm }
-      : { type: "none", xMm: (doc.widthMm || 0) / 2, yMm: 10.5, diameterMm: 5, ringThicknessMm: 0, marginMm: 8 },
+          diameterMm: hole.diameterMm, ringThicknessMm: 0, ringHeightMm: 2, marginMm: hole.marginTopMm }
+      : { type: "none", xMm: (doc.widthMm || 0) / 2, yMm: 10.5, diameterMm: 5, ringThicknessMm: 0, ringHeightMm: 2, marginMm: 8 },
     resolution: doc.resolution != null ? doc.resolution : 1024,
     colorStepLayers: doc.colorStepLayers != null ? doc.colorStepLayers : 2,
     elements: (doc.elements || []).map(el => migrateElement(el, doc, layerH)),
