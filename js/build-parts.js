@@ -215,8 +215,31 @@
     return [...baseParts, ...colorParts];
   }
 
+  // The loop (Öse) ring: an annulus around the mount hole, standing proud of the
+  // base top face. Only for mount.type==='loop' with a positive ring wall + height.
+  // Body-colored, intersected with the (no-hole) body footprint so it can't overhang.
+  function buildMountRingParts(doc) {
+    const m = doc.mount || {};
+    if (m.type !== "loop" || !(m.ringThicknessMm > 0) || !(m.ringHeightMm > 0)) return [];
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const bodyOnly = window.shapeFootprintField(cols, rows, doc.body, { type: "none" });
+    const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
+    const innerR = m.diameterMm / 2, outerR = innerR + m.ringThicknessMm;
+    const cx = m.xMm, cy = m.yMm;
+    const inRing = (c, r) => {
+      const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
+      const d = Math.hypot(x - cx, y - cy);
+      return d >= innerR && d <= outerR && bodyOnly(c, r) > 0;
+    };
+    const facets = window.orientOutward(
+      window.traceMaskToFacets(inRing, cols, rows, pitch, m.ringHeightMm, doc.body.thicknessMm));
+    if (!facets.length) return [];
+    return [{ name: "oese", color: window.hexToRgb(doc.body.baseColor), facets }];
+  }
+
   window.gridForBody = gridForBody;
   window.buildBaseParts = buildBaseParts;
   window.composeDesignV2 = composeDesignV2;
   window.buildEngravedParts = buildEngravedParts;
+  window.buildMountRingParts = buildMountRingParts;
 })();
