@@ -1072,6 +1072,189 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
+### Task 7 (T7a): `body.borderMm` model field + `freeFootprintField` (silhouette dilation)
+
+**Files:**
+- Modify: `js/bookmark-model.js` (add `body.borderMm` to `defaultDoc` + `migrateProject`)
+- Modify: `js/build-parts.js` (add `__silhouetteMask`, `__chamferDT`, `freeFootprintField`; export `window.freeFootprintField`)
+- Modify: `tests/unified-model.test.js` (assert `borderMm`)
+- Create: `tests/free-footprint.test.js`
+- Modify: `tests/run.html` (add the test script)
+
+**Background:** For the **offset-margin border** (chosen design), a freeform plate = the content silhouette **dilated outward by `borderMm`**. This task adds the model field and the footprint field (silhouette union → chamfer distance transform → `borderCells - dt` field, with the mount hole cut). Wiring it into `buildParts` is T7b.
+
+**Interfaces:**
+- Consumes: `__drawElement` (build-parts.js); v2 model.
+- Produces:
+  - `defaultDoc().body.borderMm` (= 2) and `migrateProject` sets `body.borderMm = 2` (offset width for free shape; unused for rect/circle).
+  - `__silhouetteMask(doc, cols, rows) -> Uint8Array` (internal): union of elements' opaque pixels (or just `body.freeOutlineFromElementId`'s element if set).
+  - `__chamferDT(mask, cols, rows) -> Float32Array` (internal): distance (in cells) to the nearest set pixel, two-pass chamfer (D1=1, D2=√2).
+  - `freeFootprintField(doc, cols, rows, pitch) -> (c,r)=>number`: `>0` within `borderMm/pitch` cells of the silhouette (the dilated plate), with the mount hole subtracted. Same `(c,r)=>signed`, `>0`-inside contract as `shapeFootprintField`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/unified-model.test.js` (inside the IIFE, before the closing `})();`):
+
+```javascript
+  test("v2: defaultDoc.body has borderMm default", () => {
+    assertEqual(defaultDoc().body.borderMm, 2, "border default 2mm");
+  });
+  test("migrate: v1 doc gets body.borderMm", () => {
+    assertEqual(migrateProject(defaultBookmark()).body.borderMm, 2, "migrated border 2mm");
+  });
+```
+
+Create `tests/free-footprint.test.js`:
+
+```javascript
+"use strict";
+(function () {
+  async function solidImg(hex,w,h){const cv=document.createElement("canvas");cv.width=w;cv.height=h;const cx=cv.getContext("2d");cx.fillStyle=hex;cx.fillRect(0,0,w,h);const img=new Image();await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=cv.toDataURL("image/png");});return img;}
+
+  test("freeFootprint: plate = silhouette dilated by borderMm (offset margin)", async () => {
+    const img = await solidImg("#ffffff", 8, 8);
+    const v1 = defaultBookmark(); v1.widthMm=40; v1.heightMm=40; v1.resolution=100;
+    // a 10x10mm opaque element centered on the 40x40 canvas -> mm [15,25]
+    v1.elements=[ makeImageElement({src:"a", color:"#ffffff", cxMm:20,cyMm:20,wMm:10,hMm:10}) ];
+    const v2 = migrateProject(v1); v2.body.shape = "free"; v2.body.borderMm = 3; v2.elements[0]._img = img;
+    v2.mount = { type:"none", xMm:20, yMm:10, diameterMm:5, ringThicknessMm:0, ringHeightMm:2, marginMm:8 };
+    const { cols, rows, pitch } = gridForBody(v2.body, v2.resolution); // 100x100, pitch=0.4
+    const f = freeFootprintField(v2, cols, rows, pitch);
+    // cell centers: mm x = (c+0.5)*pitch
+    assert(f(50, 50) > 0, "element center is inside the plate");
+    assert(f(65, 49) > 0, "~1.2mm outside the element edge is within the 3mm margin");
+    assert(f(78, 49) < 0, "~6mm beyond the element is outside the plate");
+  });
+
+  test("freeFootprint: mount hole is cut from the free plate", async () => {
+    const img = await solidImg("#ffffff", 8, 8);
+    const v1 = defaultBookmark(); v1.widthMm=40; v1.heightMm=40; v1.resolution=100;
+    v1.elements=[ makeImageElement({src:"a", color:"#ffffff", cxMm:20,cyMm:20,wMm:30,hMm:30}) ];
+    const v2 = migrateProject(v1); v2.body.shape = "free"; v2.body.borderMm = 2; v2.elements[0]._img = img;
+    v2.mount = { type:"hole", xMm:20, yMm:20, diameterMm:6, ringThicknessMm:0, ringHeightMm:2, marginMm:8 };
+    const { cols, rows, pitch } = gridForBody(v2.body, v2.resolution);
+    const f = freeFootprintField(v2, cols, rows, pitch);
+    assert(f(50, 50) < 0, "hole center (20,20mm) is cut out of the plate");
+  });
+})();
+```
+
+Add to `tests/run.html` after the `build-parts-entry.test.js` tag:
+```html
+<script src="free-footprint.test.js"></script>
+```
+
+- [ ] **Step 2: Run the tests; verify the new ones FAIL**
+
+`python3 -m http.server 8034`; load `tests/run.html`; `window.__ready()`.
+Expected: `fail: 4` (2 model asserts fail on missing `borderMm`; 2 free-footprint fail on `freeFootprintField is not defined`). All 46 prior tests otherwise pass.
+
+- [ ] **Step 3a: Add `body.borderMm` in `js/bookmark-model.js`**
+
+In `defaultDoc()`'s `body` object, add `borderMm: 2,` (e.g. after `baseColor`):
+```javascript
+      thicknessMm: 3, layerHeightMm: 0.2, baseColor: "#000000", borderMm: 2,
+```
+In `migrateProject`'s `body` object, add `borderMm: 2,` in the same place:
+```javascript
+      thicknessMm: doc.thicknessMm, layerHeightMm: layerH,
+      baseColor: doc.baseColor || "#000000", borderMm: 2,
+```
+
+- [ ] **Step 3b: Add the free-footprint functions in `js/build-parts.js`**
+
+Inside the IIFE (before the `window.* =` exports), add:
+
+```javascript
+  // Union of the elements' opaque silhouette on the grid (or just the element named
+  // by body.freeOutlineFromElementId, if set). Uses __drawElement (alpha cutoff 128).
+  function __silhouetteMask(doc, cols, rows) {
+    const n = cols * rows, mask = new Uint8Array(n);
+    const only = doc.body.freeOutlineFromElementId;
+    doc.elements.forEach((el) => {
+      if (only != null && el.id !== only) return;
+      if (el.type === "image" && !el._img) return;
+      const d = __drawElement(el, doc, cols, rows);
+      for (let i = 0; i < n; i++) if (d[i * 4 + 3] >= 128) mask[i] = 1;
+    });
+    return mask;
+  }
+
+  // Two-pass chamfer distance transform: distance (in cells) to the nearest set
+  // pixel. D1=1 (orthogonal), D2=sqrt(2) (diagonal) — near-Euclidean.
+  function __chamferDT(mask, cols, rows) {
+    const INF = 1e9, n = cols * rows, dist = new Float32Array(n);
+    for (let i = 0; i < n; i++) dist[i] = mask[i] ? 0 : INF;
+    const D1 = 1.0, D2 = Math.SQRT2, at = (c, r) => r * cols + c;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const i = at(c, r); let v = dist[i];
+      if (r > 0) {
+        v = Math.min(v, dist[at(c, r - 1)] + D1);
+        if (c > 0) v = Math.min(v, dist[at(c - 1, r - 1)] + D2);
+        if (c < cols - 1) v = Math.min(v, dist[at(c + 1, r - 1)] + D2);
+      }
+      if (c > 0) v = Math.min(v, dist[at(c - 1, r)] + D1);
+      dist[i] = v;
+    }
+    for (let r = rows - 1; r >= 0; r--) for (let c = cols - 1; c >= 0; c--) {
+      const i = at(c, r); let v = dist[i];
+      if (r < rows - 1) {
+        v = Math.min(v, dist[at(c, r + 1)] + D1);
+        if (c > 0) v = Math.min(v, dist[at(c - 1, r + 1)] + D2);
+        if (c < cols - 1) v = Math.min(v, dist[at(c + 1, r + 1)] + D2);
+      }
+      if (c < cols - 1) v = Math.min(v, dist[at(c + 1, r)] + D1);
+      dist[i] = v;
+    }
+    return dist;
+  }
+
+  // Free-outline footprint: the content silhouette dilated outward by body.borderMm
+  // (the offset-margin border), with the mount hole cut. >0 inside the plate. Same
+  // contract as shapeFootprintField (cell units, sign-based).
+  function freeFootprintField(doc, cols, rows, pitch) {
+    const dt = __chamferDT(__silhouetteMask(doc, cols, rows), cols, rows);
+    const borderCells = (doc.body.borderMm || 0) / pitch;
+    const idx = (c, r) => r * cols + c;
+    const m = doc.mount || { type: "none" };
+    const hasHole = m.type === "hole" || m.type === "loop";
+    const holeR = hasHole ? (m.diameterMm || 0) / 2 : 0;
+    const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm, s = (sx + sy) / 2;
+    const cx = hasHole ? m.xMm : 0, cy = hasHole ? m.yMm : 0;
+    return (c, r) => {
+      let v = borderCells - dt[idx(c, r)];              // >0 within borderCells of silhouette
+      if (hasHole) {
+        const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
+        v = Math.min(v, (Math.hypot(x - cx, y - cy) - holeR) * s); // subtract the hole
+      }
+      return v;
+    };
+  }
+```
+
+Add to the `window.* =` export block:
+```javascript
+  window.freeFootprintField = freeFootprintField;
+```
+
+- [ ] **Step 4: Run the tests; verify all pass**
+
+Reload on a fresh port (`python3 -m http.server 8035`). Expected: `fail: 0`; the 4 new tests pass; all 46 prior tests still pass (50 total).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add js/bookmark-model.js js/build-parts.js tests/unified-model.test.js tests/free-footprint.test.js tests/run.html
+git commit -m "feat(geometry): freeFootprintField — offset-margin dilation for free bodies
+
+Add body.borderMm (v2 model); free plate = content silhouette dilated by borderMm
+via a chamfer distance transform, mount hole cut. Wiring into buildParts is next.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage:** Implements the spec's § "Geometry engine" step 1 ("Rasterize each element to the resolution grid … reusing the composer's composeDesign/__renderElement + image-ops + bg-removal") for v2, reading `element.depth`. Steps 2–4 (per-mode/direction part emission, base recesses, assembly) are the follow-on tasks.
