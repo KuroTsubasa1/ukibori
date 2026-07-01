@@ -264,7 +264,7 @@
     }
     return [
       ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint),
-      ...buildRaisedParts(doc, footprint),
+      ...buildRaisedParts(doc, footprint, comp),
       ...buildHeightmapParts(doc, footprint),
       ...buildMountRingParts(doc, ringBody),
     ];
@@ -297,9 +297,9 @@
   // Height: depth.heightMm for solid/text; (rank+1)*step per color for colorLayers.
   // Uses the shared composeDesignV2 rasterizer; a raised "colored stamp" that should
   // keep bright pixels uses a high depth.threshold (256 => alpha-only).
-  function buildRaisedParts(doc, footprintArg) {
+  function buildRaisedParts(doc, footprintArg, compArg) {
     const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
-    const comp = composeDesignV2(doc, cols, rows);
+    const comp = compArg || composeDesignV2(doc, cols, rows);
     const footprint = footprintArg || window.shapeFootprintField(cols, rows, doc.body, doc.mount);
     const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
     const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
