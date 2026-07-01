@@ -9,7 +9,7 @@
     const v1 = defaultBookmark(); v1.widthMm=40; v1.heightMm=40; v1.thicknessMm=3; v1.resolution=200;
     v1.elements=[ makeImageElement({src:"a", colorMode:"solid", color:"#00ff00", cxMm:20,cyMm:20,wMm:20,hMm:20}) ];
     const v2 = migrateProject(v1);
-    v2.elements[0].depth.direction = "raised"; v2.elements[0].depth.heightMm = 2; v2.elements[0]._img = img;
+    v2.elements[0].depth.direction = "raised"; v2.elements[0].depth.heightMm = 2; v2.elements[0].depth.threshold = 256; v2.elements[0]._img = img;
     const parts = buildRaisedParts(v2);
     assertEqual(parts.length, 1, "one raised prism");
     assert(parts[0].name.indexOf("erhaben") === 0, "raised part name");
