@@ -535,6 +535,136 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
+### Task 4 (T5b): `buildRaisedParts(doc)` — raised element prisms
+
+**Files:**
+- Modify: `js/build-parts.js` (inside the IIFE; add `buildRaisedParts`; export `window.buildRaisedParts`)
+- Create: `tests/raised-parts.test.js`
+- Modify: `tests/run.html` (add the test script)
+
+**Background:** The counterpart to `buildEngravedParts`. For elements with `depth.direction === 'raised'`, extrude their colored regions UP from the base top face (`z = thicknessMm`). This builds only the raised prisms — the base plate is built separately (`buildBaseParts` full-solid, or `buildEngravedParts`' recessed base; the T6 entry assembles them). Reuses `__hex` and `__orderedNaturalHexesV2` from Task 2 (already in the file).
+
+**Interfaces:**
+- Consumes: `gridForBody`, `composeDesignV2`, `__hex`, `__orderedNaturalHexesV2` (this file); `window.shapeFootprintField`, `window.traceMaskToFacets`, `window.orientOutward`, `window.hexToRgb`.
+- Produces: `buildRaisedParts(doc) -> PART[]`. Groups raised-owned, non-cutout pixels by (element, colorHex) and extrudes each group `z = thicknessMm .. thicknessMm + height`, where height = `depth.heightMm` for solid/text (min one layer), or `(rank+1)*step` for a `colorLayers` element's colors (rank from `__orderedNaturalHexesV2`, `step = colorStepLayers*layerHeightMm`). Part names `erhaben-<n>`. Returns `[]` if no raised elements.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/raised-parts.test.js`:
+
+```javascript
+"use strict";
+(function () {
+  function signedVol(f){let v=0;for(const t of f){const[a,b,c]=t;v+=(a[0]*(b[1]*c[2]-b[2]*c[1])-a[1]*(b[0]*c[2]-b[2]*c[0])+a[2]*(b[0]*c[1]-b[1]*c[0]))/6;}return v;}
+  function zbounds(f){let mn=Infinity,mx=-Infinity;for(const t of f)for(const p of t){if(p[2]<mn)mn=p[2];if(p[2]>mx)mx=p[2];}return{mn,mx};}
+  async function solidImg(hex,w,h){const cv=document.createElement("canvas");cv.width=w;cv.height=h;const cx=cv.getContext("2d");cx.fillStyle=hex;cx.fillRect(0,0,w,h);const img=new Image();await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=cv.toDataURL("image/png");});return img;}
+
+  test("raised: solid element extrudes a prism above the base top", async () => {
+    const img = await solidImg("#00ff00", 8, 8);
+    const v1 = defaultBookmark(); v1.widthMm=40; v1.heightMm=40; v1.thicknessMm=3; v1.resolution=200;
+    v1.elements=[ makeImageElement({src:"a", colorMode:"solid", color:"#00ff00", cxMm:20,cyMm:20,wMm:20,hMm:20}) ];
+    const v2 = migrateProject(v1);
+    v2.elements[0].depth.direction = "raised"; v2.elements[0].depth.heightMm = 2; v2.elements[0]._img = img;
+    const parts = buildRaisedParts(v2);
+    assertEqual(parts.length, 1, "one raised prism");
+    assert(parts[0].name.indexOf("erhaben") === 0, "raised part name");
+    assertEqual(parts[0].color[1], 255, "green prism");
+    assert(signedVol(parts[0].facets) > 0, "watertight (positive volume)");
+    const zb = zbounds(parts[0].facets);
+    assertClose(zb.mn, 3, 1e-6, "prism bottom at base top (thicknessMm)");
+    assertClose(zb.mx, 5, 1e-6, "prism top at thicknessMm + heightMm");
+  });
+
+  test("raised: engraved elements are ignored", async () => {
+    const img = await solidImg("#00ff00", 8, 8);
+    const v1 = defaultBookmark(); v1.resolution=120;
+    v1.elements=[ makeImageElement({src:"a", colorMode:"solid", color:"#00ff00", cxMm:25,cyMm:75,wMm:20,hMm:20}) ];
+    const v2 = migrateProject(v1);  // direction defaults to 'engraved'
+    v2.elements[0]._img = img;
+    assertEqual(buildRaisedParts(v2).length, 0, "engraved element -> no raised parts");
+  });
+})();
+```
+
+Add to `tests/run.html` after the `mount-ring.test.js` tag:
+```html
+<script src="raised-parts.test.js"></script>
+```
+
+- [ ] **Step 2: Run the tests; verify the new ones FAIL**
+
+`python3 -m http.server 8026`; load `tests/run.html`; `window.__ready()`.
+Expected: `fail: 2`, `buildRaisedParts is not defined`. All 39 prior tests pass.
+
+- [ ] **Step 3: Implement in `js/build-parts.js`**
+
+Inside the IIFE (before the `window.* =` exports), add:
+
+```javascript
+  // Raised element prisms: for depth.direction==='raised' elements, extrude their
+  // colored regions UP from the base top face. Base plate is built separately.
+  // Height: depth.heightMm for solid/text; (rank+1)*step per color for colorLayers.
+  function buildRaisedParts(doc) {
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const comp = composeDesignV2(doc, cols, rows);
+    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
+    const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
+    const idx = (c, r) => r * cols + c;
+    const tracedFacets = (member, thickness, z0) => window.orientOutward(
+      window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
+
+    const heightForElemColor = (el, hex) => {
+      if (el.depth && el.depth.mode === "colorLayers") {
+        const remap = (el.depth.reduce && el.depth.reduce.remap) || {};
+        const seq = __orderedNaturalHexesV2(el).map(nat => { const c = window.hexToRgb(remap[nat] || nat); return __hex(c[0], c[1], c[2]); });
+        const rank = seq.indexOf(hex);
+        return ((rank < 0 ? 0 : rank) + 1) * step;
+      }
+      return Math.max((el.depth && el.depth.heightMm) || 0, layerH);
+    };
+
+    const groups = new Map(); // "ei|hex" -> {ei, hex, set}
+    for (let i = 0; i < cols * rows; i++) {
+      const ei = comp.owner[i];
+      if (ei < 0 || comp.cutout[i]) continue;
+      const el = doc.elements[ei];
+      if (!(el.depth && el.depth.direction === "raised")) continue;
+      const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
+      const key = ei + "|" + hex;
+      let g = groups.get(key); if (!g) groups.set(key, g = { ei, hex, set: new Uint8Array(cols * rows) });
+      g.set[i] = 1;
+    }
+    const parts = []; let n = 0;
+    for (const g of groups.values()) {
+      const h = heightForElemColor(doc.elements[g.ei], g.hex);
+      const facets = tracedFacets((c, r) => g.set[idx(c, r)] === 1, h, T);
+      if (facets.length) parts.push({ name: "erhaben-" + (++n), color: window.hexToRgb(g.hex), facets });
+    }
+    return parts;
+  }
+```
+
+Add to the `window.* =` export block:
+```javascript
+  window.buildRaisedParts = buildRaisedParts;
+```
+
+- [ ] **Step 4: Run the tests; verify all pass**
+
+Reload on a fresh port (`python3 -m http.server 8027`). Expected: `fail: 0`; the 2 raised tests pass; all 39 prior tests still pass (41 total).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add js/build-parts.js tests/raised-parts.test.js tests/run.html
+git commit -m "feat(geometry): buildRaisedParts — raised element prisms above the base
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage:** Implements the spec's § "Geometry engine" step 1 ("Rasterize each element to the resolution grid … reusing the composer's composeDesign/__renderElement + image-ops + bg-removal") for v2, reading `element.depth`. Steps 2–4 (per-mode/direction part emission, base recesses, assembly) are the follow-on tasks.
