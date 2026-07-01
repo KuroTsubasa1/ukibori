@@ -80,6 +80,9 @@ Element = {
     reduce: { method:'palette'|'posterize', numColors, levels, remap:{}, order:[] }, // colorLayers
     threshold, invert, // image thresholding / heightmap inversion
     smooth, baseFloorMm, // heightmap: smoothing + minimum floor under the surface
+    // NOTE (Phase 2 impl): `smooth` is NOT yet wired in the engine — the heightmap
+    // builder ignores it (the legacy relief `smoothTol` was also dead). The Phase 3
+    // UI must not expose a smoothing control until the engine implements it.
   },
   // type-specific:
   src, _img,                     // image (runtime _img never serialized)
