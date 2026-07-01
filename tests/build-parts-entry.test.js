@@ -10,7 +10,6 @@
     const v1 = defaultBookmark(); v1.widthMm=40; v1.heightMm=80; v1.resolution=200;
     v1.elements=[ makeImageElement({src:"a", colorMode:"solid", color:"#ff0000", cxMm:20,cyMm:40,wMm:24,hMm:24, depthLayers:2}) ];
     v1.elements[0]._img = img;
-    const eng = buildEngravedParts(migrateProject(v1));         // migrate keeps _img=null...
     // give both the same decoded image:
     const d2 = migrateProject(v1); d2.elements[0]._img = img;
     const engImg = buildEngravedParts(d2);

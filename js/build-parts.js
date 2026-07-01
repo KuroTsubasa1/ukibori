@@ -32,6 +32,7 @@
     return [{ name: "grundplatte", color: window.hexToRgb(body.baseColor), facets }];
   }
 
+  // IIFE-local; intentionally distinct from bookmark-export.js's module-scope __hex/__ALPHA_CUTOFF (no collision).
   const __ALPHA_CUTOFF = 128;
 
   // Draw one element (translate/rotate + text/image) to a cols×rows canvas and
@@ -122,6 +123,7 @@
     return { r, g, b, depthMm, cutout, isBase, owner };
   }
 
+  // IIFE-local; intentionally distinct from bookmark-export.js's module-scope __hex/__ALPHA_CUTOFF (no collision).
   function __hex(r, g, b) {
     return ("#" + [r, g, b].map(x => x.toString(16).padStart(2, "0")).join("")).toUpperCase();
   }
@@ -231,7 +233,7 @@
 
   // Unified entry: base (recessed under engraved pixels, full-thickness elsewhere) +
   // engraved colored floors + raised prisms + heightmap slabs + mount ring.
-  // rect/circle bodies; free-outline base is a later task.
+  // Handles rect/circle/free bodies.
   function buildParts(doc) {
     const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
     const comp = composeDesignV2(doc, cols, rows);
@@ -247,6 +249,7 @@
       return !!(d && d.direction === "engraved" && d.mode !== "heightmap");
     };
     const base = window.hexToRgb(doc.body.baseColor);
+    // depthMm and cutout are shared read-only (alias intentional; only r/g/b/isBase/owner are sliced because only they are rewritten).
     const engComp = {
       r: comp.r.slice(), g: comp.g.slice(), b: comp.b.slice(),
       depthMm: comp.depthMm, cutout: comp.cutout,
@@ -436,7 +439,7 @@
       let v = borderCells - dt[idx(c, r)];              // >0 within borderCells of silhouette
       if (hasHole) {
         const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
-        v = Math.min(v, (Math.hypot(x - cx, y - cy) - holeR) * s); // subtract the hole
+        v = Math.min(v, (Math.hypot(x - cx, y - cy) - holeR) * s); // intersect with the hole SDF (min): negative inside the hole
       }
       return v;
     };
