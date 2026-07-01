@@ -665,6 +665,179 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
+### Task 5 (T5c): `buildHeightmapParts(doc)` — continuous brightness→height relief
+
+**Files:**
+- Modify: `js/build-parts.js` (extract `__drawElement`; refactor `__renderElementV2` to use it; add `buildHeightmapParts`; export `window.buildHeightmapParts`)
+- Create: `tests/heightmap-parts.test.js`
+- Modify: `tests/run.html` (add the test script)
+
+**Background:** For `depth.mode === 'heightmap'` elements, the image's brightness drives height (the relief's signature). Since FDM slicing discretizes to `layerHeightMm` anyway, we build it as a **floor slab + stacked super-level slabs** (each a flat extrusion of the region where brightness ≥ a threshold) — reusing the proven `traceMaskToFacets`/`extrudeLoops` primitives (watertight per slab), physically identical to a continuous surface once printed. This needs the element's raw luminance, so we extract a shared `__drawElement` canvas helper (used by both `__renderElementV2` and the heightmap path — no new duplication).
+
+**Interfaces:**
+- Consumes: `gridForBody` (this file); `window.shapeFootprintField`, `window.traceMaskToFacets`, `window.orientOutward`, `window.hexToRgb`.
+- Produces:
+  - `__drawElement(el, doc, cols, rows) -> Uint8ClampedArray` (internal): the RGBA pixel data after drawing the element (translate/rotate/drawImage or fillText) at grid resolution. `__renderElementV2` is refactored to call it (behavior unchanged — the canvas ops are moved verbatim, so engraved parity holds).
+  - `buildHeightmapParts(doc) -> PART[]`: for each `heightmap` element, a floor slab over the silhouette (`z = thicknessMm .. thicknessMm + baseFloor`, `baseFloor = clamp(depth.baseFloorMm, layerHeightMm, heightMm)`) plus K super-level slabs (`K = clamp(round((heightMm-baseFloor)/layerHeightMm), 0, 48)`), slab k present where per-pixel brightness ≥ `k/K`, at `z = thicknessMm + baseFloor + (k-1)*Δ`, thickness `Δ = (heightMm-baseFloor)/K`. Brightness = luminance/255 (inverted if `depth.invert`). All slabs colored `el.color`. Part names `hoehe-<ei+1>-boden` / `hoehe-<ei+1>-<k>`. `[]` if no heightmap elements.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/heightmap-parts.test.js`:
+
+```javascript
+"use strict";
+(function () {
+  function signedVol(f){let v=0;for(const t of f){const[a,b,c]=t;v+=(a[0]*(b[1]*c[2]-b[2]*c[1])-a[1]*(b[0]*c[2]-b[2]*c[0])+a[2]*(b[0]*c[1]-b[1]*c[0]))/6;}return v;}
+  function zbounds(f){let mn=Infinity,mx=-Infinity;for(const t of f)for(const p of t){if(p[2]<mn)mn=p[2];if(p[2]>mx)mx=p[2];}return{mn,mx};}
+  async function halfImg(leftHex,rightHex,w,h){const cv=document.createElement("canvas");cv.width=w;cv.height=h;const cx=cv.getContext("2d");cx.fillStyle=leftHex;cx.fillRect(0,0,w/2,h);cx.fillStyle=rightHex;cx.fillRect(w/2,0,w/2,h);const img=new Image();await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=cv.toDataURL("image/png");});return img;}
+
+  test("heightmap: brightness drives height (black floor, white full relief)", async () => {
+    const img = await halfImg("#000000", "#ffffff", 16, 16);
+    const v1 = defaultBookmark(); v1.widthMm=40; v1.heightMm=40; v1.thicknessMm=3; v1.layerHeightMm=0.2; v1.resolution=120;
+    v1.elements=[ makeImageElement({src:"a", color:"#888888", cxMm:20,cyMm:20,wMm:40,hMm:40}) ];
+    const v2 = migrateProject(v1);
+    v2.elements[0].depth.mode = "heightmap"; v2.elements[0].depth.heightMm = 1.0; v2.elements[0].depth.baseFloorMm = 0.2;
+    v2.elements[0]._img = img;
+    const parts = buildHeightmapParts(v2);
+    assert(parts.length >= 2, "floor + at least one relief slab");
+    assert(parts.every(p => signedVol(p.facets) > 0), "every slab watertight");
+    assert(parts.every(p => p.color[0] === 0x88), "all slabs use el.color (#888888)");
+    const all = parts.reduce((a, p) => a.concat(p.facets), []);
+    const zb = zbounds(all);
+    assertClose(zb.mn, 3, 1e-6, "relief bottom at base top (thicknessMm)");
+    assertClose(zb.mx, 4, 1e-6, "brightest (white) reaches thicknessMm + heightMm");
+  });
+
+  test("heightmap: no heightmap elements -> []", async () => {
+    const v1 = defaultBookmark(); v1.resolution=80;
+    const v2 = migrateProject(v1); // empty
+    assertEqual(buildHeightmapParts(v2).length, 0, "empty -> no parts");
+  });
+})();
+```
+
+Add to `tests/run.html` after the `raised-parts.test.js` tag:
+```html
+<script src="heightmap-parts.test.js"></script>
+```
+
+- [ ] **Step 2: Run the tests; verify the new ones FAIL**
+
+`python3 -m http.server 8030`; load `tests/run.html`; `window.__ready()`.
+Expected: `fail: 2`, `buildHeightmapParts is not defined`. All 41 prior tests pass.
+
+- [ ] **Step 3: Implement in `js/build-parts.js`**
+
+First, **extract `__drawElement` and refactor `__renderElementV2`**. `__renderElementV2` currently begins by creating a canvas, translating/rotating, drawing text/image, then `const d = ctx.getImageData(...).data; const n = cols*rows; ...`. Replace that opening canvas block with a call to a new shared helper. Add `__drawElement` immediately before `__renderElementV2`:
+
+```javascript
+  // Draw one element (translate/rotate + text/image) to a cols×rows canvas and
+  // return its RGBA pixel data. Shared by __renderElementV2 (mask/color) and the
+  // heightmap builder (luminance). Canvas ops are identical to the prior inline
+  // version, so engraved parity is unaffected.
+  function __drawElement(el, doc, cols, rows) {
+    const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
+    const cv = document.createElement("canvas"); cv.width = cols; cv.height = rows;
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    const w = el.wMm * sx, h = el.hMm * sy;
+    ctx.save();
+    ctx.translate(el.cxMm * sx, el.cyMm * sy);
+    ctx.rotate((el.rotationDeg || 0) * Math.PI / 180);
+    if (el.type === "text") {
+      ctx.fillStyle = el.color;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.font = `${el.fontWeight} ${Math.max(1, Math.round(h))}px ${el.fontFamily}`;
+      ctx.fillText(el.text, 0, 0);
+    } else if (el._img) {
+      ctx.drawImage(el._img, -w / 2, -h / 2, w, h);
+    }
+    ctx.restore();
+    return ctx.getImageData(0, 0, cols, rows).data;
+  }
+```
+
+Then change the start of `__renderElementV2` so that instead of its own canvas setup it does:
+```javascript
+  function __renderElementV2(el, doc, cols, rows) {
+    const d = __drawElement(el, doc, cols, rows);
+    const n = cols * rows;
+    const mask = new Uint8Array(n);
+    const r = new Uint8ClampedArray(n), g = new Uint8ClampedArray(n), b = new Uint8ClampedArray(n);
+    const depth = el.depth || {};
+    // ... (the existing colorLayers branch and solid/raised branch unchanged) ...
+```
+(Keep the rest of `__renderElementV2` — the `colorLayers` branch and the solid/threshold/`raised` branch — exactly as-is. Only its canvas-setup preamble is replaced by the `__drawElement` call.)
+
+Then add `buildHeightmapParts` (before the `window.* =` exports):
+
+```javascript
+  // Continuous brightness->height relief for depth.mode==='heightmap' elements:
+  // a floor slab over the silhouette + K super-level slabs (region where brightness
+  // >= k/K), each a flat extrusion. Prints identically to a smooth surface after
+  // slicing. Single color (el.color); height from luminance.
+  function buildHeightmapParts(doc) {
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
+    const idx = (c, r) => r * cols + c;
+    const tracedFacets = (member, thickness, z0) => window.orientOutward(
+      window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
+    const parts = [];
+    doc.elements.forEach((el, ei) => {
+      const depth = el.depth || {};
+      if (depth.mode !== "heightmap") return;
+      if (el.type === "image" && !el._img) return;
+      const d = __drawElement(el, doc, cols, rows);
+      const maxH = Math.max(layerH, depth.heightMm || 0);
+      const baseFloor = Math.min(Math.max(depth.baseFloorMm || 0, layerH), maxH);
+      const availH = Math.max(0, maxH - baseFloor);
+      const invert = !!depth.invert;
+      const col = window.hexToRgb(el.color);
+      const n = cols * rows;
+      const bright = new Float32Array(n), inRegion = new Uint8Array(n);
+      for (let i = 0; i < n; i++) {
+        if (d[i * 4 + 3] < 128) continue;
+        let lum = (0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]) / 255;
+        if (invert) lum = 1 - lum;
+        bright[i] = lum; inRegion[i] = 1;
+      }
+      const floor = tracedFacets((c, r) => inRegion[idx(c, r)] === 1, baseFloor, T);
+      if (floor.length) parts.push({ name: "hoehe-" + (ei + 1) + "-boden", color: col, facets: floor });
+      const K = Math.max(0, Math.min(48, Math.round(availH / layerH)));
+      const dz = K > 0 ? availH / K : 0;
+      for (let k = 1; k <= K; k++) {
+        const thr = k / K, z0 = T + baseFloor + (k - 1) * dz;
+        const facets = tracedFacets((c, r) => inRegion[idx(c, r)] === 1 && bright[idx(c, r)] >= thr, dz, z0);
+        if (facets.length) parts.push({ name: "hoehe-" + (ei + 1) + "-" + k, color: col, facets });
+      }
+    });
+    return parts;
+  }
+```
+
+Add to the `window.* =` export block:
+```javascript
+  window.buildHeightmapParts = buildHeightmapParts;
+```
+
+- [ ] **Step 4: Run the tests; verify all pass**
+
+Reload on a fresh port (`python3 -m http.server 8031`). Expected: `fail: 0`; the 2 heightmap tests pass; all 41 prior tests still pass (43 total) — **including the engraved-parity tests** (confirming the `__drawElement` extraction didn't change `__renderElementV2`'s behavior). If engraved parity breaks, the extraction changed a canvas op — revert to verbatim.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add js/build-parts.js tests/heightmap-parts.test.js tests/run.html
+git commit -m "feat(geometry): buildHeightmapParts — brightness->height relief (slab stack)
+
+Extract __drawElement shared canvas helper; heightmap builds a floor + super-level
+slabs from per-pixel luminance. Prints identically to a continuous surface.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage:** Implements the spec's § "Geometry engine" step 1 ("Rasterize each element to the resolution grid … reusing the composer's composeDesign/__renderElement + image-ops + bg-removal") for v2, reading `element.depth`. Steps 2–4 (per-mode/direction part emission, base recesses, assembly) are the follow-on tasks.
