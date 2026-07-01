@@ -235,13 +235,17 @@
   function buildParts(doc) {
     const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
     const comp = composeDesignV2(doc, cols, rows);
-    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    const free = doc.body.shape === "free";
+    const footprint = free
+      ? freeFootprintField(doc, cols, rows, pitch)
+      : window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    const ringBody = free
+      ? freeFootprintField({ ...doc, mount: Object.assign({}, doc.mount, { type: "none" }) }, cols, rows, pitch)
+      : window.shapeFootprintField(cols, rows, doc.body, { type: "none" });
     const isEngravedEi = (ei) => {
       const d = doc.elements[ei] && doc.elements[ei].depth;
       return !!(d && d.direction === "engraved" && d.mode !== "heightmap");
     };
-    // Reclassify non-engraved-owned pixels as base so the engraved base recesses
-    // ONLY under engraved elements; raised/heightmap pixels get a full-thickness base.
     const base = window.hexToRgb(doc.body.baseColor);
     const engComp = {
       r: comp.r.slice(), g: comp.g.slice(), b: comp.b.slice(),
@@ -257,20 +261,20 @@
     }
     return [
       ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint),
-      ...buildRaisedParts(doc),
-      ...buildHeightmapParts(doc),
-      ...buildMountRingParts(doc),
+      ...buildRaisedParts(doc, footprint),
+      ...buildHeightmapParts(doc, footprint),
+      ...buildMountRingParts(doc, ringBody),
     ];
   }
 
   // The loop (Öse) ring: an annulus around the mount hole, standing proud of the
   // base top face. Only for mount.type==='loop' with a positive ring wall + height.
   // Body-colored, intersected with the (no-hole) body footprint so it can't overhang.
-  function buildMountRingParts(doc) {
+  function buildMountRingParts(doc, bodyFootprintArg) {
     const m = doc.mount || {};
     if (m.type !== "loop" || !(m.ringThicknessMm > 0) || !(m.ringHeightMm > 0)) return [];
     const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
-    const bodyOnly = window.shapeFootprintField(cols, rows, doc.body, { type: "none" });
+    const bodyOnly = bodyFootprintArg || window.shapeFootprintField(cols, rows, doc.body, { type: "none" });
     const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
     const innerR = m.diameterMm / 2, outerR = innerR + m.ringThicknessMm;
     const cx = m.xMm, cy = m.yMm;
@@ -290,10 +294,10 @@
   // Height: depth.heightMm for solid/text; (rank+1)*step per color for colorLayers.
   // Uses the shared composeDesignV2 rasterizer; a raised "colored stamp" that should
   // keep bright pixels uses a high depth.threshold (256 => alpha-only).
-  function buildRaisedParts(doc) {
+  function buildRaisedParts(doc, footprintArg) {
     const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
     const comp = composeDesignV2(doc, cols, rows);
-    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    const footprint = footprintArg || window.shapeFootprintField(cols, rows, doc.body, doc.mount);
     const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
     const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
     const idx = (c, r) => r * cols + c;
@@ -334,9 +338,9 @@
   // a floor slab over the silhouette + K super-level slabs (region where brightness
   // >= k/K), each a flat extrusion. Prints identically to a smooth surface after
   // slicing. Single color (el.color); height from luminance.
-  function buildHeightmapParts(doc) {
+  function buildHeightmapParts(doc, footprintArg) {
     const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
-    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    const footprint = footprintArg || window.shapeFootprintField(cols, rows, doc.body, doc.mount);
     const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
     const idx = (c, r) => r * cols + c;
     const tracedFacets = (member, thickness, z0) => window.orientOutward(
