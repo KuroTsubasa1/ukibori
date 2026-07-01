@@ -77,9 +77,12 @@
 
     const col = window.hexToRgb(el.color);
     const thr = depth.threshold != null ? depth.threshold : 128;
+    // Raised elements are colored "stamps" -> alpha-only silhouette. Engraved/default
+    // images use the luminance threshold (a stencil), preserving bookmark parity.
+    const raised = depth.direction === "raised";
     for (let i = 0; i < n; i++) {
       let on = d[i * 4 + 3] >= __ALPHA_CUTOFF;
-      if (on && el.type === "image") {
+      if (on && el.type === "image" && !raised) {
         const lum = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
         on = depth.invert ? lum >= thr : lum < thr;
       }
