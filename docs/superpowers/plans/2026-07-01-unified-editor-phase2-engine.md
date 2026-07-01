@@ -420,6 +420,121 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
+### Task 3 (T5a): `buildMountRingParts(doc)` — the loop (Öse) ring
+
+**Files:**
+- Modify: `js/build-parts.js` (inside the IIFE; add `buildMountRingParts`; export `window.buildMountRingParts`)
+- Create: `tests/mount-ring.test.js`
+- Modify: `tests/run.html` (add the test script)
+
+**Background:** The v2 analogue of relief's `fBoss`. When `doc.mount.type === 'loop'`, a reinforced ring (annulus) sits around the mounting hole, standing proud of the base top face. The hole itself is already cut by `shapeFootprintField` (Task foundation); this builds the additive ring. The v2 model now carries `mount.ringThicknessMm` (in-plane wall) and `mount.ringHeightMm` (protrusion height). Body-colored (`baseColor`), like relief's Öse.
+
+**Interfaces:**
+- Consumes: `gridForBody` (this file); `window.shapeFootprintField`, `window.traceMaskToFacets`, `window.orientOutward`, `window.hexToRgb`. Reads `doc.body.{widthMm,heightMm,thicknessMm,baseColor,shape,cornerRadiusMm}`, `doc.mount.{type,xMm,yMm,diameterMm,ringThicknessMm,ringHeightMm}`, `doc.resolution`.
+- Produces: `buildMountRingParts(doc) -> PART[]`. Returns `[]` unless `mount.type === 'loop'` and `ringThicknessMm > 0` and `ringHeightMm > 0`. Otherwise `[{name:'oese', color:hexToRgb(baseColor), facets}]`: an annulus centered at `(mount.xMm, mount.yMm)` — inner radius `diameterMm/2`, outer radius `diameterMm/2 + ringThicknessMm` — intersected with the body (no-hole) footprint so it can't overhang the plate, extruded `z = thicknessMm .. thicknessMm + ringHeightMm`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/mount-ring.test.js`:
+
+```javascript
+"use strict";
+(function () {
+  function signedVol(facets) {
+    let v = 0;
+    for (const t of facets) { const [a,b,c]=t;
+      v += (a[0]*(b[1]*c[2]-b[2]*c[1]) - a[1]*(b[0]*c[2]-b[2]*c[0]) + a[2]*(b[0]*c[1]-b[1]*c[0]))/6; }
+    return v;
+  }
+  function zbounds(facets){ let mn=Infinity,mx=-Infinity; for(const t of facets) for(const p of t){ if(p[2]<mn)mn=p[2]; if(p[2]>mx)mx=p[2]; } return {mn,mx}; }
+  function loopDoc() {
+    const d = defaultDoc();
+    d.body.shape="rect"; d.body.widthMm=40; d.body.heightMm=120; d.body.thicknessMm=3; d.body.baseColor="#334455";
+    d.resolution=240;
+    d.mount = { type:"loop", xMm:20, yMm:10, diameterMm:6, ringThicknessMm:2.5, ringHeightMm:2, marginMm:7 };
+    return d;
+  }
+
+  test("mount ring: loop produces one watertight annular Öse at the right z", () => {
+    const parts = buildMountRingParts(loopDoc());
+    assertEqual(parts.length, 1, "one ring part");
+    assertEqual(parts[0].name, "oese", "named oese");
+    assert(parts[0].facets.length > 0, "has facets");
+    assert(signedVol(parts[0].facets) > 0, "watertight (positive volume)");
+    const zb = zbounds(parts[0].facets);
+    assertClose(zb.mn, 3, 1e-6, "ring bottom at base top (thicknessMm)");
+    assertClose(zb.mx, 5, 1e-6, "ring top at thicknessMm + ringHeightMm");
+  });
+
+  test("mount ring: none/hole/zero-thickness produce no ring", () => {
+    const none = loopDoc(); none.mount.type = "none";
+    assertEqual(buildMountRingParts(none).length, 0, "type none -> no ring");
+    const hole = loopDoc(); hole.mount.type = "hole";
+    assertEqual(buildMountRingParts(hole).length, 0, "type hole -> no ring");
+    const zero = loopDoc(); zero.mount.ringThicknessMm = 0;
+    assertEqual(buildMountRingParts(zero).length, 0, "zero ring thickness -> no ring");
+  });
+})();
+```
+
+Add to `tests/run.html` after the `engraved-parity.test.js` tag:
+```html
+<script src="mount-ring.test.js"></script>
+```
+
+- [ ] **Step 2: Run the tests; verify the new ones FAIL**
+
+`python3 -m http.server 8024`; load `tests/run.html`; `window.__ready()`.
+Expected: `fail: 2`, `buildMountRingParts is not defined`. All 37 prior tests pass.
+
+- [ ] **Step 3: Implement in `js/build-parts.js`**
+
+Inside the IIFE (before the `window.* =` exports), add:
+
+```javascript
+  // The loop (Öse) ring: an annulus around the mount hole, standing proud of the
+  // base top face. Only for mount.type==='loop' with a positive ring wall + height.
+  // Body-colored, intersected with the (no-hole) body footprint so it can't overhang.
+  function buildMountRingParts(doc) {
+    const m = doc.mount || {};
+    if (m.type !== "loop" || !(m.ringThicknessMm > 0) || !(m.ringHeightMm > 0)) return [];
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const bodyOnly = window.shapeFootprintField(cols, rows, doc.body, { type: "none" });
+    const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
+    const innerR = m.diameterMm / 2, outerR = innerR + m.ringThicknessMm;
+    const cx = m.xMm, cy = m.yMm;
+    const inRing = (c, r) => {
+      const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
+      const d = Math.hypot(x - cx, y - cy);
+      return d >= innerR && d <= outerR && bodyOnly(c, r) > 0;
+    };
+    const facets = window.orientOutward(
+      window.traceMaskToFacets(inRing, cols, rows, pitch, m.ringHeightMm, doc.body.thicknessMm));
+    if (!facets.length) return [];
+    return [{ name: "oese", color: window.hexToRgb(doc.body.baseColor), facets }];
+  }
+```
+
+Add to the `window.* =` export block:
+```javascript
+  window.buildMountRingParts = buildMountRingParts;
+```
+
+- [ ] **Step 4: Run the tests; verify all pass**
+
+Reload on a fresh port (`python3 -m http.server 8025`). Expected: `fail: 0`; the 2 ring tests pass; all 37 prior tests still pass (39 total).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add js/build-parts.js tests/mount-ring.test.js tests/run.html
+git commit -m "feat(geometry): buildMountRingParts — v2 loop (Öse) ring
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage:** Implements the spec's § "Geometry engine" step 1 ("Rasterize each element to the resolution grid … reusing the composer's composeDesign/__renderElement + image-ops + bg-removal") for v2, reading `element.depth`. Steps 2–4 (per-mode/direction part emission, base recesses, assembly) are the follow-on tasks.
