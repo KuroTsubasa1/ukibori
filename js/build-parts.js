@@ -34,10 +34,11 @@
 
   const __ALPHA_CUTOFF = 128;
 
-  // v2 analogue of bookmark-export __renderElement: rasterize one element to a
-  // cols×rows grid. mask[i]=1 where opaque; r/g/b per pixel. Reads el.depth.* for
-  // mode/threshold/invert/reduce (v1 read el.colorMode/threshold/invert/reduce).
-  function __renderElementV2(el, doc, cols, rows) {
+  // Draw one element (translate/rotate + text/image) to a cols×rows canvas and
+  // return its RGBA pixel data. Shared by __renderElementV2 (mask/color) and the
+  // heightmap builder (luminance). Canvas ops are identical to the prior inline
+  // version, so engraved parity is unaffected.
+  function __drawElement(el, doc, cols, rows) {
     const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
     const cv = document.createElement("canvas"); cv.width = cols; cv.height = rows;
     const ctx = cv.getContext("2d", { willReadFrequently: true });
@@ -54,7 +55,15 @@
       ctx.drawImage(el._img, -w / 2, -h / 2, w, h);
     }
     ctx.restore();
-    const d = ctx.getImageData(0, 0, cols, rows).data, n = cols * rows;
+    return ctx.getImageData(0, 0, cols, rows).data;
+  }
+
+  // v2 analogue of bookmark-export __renderElement: rasterize one element to a
+  // cols×rows grid. mask[i]=1 where opaque; r/g/b per pixel. Reads el.depth.* for
+  // mode/threshold/invert/reduce (v1 read el.colorMode/threshold/invert/reduce).
+  function __renderElementV2(el, doc, cols, rows) {
+    const d = __drawElement(el, doc, cols, rows);
+    const n = cols * rows;
     const mask = new Uint8Array(n);
     const r = new Uint8ClampedArray(n), g = new Uint8ClampedArray(n), b = new Uint8ClampedArray(n);
     const depth = el.depth || {};
@@ -285,10 +294,54 @@
     return parts;
   }
 
+  // Continuous brightness->height relief for depth.mode==='heightmap' elements:
+  // a floor slab over the silhouette + K super-level slabs (region where brightness
+  // >= k/K), each a flat extrusion. Prints identically to a smooth surface after
+  // slicing. Single color (el.color); height from luminance.
+  function buildHeightmapParts(doc) {
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
+    const idx = (c, r) => r * cols + c;
+    const tracedFacets = (member, thickness, z0) => window.orientOutward(
+      window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
+    const parts = [];
+    doc.elements.forEach((el, ei) => {
+      const depth = el.depth || {};
+      if (depth.mode !== "heightmap") return;
+      if (el.type === "image" && !el._img) return;
+      const d = __drawElement(el, doc, cols, rows);
+      const maxH = Math.max(layerH, depth.heightMm || 0);
+      const baseFloor = Math.min(Math.max(depth.baseFloorMm || 0, layerH), maxH);
+      const availH = Math.max(0, maxH - baseFloor);
+      const invert = !!depth.invert;
+      const col = window.hexToRgb(el.color);
+      const n = cols * rows;
+      const bright = new Float32Array(n), inRegion = new Uint8Array(n);
+      for (let i = 0; i < n; i++) {
+        if (d[i * 4 + 3] < 128) continue;
+        let lum = (0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]) / 255;
+        if (invert) lum = 1 - lum;
+        bright[i] = lum; inRegion[i] = 1;
+      }
+      const floor = tracedFacets((c, r) => inRegion[idx(c, r)] === 1, baseFloor, T);
+      if (floor.length) parts.push({ name: "hoehe-" + (ei + 1) + "-boden", color: col, facets: floor });
+      const K = Math.max(0, Math.min(48, Math.round(availH / layerH)));
+      const dz = K > 0 ? availH / K : 0;
+      for (let k = 1; k <= K; k++) {
+        const thr = k / K, z0 = T + baseFloor + (k - 1) * dz;
+        const facets = tracedFacets((c, r) => inRegion[idx(c, r)] === 1 && bright[idx(c, r)] >= thr, dz, z0);
+        if (facets.length) parts.push({ name: "hoehe-" + (ei + 1) + "-" + k, color: col, facets });
+      }
+    });
+    return parts;
+  }
+
   window.gridForBody = gridForBody;
   window.buildBaseParts = buildBaseParts;
   window.composeDesignV2 = composeDesignV2;
   window.buildEngravedParts = buildEngravedParts;
   window.buildMountRingParts = buildMountRingParts;
   window.buildRaisedParts = buildRaisedParts;
+  window.buildHeightmapParts = buildHeightmapParts;
 })();
