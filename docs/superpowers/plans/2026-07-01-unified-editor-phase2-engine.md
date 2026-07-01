@@ -1255,6 +1255,156 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
+### Task 8 (T7b): wire the free branch into `buildParts` (thread the shared footprint)
+
+**Files:**
+- Modify: `js/build-parts.js` (add optional footprint params to `buildRaisedParts`/`buildHeightmapParts`/`buildMountRingParts`; use free footprint in `buildParts`)
+- Create: `tests/free-entry.test.js`
+- Modify: `tests/run.html` (add the test script)
+
+**Background:** Completes the engine. The sub-builders currently each compute their own `shapeFootprintField`; to support free bodies, `buildParts` must compute the footprint once (free → `freeFootprintField`) and pass it to all builders. rect/circle output is unchanged (the passed footprint equals what the builders computed), so all parity tests still hold.
+
+**Interfaces:**
+- Consumes: `freeFootprintField` (T7a), `shapeFootprintField`, the existing builders.
+- Produces:
+  - `buildRaisedParts(doc, footprint)` / `buildHeightmapParts(doc, footprint)`: optional `footprint`; default `shapeFootprintField(cols,rows,doc.body,doc.mount)` (unchanged behavior when omitted).
+  - `buildMountRingParts(doc, bodyFootprint)`: optional no-hole body footprint; default `shapeFootprintField(cols,rows,doc.body,{type:'none'})` (unchanged when omitted).
+  - `buildParts(doc)`: for `body.shape==='free'`, footprint = `freeFootprintField(doc,...)` and the ring's body footprint = `freeFootprintField({...doc, mount:{...doc.mount, type:'none'}},...)`; otherwise the shape fields as before. Passes them to all builders.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `tests/free-entry.test.js`:
+
+```javascript
+"use strict";
+(function () {
+  function signedVol(f){let v=0;for(const t of f){const[a,b,c]=t;v+=(a[0]*(b[1]*c[2]-b[2]*c[1])-a[1]*(b[0]*c[2]-b[2]*c[0])+a[2]*(b[0]*c[1]-b[1]*c[0]))/6;}return v;}
+  function bbox(f){let mnx=Infinity,mny=Infinity,mxx=-Infinity,mxy=-Infinity;for(const t of f)for(const p of t){if(p[0]<mnx)mnx=p[0];if(p[0]>mxx)mxx=p[0];if(p[1]<mny)mny=p[1];if(p[1]>mxy)mxy=p[1];}return{mnx,mny,mxx,mxy};}
+  async function solidImg(hex,w,h){const cv=document.createElement("canvas");cv.width=w;cv.height=h;const cx=cv.getContext("2d");cx.fillStyle=hex;cx.fillRect(0,0,w,h);const img=new Image();await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=cv.toDataURL("image/png");});return img;}
+
+  test("entry (free): plate is the dilated silhouette, not the full canvas", async () => {
+    const img = await solidImg("#ffffff", 8, 8);
+    const v1 = defaultBookmark(); v1.widthMm=40; v1.heightMm=40; v1.resolution=120;
+    v1.elements=[ makeImageElement({src:"a", color:"#ffffff", cxMm:20,cyMm:20,wMm:10,hMm:10, depthLayers:2}) ];
+    const doc = migrateProject(v1);
+    doc.body.shape = "free"; doc.body.borderMm = 3; doc.elements[0]._img = img;
+    doc.mount = { type:"none", xMm:20, yMm:10, diameterMm:5, ringThicknessMm:0, ringHeightMm:2, marginMm:8 };
+    const parts = buildParts(doc);
+    assert(parts.length >= 1, "has parts");
+    assert(parts.every(p => Math.abs(signedVol(p.facets)) > 0), "all parts watertight");
+    const bb = bbox(parts.reduce((a, p) => a.concat(p.facets), []));
+    const wx = bb.mxx - bb.mnx, wy = bb.mxy - bb.mny;
+    assert(wx < 25 && wy < 25, "plate ~ content(10) + 2x3mm border, NOT the full 40mm canvas");
+    assert(wx > 12 && wy > 12, "plate includes the content plus its margin");
+  });
+
+  test("entry: rect body still equals buildEngravedParts for a pure-engraved doc (unchanged)", async () => {
+    const img = await solidImg("#101010", 8, 8);
+    const v1 = defaultBookmark(); v1.widthMm=40; v1.heightMm=80; v1.resolution=180;
+    v1.elements=[ makeImageElement({src:"a", colorMode:"solid", color:"#ff0000", cxMm:20,cyMm:40,wMm:20,hMm:20, depthLayers:2}) ];
+    const dA = migrateProject(v1); dA.elements[0]._img = img;
+    const dB = migrateProject(v1); dB.elements[0]._img = img;
+    const eng = buildEngravedParts(dA), got = buildParts(dB);
+    assertEqual(got.length, eng.length, "rect buildParts unchanged vs buildEngravedParts");
+  });
+})();
+```
+
+Add to `tests/run.html` after the `free-footprint.test.js` tag:
+```html
+<script src="free-entry.test.js"></script>
+```
+
+- [ ] **Step 2: Run the tests; verify the new ones FAIL**
+
+`python3 -m http.server 8036`; load `tests/run.html`; `window.__ready()`.
+Expected: the first test FAILS (free body currently uses `shapeFootprintField` → plate is the full 40mm rect, so `wx < 25` fails). The second test PASSES already (rect unchanged). So `fail: 1`. All 50 prior tests pass.
+
+- [ ] **Step 3: Implement in `js/build-parts.js`**
+
+Add the optional footprint params. In `buildRaisedParts`, change the signature and the footprint line:
+```javascript
+  function buildRaisedParts(doc, footprintArg) {
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const comp = composeDesignV2(doc, cols, rows);
+    const footprint = footprintArg || window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+```
+(the rest of the function, which uses `footprint`, is unchanged.)
+
+In `buildHeightmapParts`, the same:
+```javascript
+  function buildHeightmapParts(doc, footprintArg) {
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const footprint = footprintArg || window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+```
+(the rest unchanged.)
+
+In `buildMountRingParts`, change the signature and the `bodyOnly` line:
+```javascript
+  function buildMountRingParts(doc, bodyFootprintArg) {
+    const m = doc.mount || {};
+    if (m.type !== "loop" || !(m.ringThicknessMm > 0) || !(m.ringHeightMm > 0)) return [];
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const bodyOnly = bodyFootprintArg || window.shapeFootprintField(cols, rows, doc.body, { type: "none" });
+```
+(the rest, which uses `bodyOnly`, is unchanged.)
+
+In `buildParts`, replace the single `footprint` computation and the builder calls so the free footprint is used:
+```javascript
+  function buildParts(doc) {
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const comp = composeDesignV2(doc, cols, rows);
+    const free = doc.body.shape === "free";
+    const footprint = free
+      ? freeFootprintField(doc, cols, rows, pitch)
+      : window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    const ringBody = free
+      ? freeFootprintField({ ...doc, mount: Object.assign({}, doc.mount, { type: "none" }) }, cols, rows, pitch)
+      : window.shapeFootprintField(cols, rows, doc.body, { type: "none" });
+    const isEngravedEi = (ei) => {
+      const d = doc.elements[ei] && doc.elements[ei].depth;
+      return !!(d && d.direction === "engraved" && d.mode !== "heightmap");
+    };
+    const base = window.hexToRgb(doc.body.baseColor);
+    const engComp = {
+      r: comp.r.slice(), g: comp.g.slice(), b: comp.b.slice(),
+      depthMm: comp.depthMm, cutout: comp.cutout,
+      isBase: comp.isBase.slice(), owner: comp.owner.slice(),
+    };
+    for (let i = 0; i < cols * rows; i++) {
+      const ei = comp.owner[i];
+      if (ei >= 0 && !isEngravedEi(ei)) {
+        engComp.isBase[i] = 1; engComp.owner[i] = -1;
+        engComp.r[i] = base[0]; engComp.g[i] = base[1]; engComp.b[i] = base[2];
+      }
+    }
+    return [
+      ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint),
+      ...buildRaisedParts(doc, footprint),
+      ...buildHeightmapParts(doc, footprint),
+      ...buildMountRingParts(doc, ringBody),
+    ];
+  }
+```
+
+- [ ] **Step 4: Run the tests; verify all pass**
+
+Reload on a fresh port (`python3 -m http.server 8037`). Expected: `fail: 0`; both free-entry tests pass; **all 50 prior tests still pass (52 total), including every parity test** (rect/circle `buildParts` output is unchanged because the passed footprint equals what the builders computed internally).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add js/build-parts.js tests/free-entry.test.js tests/run.html
+git commit -m "feat(geometry): buildParts free-body branch + offset-margin border (thread footprint)
+
+Sub-builders accept an optional shared footprint; buildParts uses freeFootprintField
+for body.shape==='free' (offset-margin border). rect/circle output unchanged.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage:** Implements the spec's § "Geometry engine" step 1 ("Rasterize each element to the resolution grid … reusing the composer's composeDesign/__renderElement + image-ops + bg-removal") for v2, reading `element.depth`. Steps 2–4 (per-mode/direction part emission, base recesses, assembly) are the follow-on tasks.
