@@ -237,9 +237,115 @@
     return [{ name: "oese", color: window.hexToRgb(doc.body.baseColor), facets }];
   }
 
+  // Rasterize one raised element with alpha-only masking (no luminance threshold).
+  // For colorLayers: nearest-palette per pixel. For solid/text: flat el.color on
+  // every opaque pixel. Raised elements are colored stamps, not silhouettes.
+  function __renderRaisedElement(el, doc, cols, rows) {
+    const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
+    const cv = document.createElement("canvas"); cv.width = cols; cv.height = rows;
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    const w = el.wMm * sx, h = el.hMm * sy;
+    ctx.save();
+    ctx.translate(el.cxMm * sx, el.cyMm * sy);
+    ctx.rotate((el.rotationDeg || 0) * Math.PI / 180);
+    if (el.type === "text") {
+      ctx.fillStyle = el.color;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.font = `${el.fontWeight} ${Math.max(1, Math.round(h))}px ${el.fontFamily}`;
+      ctx.fillText(el.text, 0, 0);
+    } else if (el._img) {
+      ctx.drawImage(el._img, -w / 2, -h / 2, w, h);
+    }
+    ctx.restore();
+    const d = ctx.getImageData(0, 0, cols, rows).data, n = cols * rows;
+    const mask = new Uint8Array(n);
+    const r = new Uint8ClampedArray(n), g = new Uint8ClampedArray(n), b = new Uint8ClampedArray(n);
+    const depth = el.depth || {};
+    if (el.type === "image" && depth.mode === "colorLayers" && el._img) {
+      const red = depth.reduce || { method: "palette", numColors: 8, levels: 4, remap: {} };
+      const pal = window.__imagePaletteFromImg(el._img, red.method, red.numColors, red.levels);
+      const remap = red.remap || {};
+      const hx = (R, G, B) => ("#" + [R, G, B].map(x => x.toString(16).padStart(2, "0")).join("")).toUpperCase();
+      for (let i = 0; i < n; i++) {
+        if (d[i * 4 + 3] < __ALPHA_CUTOFF) continue;
+        const near = window.__nearestColor(pal, d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
+        let cr = near[0], cg = near[1], cb = near[2];
+        const m = remap[hx(cr, cg, cb)];
+        if (m) { const c = window.hexToRgb(m); cr = c[0]; cg = c[1]; cb = c[2]; }
+        mask[i] = 1; r[i] = cr; g[i] = cg; b[i] = cb;
+      }
+      return { mask, r, g, b };
+    }
+    // Solid/text: alpha-only mask; raised elements are colored stamps, not lum-thresholded silhouettes.
+    const col = window.hexToRgb(el.color);
+    for (let i = 0; i < n; i++) {
+      if (d[i * 4 + 3] >= __ALPHA_CUTOFF) { mask[i] = 1; r[i] = col[0]; g[i] = col[1]; b[i] = col[2]; }
+    }
+    return { mask, r, g, b };
+  }
+
+  // Raised element prisms: for depth.direction==='raised' elements, extrude their
+  // colored regions UP from the base top face. Base plate is built separately.
+  // Height: depth.heightMm for solid/text; (rank+1)*step per color for colorLayers.
+  // Uses alpha-only rasterization for raised elements (not lum-threshold silhouettes).
+  function buildRaisedParts(doc) {
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
+    const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
+    const idx = (c, r) => r * cols + c;
+    const tracedFacets = (member, thickness, z0) => window.orientOutward(
+      window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
+
+    const heightForElemColor = (el, hex) => {
+      if (el.depth && el.depth.mode === "colorLayers") {
+        const remap = (el.depth.reduce && el.depth.reduce.remap) || {};
+        const seq = __orderedNaturalHexesV2(el).map(nat => { const c = window.hexToRgb(remap[nat] || nat); return __hex(c[0], c[1], c[2]); });
+        const rank = seq.indexOf(hex);
+        return ((rank < 0 ? 0 : rank) + 1) * step;
+      }
+      return Math.max((el.depth && el.depth.heightMm) || 0, layerH);
+    };
+
+    // Composite only the raised elements (last = on top), alpha-only mask.
+    const n = cols * rows;
+    const compR = new Uint8ClampedArray(n), compG = new Uint8ClampedArray(n), compB = new Uint8ClampedArray(n);
+    const owner = new Int32Array(n).fill(-1);
+    const cutout = new Uint8Array(n);
+    doc.elements.forEach((el, ei) => {
+      if (!(el.depth && el.depth.direction === "raised")) return;
+      if (el.type === "image" && !el._img) return;
+      if (el.cutout) return; // cutout raised elements don't extrude
+      const layer = __renderRaisedElement(el, doc, cols, rows);
+      for (let i = 0; i < n; i++) {
+        if (!layer.mask[i]) continue;
+        compR[i] = layer.r[i]; compG[i] = layer.g[i]; compB[i] = layer.b[i];
+        owner[i] = ei;
+      }
+    });
+
+    const groups = new Map(); // "ei|hex" -> {ei, hex, set}
+    for (let i = 0; i < n; i++) {
+      const ei = owner[i];
+      if (ei < 0 || cutout[i]) continue;
+      const hex = __hex(compR[i], compG[i], compB[i]);
+      const key = ei + "|" + hex;
+      let g = groups.get(key); if (!g) groups.set(key, g = { ei, hex, set: new Uint8Array(n) });
+      g.set[i] = 1;
+    }
+    const parts = []; let pn = 0;
+    for (const g of groups.values()) {
+      const h = heightForElemColor(doc.elements[g.ei], g.hex);
+      const facets = tracedFacets((c, r) => g.set[idx(c, r)] === 1, h, T);
+      if (facets.length) parts.push({ name: "erhaben-" + (++pn), color: window.hexToRgb(g.hex), facets });
+    }
+    return parts;
+  }
+
   window.gridForBody = gridForBody;
   window.buildBaseParts = buildBaseParts;
   window.composeDesignV2 = composeDesignV2;
   window.buildEngravedParts = buildEngravedParts;
   window.buildMountRingParts = buildMountRingParts;
+  window.buildRaisedParts = buildRaisedParts;
 })();
