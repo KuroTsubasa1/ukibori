@@ -141,16 +141,11 @@
     return out;
   }
 
-  // Engraved model for a v2 doc: a v2 port of buildBookmarkParts. Solid base plate;
-  // each color is a recess floor whose depth = rank * step (front-most = shallowest);
-  // continuous bottom slab + background/under-color risers keep it manifold. Reuses
-  // the same slab+riser construction as the bookmark builder (so a migrated v1 doc
-  // reproduces buildBookmarkParts output). Raised/heightmap directions are separate
-  // builders (later tasks); this is the engraved path.
-  function buildEngravedParts(doc) {
-    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
-    const comp = composeDesignV2(doc, cols, rows);
-    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+  // Engraved base slab + risers + per-color recess floors, from a pre-composed grid.
+  // (Body extracted verbatim from buildEngravedParts so a pure-engraved comp is
+  // unchanged — parity preserved. buildParts feeds it a comp where non-engraved
+  // pixels have been reclassified as base.)
+  function __engravedBaseAndFloors(doc, comp, cols, rows, pitch, footprint) {
     const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
     const baseHex = doc.body.baseColor.toUpperCase();
     const idx = (c, r) => r * cols + c;
@@ -225,6 +220,47 @@
     for (const set of behind.values()) baseAdd((c, r) => set.m[idx(c, r)] === 1, set.h - minBase, minBase);
 
     return [...baseParts, ...colorParts];
+  }
+
+  function buildEngravedParts(doc) {
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const comp = composeDesignV2(doc, cols, rows);
+    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    return __engravedBaseAndFloors(doc, comp, cols, rows, pitch, footprint);
+  }
+
+  // Unified entry: base (recessed under engraved pixels, full-thickness elsewhere) +
+  // engraved colored floors + raised prisms + heightmap slabs + mount ring.
+  // rect/circle bodies; free-outline base is a later task.
+  function buildParts(doc) {
+    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+    const comp = composeDesignV2(doc, cols, rows);
+    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    const isEngravedEi = (ei) => {
+      const d = doc.elements[ei] && doc.elements[ei].depth;
+      return !!(d && d.direction === "engraved" && d.mode !== "heightmap");
+    };
+    // Reclassify non-engraved-owned pixels as base so the engraved base recesses
+    // ONLY under engraved elements; raised/heightmap pixels get a full-thickness base.
+    const base = window.hexToRgb(doc.body.baseColor);
+    const engComp = {
+      r: comp.r.slice(), g: comp.g.slice(), b: comp.b.slice(),
+      depthMm: comp.depthMm, cutout: comp.cutout,
+      isBase: comp.isBase.slice(), owner: comp.owner.slice(),
+    };
+    for (let i = 0; i < cols * rows; i++) {
+      const ei = comp.owner[i];
+      if (ei >= 0 && !isEngravedEi(ei)) {
+        engComp.isBase[i] = 1; engComp.owner[i] = -1;
+        engComp.r[i] = base[0]; engComp.g[i] = base[1]; engComp.b[i] = base[2];
+      }
+    }
+    return [
+      ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint),
+      ...buildRaisedParts(doc),
+      ...buildHeightmapParts(doc),
+      ...buildMountRingParts(doc),
+    ];
   }
 
   // The loop (Öse) ring: an annulus around the mount hole, standing proud of the
@@ -344,4 +380,5 @@
   window.buildMountRingParts = buildMountRingParts;
   window.buildRaisedParts = buildRaisedParts;
   window.buildHeightmapParts = buildHeightmapParts;
+  window.buildParts = buildParts;
 })();
