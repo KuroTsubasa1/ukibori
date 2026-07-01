@@ -84,7 +84,7 @@ function defaultDoc() {
     body: {
       shape: "rect",
       widthMm: 50, heightMm: 150, cornerRadiusMm: 4,
-      thicknessMm: 3, layerHeightMm: 0.2, baseColor: "#000000",
+      thicknessMm: 3, layerHeightMm: 0.2, baseColor: "#000000", borderMm: 2,
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
     // xMm/yMm = hole/loop CENTER (see migrateProject); yMm = marginMm + diameterMm/2.
@@ -134,7 +134,7 @@ function migrateProject(doc) {
       widthMm: doc.widthMm, heightMm: doc.heightMm,
       cornerRadiusMm: doc.cornerRadiusMm != null ? doc.cornerRadiusMm : 0,
       thicknessMm: doc.thicknessMm, layerHeightMm: layerH,
-      baseColor: doc.baseColor || "#000000",
+      baseColor: doc.baseColor || "#000000", borderMm: 2,
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
     // mount.xMm/yMm are the hole/loop CENTER (matches js/geometry.js roundedRectHoleField:

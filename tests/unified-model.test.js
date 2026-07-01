@@ -102,4 +102,11 @@
     v1.fonts = { "bmfont-x": "data:font" };
     assertEqual(migrateProject(v1).fonts["bmfont-x"], "data:font", "fonts carried");
   });
+
+  test("v2: defaultDoc.body has borderMm default", () => {
+    assertEqual(defaultDoc().body.borderMm, 2, "border default 2mm");
+  });
+  test("migrate: v1 doc gets body.borderMm", () => {
+    assertEqual(migrateProject(defaultBookmark()).body.borderMm, 2, "migrated border 2mm");
+  });
 })();

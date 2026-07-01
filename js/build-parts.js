@@ -373,6 +373,71 @@
     return parts;
   }
 
+  // Union of the elements' opaque silhouette on the grid (or just the element named
+  // by body.freeOutlineFromElementId, if set). Uses __drawElement (alpha cutoff 128).
+  function __silhouetteMask(doc, cols, rows) {
+    const n = cols * rows, mask = new Uint8Array(n);
+    const only = doc.body.freeOutlineFromElementId;
+    doc.elements.forEach((el) => {
+      if (only != null && el.id !== only) return;
+      if (el.type === "image" && !el._img) return;
+      const d = __drawElement(el, doc, cols, rows);
+      for (let i = 0; i < n; i++) if (d[i * 4 + 3] >= 128) mask[i] = 1;
+    });
+    return mask;
+  }
+
+  // Two-pass chamfer distance transform: distance (in cells) to the nearest set
+  // pixel. D1=1 (orthogonal), D2=sqrt(2) (diagonal) — near-Euclidean.
+  function __chamferDT(mask, cols, rows) {
+    const INF = 1e9, n = cols * rows, dist = new Float32Array(n);
+    for (let i = 0; i < n; i++) dist[i] = mask[i] ? 0 : INF;
+    const D1 = 1.0, D2 = Math.SQRT2, at = (c, r) => r * cols + c;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const i = at(c, r); let v = dist[i];
+      if (r > 0) {
+        v = Math.min(v, dist[at(c, r - 1)] + D1);
+        if (c > 0) v = Math.min(v, dist[at(c - 1, r - 1)] + D2);
+        if (c < cols - 1) v = Math.min(v, dist[at(c + 1, r - 1)] + D2);
+      }
+      if (c > 0) v = Math.min(v, dist[at(c - 1, r)] + D1);
+      dist[i] = v;
+    }
+    for (let r = rows - 1; r >= 0; r--) for (let c = cols - 1; c >= 0; c--) {
+      const i = at(c, r); let v = dist[i];
+      if (r < rows - 1) {
+        v = Math.min(v, dist[at(c, r + 1)] + D1);
+        if (c > 0) v = Math.min(v, dist[at(c - 1, r + 1)] + D2);
+        if (c < cols - 1) v = Math.min(v, dist[at(c + 1, r + 1)] + D2);
+      }
+      if (c < cols - 1) v = Math.min(v, dist[at(c + 1, r)] + D1);
+      dist[i] = v;
+    }
+    return dist;
+  }
+
+  // Free-outline footprint: the content silhouette dilated outward by body.borderMm
+  // (the offset-margin border), with the mount hole cut. >0 inside the plate. Same
+  // contract as shapeFootprintField (cell units, sign-based).
+  function freeFootprintField(doc, cols, rows, pitch) {
+    const dt = __chamferDT(__silhouetteMask(doc, cols, rows), cols, rows);
+    const borderCells = (doc.body.borderMm || 0) / pitch;
+    const idx = (c, r) => r * cols + c;
+    const m = doc.mount || { type: "none" };
+    const hasHole = m.type === "hole" || m.type === "loop";
+    const holeR = hasHole ? (m.diameterMm || 0) / 2 : 0;
+    const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm, s = (sx + sy) / 2;
+    const cx = hasHole ? m.xMm : 0, cy = hasHole ? m.yMm : 0;
+    return (c, r) => {
+      let v = borderCells - dt[idx(c, r)];              // >0 within borderCells of silhouette
+      if (hasHole) {
+        const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
+        v = Math.min(v, (Math.hypot(x - cx, y - cy) - holeR) * s); // subtract the hole
+      }
+      return v;
+    };
+  }
+
   window.gridForBody = gridForBody;
   window.buildBaseParts = buildBaseParts;
   window.composeDesignV2 = composeDesignV2;
@@ -381,4 +446,5 @@
   window.buildRaisedParts = buildRaisedParts;
   window.buildHeightmapParts = buildHeightmapParts;
   window.buildParts = buildParts;
+  window.freeFootprintField = freeFootprintField;
 })();
