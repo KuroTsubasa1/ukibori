@@ -51,6 +51,33 @@
     _rebuild3DTimer = setTimeout(function () { window.preview3d.rebuild(); }, 120);
   }
 
+  // ---- Element-field helpers (DRY refactor) ----
+
+  // Returns the currently selected element, or null.
+  function selectedEl() {
+    return doc.elements.find(function (e) { return e.id === state.selectedId; }) || null;
+  }
+
+  // Runs mutate(el) on the selected element, then optionally invalidates _display and re-renders.
+  // If mutate returns false, the update is aborted (no state change, no re-render).
+  function withSelected(mutate, opts) {
+    var el = selectedEl();
+    if (!el) return;
+    if (mutate(el) === false) return;
+    if (opts && opts.invalidate) delete el._display;
+    render2D();
+    scheduleRebuild3D();
+  }
+
+  // Wires a single control: on evt, calls withSelected with apply(el, node).
+  function bindElementField(id, evt, apply, opts) {
+    var node = document.getElementById(id);
+    if (!node) return;
+    node.addEventListener(evt, function () {
+      withSelected(function (el) { return apply(el, node); }, opts);
+    });
+  }
+
   // ---- Canvas fit scale ----
   // Returns px-per-mm to fit doc.body.widthMm × heightMm into the preview element.
   function fitScale() {
@@ -1227,120 +1254,61 @@
   document.getElementById("modeHeightmap").addEventListener("click", function () { applyDepthMode("heightmap"); });
 
   // -- Umwandlung inputs --
-  document.getElementById("advThreshold").addEventListener("input", function () {
-    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
-    if (!el) return;
-    var v = Number(this.value);
-    el.depth.threshold = v;
-    var badge = document.getElementById("advThresholdVal");
-    if (badge) badge.textContent = v;
-    delete el._display; // invalidate processed display cache
-    render2D();
-    scheduleRebuild3D();
-  });
+  bindElementField("advThreshold", "input", function (el, node) {
+    var v = Number(node.value); el.depth.threshold = v;
+    var badge = document.getElementById("advThresholdVal"); if (badge) badge.textContent = v;
+  }, { invalidate: true });
 
-  document.getElementById("advInvert").addEventListener("change", function () {
-    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
-    if (!el) return;
-    el.depth.invert = this.checked;
-    delete el._display; // invalidate processed display cache
-    render2D();
-    scheduleRebuild3D();
-  });
+  bindElementField("advInvert", "change", function (el, node) {
+    el.depth.invert = node.checked;
+  }, { invalidate: true });
 
-  document.getElementById("advNumColors").addEventListener("input", function () {
-    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
-    if (!el) return;
-    var v = Number(this.value);
-    if (!isNaN(v) && v >= 2) {
-      el.depth.reduce.numColors = v;
-      delete el._display; // invalidate processed display cache; regenerate palette
-      renderPaletteSwatches(el);
-      render2D();
-      scheduleRebuild3D();
-    }
-  });
+  bindElementField("advNumColors", "input", function (el, node) {
+    var v = Number(node.value); if (isNaN(v) || v < 2) return false;
+    el.depth.reduce.numColors = v; renderPaletteSwatches(el);
+  }, { invalidate: true });
 
   // -- Element inputs --
-  document.getElementById("advColor").addEventListener("input", function () {
-    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
-    if (!el) return;
-    el.color = this.value;
-    delete el._display; // invalidate (solid mode color changes silhouette)
-    render2D();
-    scheduleRebuild3D();
+  bindElementField("advColor", "input", function (el, node) {
+    el.color = node.value;
+  }, { invalidate: true });
+
+  bindElementField("advCx", "input", function (el, node) {
+    var v = parseFloat(node.value); if (isNaN(v)) return false; el.cxMm = v;
   });
 
-  document.getElementById("advCx").addEventListener("input", function () {
-    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
-    if (!el) return;
-    var v = parseFloat(this.value);
-    if (!isNaN(v)) { el.cxMm = v; render2D(); scheduleRebuild3D(); }
+  bindElementField("advCy", "input", function (el, node) {
+    var v = parseFloat(node.value); if (isNaN(v)) return false; el.cyMm = v;
   });
 
-  document.getElementById("advCy").addEventListener("input", function () {
-    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
-    if (!el) return;
-    var v = parseFloat(this.value);
-    if (!isNaN(v)) { el.cyMm = v; render2D(); scheduleRebuild3D(); }
+  bindElementField("advW", "input", function (el, node) {
+    var v = parseFloat(node.value); if (isNaN(v) || v < 0.5) return false; el.wMm = v;
   });
 
-  document.getElementById("advW").addEventListener("input", function () {
-    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
-    if (!el) return;
-    var v = parseFloat(this.value);
-    if (!isNaN(v) && v >= 0.5) { el.wMm = v; render2D(); scheduleRebuild3D(); }
+  bindElementField("advH", "input", function (el, node) {
+    var v = parseFloat(node.value); if (isNaN(v) || v < 0.5) return false; el.hMm = v;
   });
 
-  document.getElementById("advH").addEventListener("input", function () {
-    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
-    if (!el) return;
-    var v = parseFloat(this.value);
-    if (!isNaN(v) && v >= 0.5) { el.hMm = v; render2D(); scheduleRebuild3D(); }
+  bindElementField("advRot", "input", function (el, node) {
+    var v = Number(node.value); el.rotationDeg = v;
+    var badge = document.getElementById("advRotVal"); if (badge) badge.textContent = v + "°";
   });
 
-  document.getElementById("advRot").addEventListener("input", function () {
-    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
-    if (!el) return;
-    var v = Number(this.value);
-    el.rotationDeg = v;
-    var badge = document.getElementById("advRotVal");
-    if (badge) badge.textContent = v + "°";
-    render2D();
-    scheduleRebuild3D();
-  });
-
-  document.getElementById("advCutout").addEventListener("change", function () {
-    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
-    if (!el) return;
-    el.cutout = this.checked;
-    render2D();
-    scheduleRebuild3D();
+  bindElementField("advCutout", "change", function (el, node) {
+    el.cutout = node.checked;
   });
 
   // -- Per-element direction (Erhaben / Vertieft) --
-  document.getElementById("advDirRaised").addEventListener("click", function () {
-    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
-    if (!el) return;
+  bindElementField("advDirRaised", "click", function (el) {
     el.depth.direction = "raised";
-    var advDirRaised = document.getElementById("advDirRaised");
-    var advDirEngraved = document.getElementById("advDirEngraved");
-    if (advDirRaised) advDirRaised.classList.add("seg-active");
-    if (advDirEngraved) advDirEngraved.classList.remove("seg-active");
-    render2D();
-    scheduleRebuild3D();
+    var r = document.getElementById("advDirRaised"), g = document.getElementById("advDirEngraved");
+    if (r) r.classList.add("seg-active"); if (g) g.classList.remove("seg-active");
   });
 
-  document.getElementById("advDirEngraved").addEventListener("click", function () {
-    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
-    if (!el) return;
+  bindElementField("advDirEngraved", "click", function (el) {
     el.depth.direction = "engraved";
-    var advDirRaised = document.getElementById("advDirRaised");
-    var advDirEngraved = document.getElementById("advDirEngraved");
-    if (advDirRaised) advDirRaised.classList.remove("seg-active");
-    if (advDirEngraved) advDirEngraved.classList.add("seg-active");
-    render2D();
-    scheduleRebuild3D();
+    var r = document.getElementById("advDirRaised"), g = document.getElementById("advDirEngraved");
+    if (r) r.classList.remove("seg-active"); if (g) g.classList.add("seg-active");
   });
 
   // -- 3D / Export doc-level inputs --
