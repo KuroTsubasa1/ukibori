@@ -81,9 +81,28 @@
     api.orbitCamera(camera, c, orbit.radius, orbit.theta, orbit.phi);
   }
 
+  // Free a built scene's GPU resources. three.js does NOT garbage-collect
+  // BufferGeometry / Material — they must be .dispose()'d explicitly. Without this
+  // every rebuild()/show() leaked one geometry + material per part; over a session
+  // (each edit -> rebuild, continuous in split mode) that exhausted memory and led
+  // to WebGL context loss / tab OOM (freeze + reload to the default doc).
+  api.disposeScene = function (built) {
+    if (!built || !built.scene || typeof built.scene.traverse !== "function") return;
+    built.scene.traverse(function (o) {
+      if (!o.isMesh) return;
+      if (o.geometry && o.geometry.dispose) o.geometry.dispose();
+      var m = o.material;
+      if (Array.isArray(m)) { m.forEach(function (x) { if (x && x.dispose) x.dispose(); }); }
+      else if (m && m.dispose) { m.dispose(); }
+    });
+  };
+
   api.rebuild = function () {
     if (!active || !getPartsFn) return;
-    const parts = (getPartsFn() || {}).parts || [];
+    var parts;
+    try { parts = (getPartsFn() || {}).parts || []; }
+    catch (e) { if (window.__errs) window.__errs.push("rebuild: " + (e && e.message || e)); return; }
+    api.disposeScene(current);              // free the previous scene before replacing it
     current = api.buildPreviewScene(parts);
     if (!orbit.center) fitCamera(current); else api.orbitCamera(camera, orbit.center, orbit.radius, orbit.theta, orbit.phi);
     renderOnce();
@@ -110,13 +129,14 @@
     resize();
     window.addEventListener('resize', resize);
     const parts = (getParts() || {}).parts || [];
+    api.disposeScene(current);              // free a prior scene if show() runs again
     current = api.buildPreviewScene(parts);
     fitCamera(current);
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
     loop();
   };
-  api.hide = function () { active = false; if (raf) cancelAnimationFrame(raf); raf = 0; window.removeEventListener('resize', resize); if (canvasEl) canvasEl.hidden = true; };
+  api.hide = function () { active = false; if (raf) cancelAnimationFrame(raf); raf = 0; window.removeEventListener('resize', resize); api.disposeScene(current); current = null; if (canvasEl) canvasEl.hidden = true; };
   api.isActive = function () { return active; };
 
   function attachOrbit(canvas) {
