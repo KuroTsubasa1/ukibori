@@ -151,6 +151,21 @@ function migrateProject(doc) {
   };
 }
 
+// === v2 element factory =====================================================
+// Creates a v2-shaped element (uses v2 doc's depth/color fields, not v1
+// colorMode/depthLayers). Additive — does not change existing v1 factories.
+function makeElementV2(type, props) {
+  const e = Object.assign({
+    id: __nextId(), type,
+    cxMm: 25, cyMm: 75, wMm: 30, hMm: 30, rotationDeg: 0,
+    cutout: false, color: "#ffffff",
+    depth: defaultDepth(type),
+  }, props);
+  if (type === "image") { if (e.src == null) e.src = ""; e._img = e._img || null; }
+  if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; }
+  return e;
+}
+
 window.defaultBookmark = defaultBookmark;
 window.makeImageElement = makeImageElement;
 window.makeTextElement = makeTextElement;
@@ -160,3 +175,4 @@ window.DOC_VERSION = DOC_VERSION;
 window.defaultDepth = defaultDepth;
 window.defaultDoc = defaultDoc;
 window.migrateProject = migrateProject;
+window.makeElementV2 = makeElementV2;
