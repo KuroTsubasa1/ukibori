@@ -507,6 +507,28 @@ function roundedRectHoleField(cols, rows, p) {
 }
 window.roundedRectHoleField = roundedRectHoleField;
 
+// Signed mm-space SDF for a body shape: >0 inside the plate, <0 outside, in mm.
+// body={shape:'rect'|'circle', widthMm, heightMm, cornerRadiusMm}.
+// Extracted verbatim from shapeFootprintField (geometry is identical; units = mm).
+// Used by build-parts.js for footprint union and by editor.js for drag clamp.
+function bodySdfMm(body) {
+  const W = body.widthMm, H = body.heightMm;
+  const hw = W / 2, hh = H / 2;
+  const isCircle = body.shape === "circle";
+  const rr = Math.min(body.cornerRadiusMm || 0, hw, hh);
+  const bodyR = Math.min(hw, hh);                // inscribed circle radius
+  return (xMm, yMm) => {
+    if (isCircle) {
+      return bodyR - Math.hypot(xMm - hw, yMm - hh);    // >0 inside circle, mm
+    } else {
+      const qx = Math.abs(xMm - hw) - (hw - rr), qy = Math.abs(yMm - hh) - (hh - rr);
+      const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - rr;
+      return -outside;                                   // >0 inside rounded-rect, mm
+    }
+  };
+}
+window.bodySdfMm = bodySdfMm;
+
 // Generalized footprint field for the unified engine: >0 inside the body AND
 // outside any mount hole, in cell units (same convention as roundedRectHoleField).
 // body={shape:'rect'|'circle', widthMm, heightMm, cornerRadiusMm}. mount.xMm/yMm
@@ -517,24 +539,14 @@ function shapeFootprintField(cols, rows, body, mount) {
   const W = body.widthMm, H = body.heightMm;
   const sx = cols / W, sy = rows / H;            // cells per mm
   const s = (sx + sy) / 2;                       // ~uniform mm -> cells
-  const hw = W / 2, hh = H / 2;
-  const isCircle = body.shape === "circle";
-  const rr = Math.min(body.cornerRadiusMm || 0, hw, hh);
-  const bodyR = Math.min(hw, hh);                // inscribed circle radius
+  const sdfMm = bodySdfMm(body);
   const m = mount || { type: "none" };
   const hasHole = m.type === "hole" || m.type === "loop";
   const holeR = hasHole ? (m.diameterMm || 0) / 2 : 0;
   const holeCx = hasHole ? m.xMm : 0, holeCy = hasHole ? m.yMm : 0;
   return (c, r) => {
     const x = (c + 0.5) / sx, y = (r + 0.5) / sy;        // mm, origin top-left
-    let bodyInside;
-    if (isCircle) {
-      bodyInside = bodyR - Math.hypot(x - hw, y - hh);   // >0 inside circle, mm
-    } else {
-      const qx = Math.abs(x - hw) - (hw - rr), qy = Math.abs(y - hh) - (hh - rr);
-      const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - rr;
-      bodyInside = -outside;                             // >0 inside rounded-rect, mm
-    }
+    const bodyInside = sdfMm(x, y);
     if (!hasHole) return bodyInside * s;
     const holeOutside = Math.hypot(x - holeCx, y - holeCy) - holeR; // >0 outside hole
     return Math.min(bodyInside, holeOutside) * s;        // mm -> cells

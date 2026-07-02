@@ -17,13 +17,53 @@
     return { cols, rows, pitch: body.widthMm / cols };
   }
 
+  // Compute the raster domain for a doc. Normally the body box {x0:0,y0:0,wMm:W,hMm:H}.
+  // When mount.type==='loop' and the washer overhangs beyond the body box (per-side),
+  // expand to the union bbox (washer + plate) with ~1mm pad on overhanging sides only.
+  // Degenerate loop (ringThicknessMm<=0 or diameterMm<=0) falls back to body box.
+  function docDomain(doc) {
+    const W = doc.body.widthMm, H = doc.body.heightMm;
+    const m = doc.mount;
+    const PAD = 1.0; // mm of extra padding on expanded sides
+    if (m && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0) {
+      const outerR = m.diameterMm / 2 + m.ringThicknessMm;
+      const cx = m.xMm, cy = m.yMm;
+      // Washer bbox:
+      const wx0 = cx - outerR, wx1 = cx + outerR;
+      const wy0 = cy - outerR, wy1 = cy + outerR;
+      // Only expand sides that actually overhang (beyond body box)
+      const x0 = wx0 < 0 ? wx0 - PAD : 0;
+      const y0 = wy0 < 0 ? wy0 - PAD : 0;
+      const x1 = wx1 > W ? wx1 + PAD : W;
+      const y1 = wy1 > H ? wy1 + PAD : H;
+      // If no expansion happened, return the body box exactly
+      if (x0 === 0 && y0 === 0 && x1 === W && y1 === H) {
+        return { x0: 0, y0: 0, wMm: W, hMm: H };
+      }
+      return { x0, y0, wMm: x1 - x0, hMm: y1 - y0 };
+    }
+    return { x0: 0, y0: 0, wMm: W, hMm: H };
+  }
+
+  // Raster grid for an arbitrary domain. Same longest-side=resolution rule as gridForBody,
+  // delegating to it so the default body-box path is provably identical.
+  // Returns {cols, rows, pitch, x0, y0}.
+  function gridForDomain(domain, resolution) {
+    // Delegate by constructing a pseudo-body matching the domain dimensions
+    const pseudoBody = { widthMm: domain.wMm, heightMm: domain.hMm };
+    const { cols, rows, pitch } = gridForBody(pseudoBody, resolution);
+    return { cols, rows, pitch, x0: domain.x0, y0: domain.y0 };
+  }
+
   // Base plate: the body footprint (with the mount hole cut) extruded from z=0 to
   // body.thicknessMm, colored body.baseColor. The loop's raised ring is built
   // separately (later task).
-  function buildBaseParts(doc) {
-    const body = doc.body, mount = doc.mount;
-    const { cols, rows, pitch } = gridForBody(body, doc.resolution);
-    const field = window.shapeFootprintField(cols, rows, body, mount);
+  // grid: optional shared grid {cols,rows,pitch,x0,y0}; footprintArg: optional field.
+  // If omitted, defaults to the body-box domain (byte-identical to prior behavior).
+  function buildBaseParts(doc, grid, footprintArg) {
+    const body = doc.body;
+    const { cols, rows, pitch } = grid || gridForBody(body, doc.resolution);
+    const field = footprintArg || window.shapeFootprintField(cols, rows, body, doc.mount);
     const inside = (c, r) => field(c, r) > 0;
     const facets = window.orientOutward(
       window.traceMaskToFacets(inside, cols, rows, pitch, body.thicknessMm, 0)
@@ -39,13 +79,19 @@
   // return its RGBA pixel data. Shared by __renderElementV2 (mask/color) and the
   // heightmap builder (luminance). Canvas ops are identical to the prior inline
   // version, so engraved parity is unaffected.
-  function __drawElement(el, doc, cols, rows) {
-    const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
+  // grid: optional {x0,y0,pitch} for expanded-domain mapping; default = body-box.
+  function __drawElement(el, doc, cols, rows, grid) {
+    // Map element mm coordinates to canvas pixels.
+    // Default: sx=cols/W (body-box origin). With grid: origin is shifted by x0/y0.
+    const pitch = grid ? grid.pitch : doc.body.widthMm / cols;
+    const sx = 1 / pitch, sy = 1 / pitch;
+    const ox = grid ? -grid.x0 * sx : 0;
+    const oy = grid ? -grid.y0 * sy : 0;
     const cv = document.createElement("canvas"); cv.width = cols; cv.height = rows;
     const ctx = cv.getContext("2d", { willReadFrequently: true });
     const w = el.wMm * sx, h = el.hMm * sy;
     ctx.save();
-    ctx.translate(el.cxMm * sx, el.cyMm * sy);
+    ctx.translate(el.cxMm * sx + ox, el.cyMm * sy + oy);
     ctx.rotate((el.rotationDeg || 0) * Math.PI / 180);
     if (el.type === "text") {
       ctx.fillStyle = el.color;
@@ -62,8 +108,9 @@
   // v2 analogue of bookmark-export __renderElement: rasterize one element to a
   // cols×rows grid. mask[i]=1 where opaque; r/g/b per pixel. Reads el.depth.* for
   // mode/threshold/invert/reduce (v1 read el.colorMode/threshold/invert/reduce).
-  function __renderElementV2(el, doc, cols, rows) {
-    const d = __drawElement(el, doc, cols, rows);
+  // grid: optional shared grid for expanded-domain drawing.
+  function __renderElementV2(el, doc, cols, rows, grid) {
+    const d = __drawElement(el, doc, cols, rows, grid);
     const n = cols * rows;
     const mask = new Uint8Array(n);
     const r = new Uint8ClampedArray(n), g = new Uint8ClampedArray(n), b = new Uint8ClampedArray(n);
@@ -103,7 +150,8 @@
 
   // v2 analogue of bookmark-export composeDesign: composite elements (last = on
   // top) into per-pixel front color/depth/flags. Same return shape as composeDesign.
-  function composeDesignV2(doc, cols, rows) {
+  // grid: optional shared grid for expanded-domain drawing.
+  function composeDesignV2(doc, cols, rows, grid) {
     const n = cols * rows;
     const base = window.hexToRgb(doc.body.baseColor);
     const r = new Uint8ClampedArray(n), g = new Uint8ClampedArray(n), b = new Uint8ClampedArray(n);
@@ -112,7 +160,7 @@
     for (let i = 0; i < n; i++) { r[i] = base[0]; g[i] = base[1]; b[i] = base[2]; depthMm[i] = doc.body.thicknessMm; isBase[i] = 1; }
     doc.elements.forEach((el, ei) => {
       if (el.type === "image" && !el._img) return;
-      const layer = __renderElementV2(el, doc, cols, rows);
+      const layer = __renderElementV2(el, doc, cols, rows, grid);
       const eh = (el.depth && el.depth.heightMm) || 0;
       for (let i = 0; i < n; i++) {
         if (!layer.mask[i]) continue;
@@ -224,26 +272,55 @@
     return [...baseParts, ...colorParts];
   }
 
-  function buildEngravedParts(doc) {
-    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
-    const comp = composeDesignV2(doc, cols, rows);
-    const footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+  function buildEngravedParts(doc, gridArg, footprintArg) {
+    const grid = gridArg || gridForBody(doc.body, doc.resolution);
+    const { cols, rows, pitch } = grid;
+    const comp = composeDesignV2(doc, cols, rows, gridArg);
+    const footprint = footprintArg || window.shapeFootprintField(cols, rows, doc.body, doc.mount);
     return __engravedBaseAndFloors(doc, comp, cols, rows, pitch, footprint);
   }
 
   // Unified entry: base (recessed under engraved pixels, full-thickness elsewhere) +
-  // engraved colored floors + raised prisms + heightmap slabs + mount ring.
+  // engraved colored floors + raised prisms + heightmap slabs. Mount ring no longer
+  // emitted (Öse is now a flat tab via footprint union on the expanded domain).
   // Handles rect/circle/free bodies.
   function buildParts(doc) {
-    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
-    const comp = composeDesignV2(doc, cols, rows);
+    // Compute a single shared grid over the expanded domain (expanded only when the
+    // Öse washer overhangs the body box; default = body box, byte-identical path).
+    const domain = docDomain(doc);
+    const grid = gridForDomain(domain, doc.resolution);
+    const { cols, rows, pitch } = grid;
+
+    const comp = composeDesignV2(doc, cols, rows, grid);
     const free = doc.body.shape === "free";
-    const footprint = free
-      ? freeFootprintField(doc, cols, rows, pitch)
-      : window.shapeFootprintField(cols, rows, doc.body, doc.mount);
-    const ringBody = free
-      ? freeFootprintField({ ...doc, mount: Object.assign({}, doc.mount, { type: "none" }) }, cols, rows, pitch)
-      : window.shapeFootprintField(cols, rows, doc.body, { type: "none" });
+
+    // Build the composed footprint. For loop with valid params:
+    //   rect/circle: max(plateSDF, washerSDF) min holeSDF, in cell units
+    //   free: washer unioned into freeFootprintField (inside freeFootprintField)
+    let footprint;
+    const m = doc.mount;
+    const isLoop = m && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0;
+    if (free) {
+      footprint = freeFootprintField(doc, cols, rows, pitch, grid);
+    } else if (isLoop) {
+      // Expanded path: union plate SDF with washer disk SDF, then cut hole
+      const plateSdf = window.bodySdfMm(doc.body);
+      const outerR = m.diameterMm / 2 + m.ringThicknessMm;
+      const holeR = m.diameterMm / 2;
+      const s = 1 / pitch;
+      const x0 = grid.x0, y0 = grid.y0;
+      footprint = (c, r) => {
+        const x = x0 + (c + 0.5) * pitch, y = y0 + (r + 0.5) * pitch;
+        const plate = plateSdf(x, y);
+        const washer = outerR - Math.hypot(x - m.xMm, y - m.yMm);
+        const unionDist = Math.max(plate, washer);       // inside plate OR washer
+        const holeDist = Math.hypot(x - m.xMm, y - m.yMm) - holeR; // >0 outside hole
+        return Math.min(unionDist, holeDist) * s;        // hole cut, cell units
+      };
+    } else {
+      footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    }
+
     const isEngravedEi = (ei) => {
       const d = doc.elements[ei] && doc.elements[ei].depth;
       return !!(d && d.direction === "engraved" && d.mode !== "heightmap");
@@ -264,32 +341,17 @@
     }
     return [
       ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint),
-      ...buildRaisedParts(doc, footprint, comp),
-      ...buildHeightmapParts(doc, footprint),
-      ...buildMountRingParts(doc, ringBody),
+      ...buildRaisedParts(doc, footprint, comp, grid),
+      ...buildHeightmapParts(doc, footprint, grid),
+      ...buildMountRingParts(doc),
     ];
   }
 
-  // The loop (Öse) ring: an annulus around the mount hole, standing proud of the
-  // base top face. Only for mount.type==='loop' with a positive ring wall + height.
-  // Body-colored, intersected with the (no-hole) body footprint so it can't overhang.
-  function buildMountRingParts(doc, bodyFootprintArg) {
-    const m = doc.mount || {};
-    if (m.type !== "loop" || !(m.ringThicknessMm > 0) || !(m.ringHeightMm > 0)) return [];
-    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
-    const bodyOnly = bodyFootprintArg || window.shapeFootprintField(cols, rows, doc.body, { type: "none" });
-    const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
-    const innerR = m.diameterMm / 2, outerR = innerR + m.ringThicknessMm;
-    const cx = m.xMm, cy = m.yMm;
-    const inRing = (c, r) => {
-      const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
-      const d = Math.hypot(x - cx, y - cy);
-      return d >= innerR && d <= outerR && bodyOnly(c, r) > 0;
-    };
-    const facets = window.orientOutward(
-      window.traceMaskToFacets(inRing, cols, rows, pitch, m.ringHeightMm, doc.body.thicknessMm));
-    if (!facets.length) return [];
-    return [{ name: "oese", color: window.hexToRgb(doc.body.baseColor), facets }];
+  // The loop (Öse) ring: formerly emitted a raised annulus rim.
+  // Redesigned: the Öse is now a flat protruding tab (part of the base footprint).
+  // This function returns [] for loop (no rim geometry); kept for API compat.
+  function buildMountRingParts(doc) {
+    return [];
   }
 
   // Raised element prisms: for depth.direction==='raised' elements, extrude their
@@ -297,9 +359,10 @@
   // Height: depth.heightMm for solid/text; (rank+1)*step per color for colorLayers.
   // Uses the shared composeDesignV2 rasterizer; a raised "colored stamp" that should
   // keep bright pixels uses a high depth.threshold (256 => alpha-only).
-  function buildRaisedParts(doc, footprintArg, compArg) {
-    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
-    const comp = compArg || composeDesignV2(doc, cols, rows);
+  function buildRaisedParts(doc, footprintArg, compArg, gridArg) {
+    const grid = gridArg || gridForBody(doc.body, doc.resolution);
+    const { cols, rows, pitch } = grid;
+    const comp = compArg || composeDesignV2(doc, cols, rows, gridArg);
     const footprint = footprintArg || window.shapeFootprintField(cols, rows, doc.body, doc.mount);
     const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
     const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
@@ -341,8 +404,9 @@
   // a floor slab over the silhouette + K super-level slabs (region where brightness
   // >= k/K), each a flat extrusion. Prints identically to a smooth surface after
   // slicing. Single color (el.color); height from luminance.
-  function buildHeightmapParts(doc, footprintArg) {
-    const { cols, rows, pitch } = gridForBody(doc.body, doc.resolution);
+  function buildHeightmapParts(doc, footprintArg, gridArg) {
+    const grid = gridArg || gridForBody(doc.body, doc.resolution);
+    const { cols, rows, pitch } = grid;
     const footprint = footprintArg || window.shapeFootprintField(cols, rows, doc.body, doc.mount);
     const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
     const idx = (c, r) => r * cols + c;
@@ -353,7 +417,7 @@
       const depth = el.depth || {};
       if (depth.mode !== "heightmap") return;
       if (el.type === "image" && !el._img) return;
-      const d = __drawElement(el, doc, cols, rows);
+      const d = __drawElement(el, doc, cols, rows, gridArg);
       const maxH = Math.max(layerH, depth.heightMm || 0);
       const baseFloor = Math.min(Math.max(depth.baseFloorMm || 0, layerH), maxH);
       const availH = Math.max(0, maxH - baseFloor);
@@ -382,13 +446,14 @@
 
   // Union of the elements' opaque silhouette on the grid (or just the element named
   // by body.freeOutlineFromElementId, if set). Uses __drawElement (alpha cutoff 128).
-  function __silhouetteMask(doc, cols, rows) {
+  // grid: optional shared grid for expanded-domain drawing.
+  function __silhouetteMask(doc, cols, rows, grid) {
     const n = cols * rows, mask = new Uint8Array(n);
     const only = doc.body.freeOutlineFromElementId;
     doc.elements.forEach((el) => {
       if (only != null && el.id !== only) return;
       if (el.type === "image" && !el._img) return;
-      const d = __drawElement(el, doc, cols, rows);
+      const d = __drawElement(el, doc, cols, rows, grid);
       for (let i = 0; i < n; i++) if (d[i * 4 + 3] >= 128) mask[i] = 1;
     });
     return mask;
@@ -426,26 +491,75 @@
   // Free-outline footprint: the content silhouette dilated outward by body.borderMm
   // (the offset-margin border), with the mount hole cut. >0 inside the plate. Same
   // contract as shapeFootprintField (cell units, sign-based).
-  function freeFootprintField(doc, cols, rows, pitch) {
-    const dt = __chamferDT(__silhouetteMask(doc, cols, rows), cols, rows);
+  // grid: optional shared {cols,rows,pitch,x0,y0} for expanded-domain mapping.
+  // When mount.type==='loop' with valid params, the washer is unioned into the plate
+  // BEFORE the hole cut (washer tab extends the free footprint).
+  function freeFootprintField(doc, cols, rows, pitch, grid) {
+    const dt = __chamferDT(__silhouetteMask(doc, cols, rows, grid), cols, rows);
     const borderCells = (doc.body.borderMm || 0) / pitch;
     const idx = (c, r) => r * cols + c;
     const m = doc.mount || { type: "none" };
     const hasHole = m.type === "hole" || m.type === "loop";
     const holeR = hasHole ? (m.diameterMm || 0) / 2 : 0;
-    const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm, s = (sx + sy) / 2;
+    // For mm→cells scale, use the grid pitch if provided, else body-box mapping
+    const s = 1 / pitch;
     const cx = hasHole ? m.xMm : 0, cy = hasHole ? m.yMm : 0;
+    // Washer union for loop (free body path mirrors rect/circle path)
+    const hasWasher = m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0;
+    const outerR = hasWasher ? m.diameterMm / 2 + m.ringThicknessMm : 0;
+    // x0/y0 from shared grid (0 when default body-box)
+    const x0 = grid ? grid.x0 : 0, y0 = grid ? grid.y0 : 0;
     return (c, r) => {
+      const x = x0 + (c + 0.5) * pitch, yy = y0 + (r + 0.5) * pitch;
       let v = borderCells - dt[idx(c, r)];              // >0 within borderCells of silhouette
+      if (hasWasher) {
+        const washerSdf = (outerR - Math.hypot(x - cx, yy - cy)) * s; // >0 inside washer disk
+        v = Math.max(v, washerSdf);                     // union: inside plate OR inside washer
+      }
       if (hasHole) {
-        const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
-        v = Math.min(v, (Math.hypot(x - cx, y - cy) - holeR) * s); // intersect with the hole SDF (min): negative inside the hole
+        v = Math.min(v, (Math.hypot(x - cx, yy - cy) - holeR) * s); // hole cut
       }
       return v;
     };
   }
 
+  // Single public entry point for domain + footprint. Consumed by buildParts internally
+  // and by T3's SVG. Returns {grid:{cols,rows,pitch,x0,y0}, footprint:(c,r)=>cellUnits}.
+  // Non-loop docs return the body-box grid (x0=y0=0) and the standard shapeFootprintField.
+  function docGridAndFootprint(doc) {
+    const domain = docDomain(doc);
+    const grid = gridForDomain(domain, doc.resolution);
+    const { cols, rows, pitch } = grid;
+    const m = doc.mount;
+    const free = doc.body.shape === "free";
+    const isLoop = m && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0;
+    let footprint;
+    if (free) {
+      footprint = freeFootprintField(doc, cols, rows, pitch, grid);
+    } else if (isLoop) {
+      const plateSdf = window.bodySdfMm(doc.body);
+      const outerR = m.diameterMm / 2 + m.ringThicknessMm;
+      const holeR = m.diameterMm / 2;
+      const s = 1 / pitch;
+      const x0 = grid.x0, y0 = grid.y0;
+      footprint = (c, r) => {
+        const x = x0 + (c + 0.5) * pitch, y = y0 + (r + 0.5) * pitch;
+        const plate = plateSdf(x, y);
+        const washer = outerR - Math.hypot(x - m.xMm, y - m.yMm);
+        const unionDist = Math.max(plate, washer);
+        const holeDist = Math.hypot(x - m.xMm, y - m.yMm) - holeR;
+        return Math.min(unionDist, holeDist) * s;
+      };
+    } else {
+      footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+    }
+    return { grid, footprint };
+  }
+
   window.gridForBody = gridForBody;
+  window.docDomain = docDomain;
+  window.gridForDomain = gridForDomain;
+  window.docGridAndFootprint = docGridAndFootprint;
   window.buildBaseParts = buildBaseParts;
   window.composeDesignV2 = composeDesignV2;
   window.buildEngravedParts = buildEngravedParts;
