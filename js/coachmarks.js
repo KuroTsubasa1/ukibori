@@ -152,15 +152,20 @@
     }
   }
 
-  // --- Close the overlay ---
-  function close(setFlag) {
-    if (overlay) {
-      overlay.style.display = 'none';
-    }
+  // --- Tear down resize listener and hide overlay (does NOT set seen-flag) ---
+  function teardown() {
     if (resizeListener) {
       window.removeEventListener('resize', resizeListener);
       resizeListener = null;
     }
+    if (overlay) {
+      overlay.style.display = 'none';
+    }
+  }
+
+  // --- Close the overlay ---
+  function close(setFlag) {
+    teardown();
     if (setFlag) {
       try { localStorage.setItem(SEEN_KEY, '1'); } catch (e) { /* ignore */ }
     }
@@ -168,6 +173,9 @@
 
   // --- Public: start the tour (always from step 1, regardless of seen-flag) ---
   function start() {
+    // Tear down any existing state first to avoid orphaned resize listeners
+    teardown();
+
     buildDOM();
 
     // Filter steps whose target elements are present in the DOM
@@ -190,8 +198,12 @@
     window.addEventListener('resize', resizeListener);
   }
 
-  // --- Auto-start on DOMContentLoaded if unseen + Simple view ---
+  // --- Wire #tourBtn and auto-start on DOMContentLoaded ---
   document.addEventListener('DOMContentLoaded', function () {
+    var btn = document.getElementById('tourBtn');
+    if (btn) {
+      btn.addEventListener('click', function () { start(); });
+    }
     try {
       var seen = localStorage.getItem(SEEN_KEY);
       if (seen) return;
@@ -200,14 +212,6 @@
         start();
       }
     } catch (e) { /* localStorage unavailable — fail silently */ }
-  });
-
-  // --- Wire #tourBtn ---
-  document.addEventListener('DOMContentLoaded', function () {
-    var btn = document.getElementById('tourBtn');
-    if (btn) {
-      btn.addEventListener('click', function () { start(); });
-    }
   });
 
   // --- Expose API ---
