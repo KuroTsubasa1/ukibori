@@ -22,8 +22,13 @@
     try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
   }
 
-  // ---- 3D rebuild stub (Task 3 fills this in) ----
-  function scheduleRebuild3D() { /* noop until Task 3 */ }
+  // ---- 3D rebuild (debounced, 120 ms) ----
+  let _rebuild3DTimer = null;
+  function scheduleRebuild3D() {
+    if (!window.preview3d || !window.preview3d.isActive()) return;
+    clearTimeout(_rebuild3DTimer);
+    _rebuild3DTimer = setTimeout(function () { window.preview3d.rebuild(); }, 120);
+  }
 
   // ---- Canvas fit scale ----
   // Returns px-per-mm to fit doc.body.widthMm × heightMm into the preview element.
@@ -278,8 +283,103 @@
     });
   }
 
-  // ---- Resize: re-render when preview changes size ----
-  window.addEventListener("resize", function () { render2D(); });
+  // ---- Single resize listener: 2D re-render; 3D resize is handled by preview3d ----
+  window.addEventListener("resize", function () {
+    if (!window.preview3d || !window.preview3d.isActive()) render2D();
+  });
+
+  // ---- 2D/3D toggle ----
+  function getPartsFn() { return { parts: window.buildParts(doc) }; }
+
+  document.getElementById("view3dBtn").addEventListener("click", function () {
+    document.getElementById("canvas2d").hidden = true;
+    document.getElementById("preview3dCanvas").hidden = false;
+    document.getElementById("view3dBtn").classList.add("seg-active");
+    document.getElementById("view2dBtn").classList.remove("seg-active");
+    window.preview3d.show(document.getElementById("preview3dCanvas"), getPartsFn);
+  });
+
+  document.getElementById("view2dBtn").addEventListener("click", function () {
+    window.preview3d.hide();
+    document.getElementById("canvas2d").hidden = false;
+    document.getElementById("preview3dCanvas").hidden = true;
+    document.getElementById("view2dBtn").classList.add("seg-active");
+    document.getElementById("view3dBtn").classList.remove("seg-active");
+    render2D();
+  });
+
+  // ---- Export dialog ----
+  function exportFileName() {
+    const n = (document.getElementById("exportName").value || "").trim();
+    return n || "ukibori";
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+  }
+
+  function setExportStatus(msg) {
+    document.getElementById("exportStatus").textContent = msg;
+  }
+
+  document.getElementById("exportBtn").addEventListener("click", function () {
+    document.getElementById("exportModal").removeAttribute("hidden");
+    setExportStatus("");
+  });
+
+  document.getElementById("exportClose").addEventListener("click", function () {
+    document.getElementById("exportModal").setAttribute("hidden", "");
+  });
+
+  document.getElementById("exportMf").addEventListener("click", function () {
+    try {
+      setExportStatus("Exportiere …");
+      const parts = window.buildParts(doc);
+      const blob = window.build3MF(parts);
+      downloadBlob(blob, exportFileName() + ".3mf");
+      setExportStatus("Fertig.");
+    } catch (e) {
+      setExportStatus("Fehler: " + e.message);
+    }
+  });
+
+  document.getElementById("exportStl").addEventListener("click", function () {
+    try {
+      setExportStatus("Exportiere …");
+      const parts = window.buildParts(doc);
+      const facets = parts.flatMap(function (p) { return p.facets; });
+      const u8 = window.facetsToBinarySTL(facets);
+      const blob = new Blob([u8], { type: "application/octet-stream" });
+      downloadBlob(blob, exportFileName() + ".stl");
+      setExportStatus("Fertig.");
+    } catch (e) {
+      setExportStatus("Fehler: " + e.message);
+    }
+  });
+
+  document.getElementById("exportPng").addEventListener("click", function () {
+    try {
+      setExportStatus("Exportiere …");
+      const name = exportFileName();
+      document.getElementById("canvas2d").toBlob(function (b) {
+        if (!b) { setExportStatus("Fehler: PNG konnte nicht erstellt werden."); return; }
+        downloadBlob(b, name + ".png");
+        setExportStatus("Fertig.");
+      }, "image/png");
+    } catch (e) {
+      setExportStatus("Fehler: " + e.message);
+    }
+  });
+
+  document.getElementById("exportSvg").addEventListener("click", function () {
+    setExportStatus("SVG folgt – Format noch nicht verfügbar.");
+  });
 
   // ---- View toggle wiring (Task 1, preserved) ----
   document.getElementById("viewSimple").addEventListener("click", function () { setView("simple"); });
