@@ -28,7 +28,7 @@
 
   api.buildPreviewScene = function (parts) {
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x16161a);
+    scene.background = new THREE.Color(0xcccccc); // P1: lighter grey for better model contrast.
     let meshCount = 0;
     for (const part of parts) {
       if (!part.facets || !part.facets.length) continue;

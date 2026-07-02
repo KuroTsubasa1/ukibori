@@ -108,7 +108,8 @@
   // ---- Main render (exported as render2D) ----
   function render2D() {
     if (!cv) return;
-    fitScale();
+    // B3: fitScale is NOT called here; it is called on initial load, window resize,
+    // and when body size (sizeW/sizeH) changes. This prevents re-zoom on every control change.
     const s = state.scale;
     const ctx = cv.getContext("2d");
     ctx.clearRect(0, 0, cv.width, cv.height);
@@ -117,9 +118,7 @@
     const shape = body.shape || "rect";
 
     if (shape === "rect") {
-      // Rounded-rect plate.
-      bodyPath(ctx, s);
-      ctx.fillStyle = body.baseColor || "#000000"; ctx.fill();
+      // Rounded-rect plate: outline only (B5: no solid fill so elements/relief are visible).
       // Clip elements inside the body outline.
       ctx.save(); bodyPath(ctx, s); ctx.clip();
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
@@ -127,11 +126,9 @@
       // Outline.
       bodyPath(ctx, s); ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
     } else if (shape === "circle") {
-      // Circle plate.
+      // Circle plate: outline only (B5: no solid fill so elements/relief are visible).
       const r = Math.min(body.widthMm, body.heightMm) / 2 * s;
       const cx = body.widthMm / 2 * s, cy = body.heightMm / 2 * s;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fillStyle = body.baseColor || "#000000"; ctx.fill();
       // Clip to circle.
       ctx.save();
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
@@ -301,7 +298,10 @@
 
   // ---- Single resize listener: 2D re-render; 3D resize is handled by preview3d ----
   window.addEventListener("resize", function () {
-    if (!window.preview3d || !window.preview3d.isActive()) render2D();
+    if (!window.preview3d || !window.preview3d.isActive()) {
+      fitScale(); // B3: re-fit available space on window resize.
+      render2D();
+    }
   });
 
   // ---- 2D/3D toggle ----
@@ -448,6 +448,11 @@
   // Mount: Keine / Loch / Öse
   function applyMount(type) {
     doc.mount.type = type;
+    if (type === "loop") {
+      // B1: ensure non-zero ring dimensions so buildMountRingParts returns geometry.
+      if (!(doc.mount.ringThicknessMm > 0)) doc.mount.ringThicknessMm = 2;
+      if (!(doc.mount.ringHeightMm > 0)) doc.mount.ringHeightMm = 2;
+    }
     setSegActive("mountSeg", type === "none" ? "mountNone" : type === "hole" ? "mountHole" : "mountLoop");
     render2D();
     scheduleRebuild3D();
@@ -461,6 +466,7 @@
     var v = parseFloat(this.value);
     if (!isNaN(v) && v >= 5) {
       doc.body.widthMm = v;
+      fitScale(); // B3: re-fit when plate dimensions change.
       render2D();
       scheduleRebuild3D();
     }
@@ -469,6 +475,7 @@
     var v = parseFloat(this.value);
     if (!isNaN(v) && v >= 5) {
       doc.body.heightMm = v;
+      fitScale(); // B3: re-fit when plate dimensions change.
       render2D();
       scheduleRebuild3D();
     }
@@ -1010,7 +1017,8 @@
   });
   setView((function () { try { return localStorage.getItem(VIEW_KEY) || "simple"; } catch (e) { return "simple"; } })());
 
-  // Initial render.
+  // Initial render: fit scale first (B3: fitScale not in render2D anymore).
+  fitScale();
   render2D();
 
   // Public interface. Expose state so tests can inspect/mutate selection.

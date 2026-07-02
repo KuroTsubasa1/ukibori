@@ -306,7 +306,7 @@
 #canvas2d,#preview3dCanvas{max-width:100%;height:auto;background:#fafafa;border:1px solid #ddd}
 
 /* === Advanced panel (Task 4b) === */
-#sidebarAdvanced { overflow: hidden; }
+#sidebarAdvanced { display: flex; flex-direction: column; min-height: 0; max-height: calc(100vh - 64px); overflow: hidden; }
 .adv-scroll { overflow-y: auto; flex: 1; min-height: 0; padding: 0 14px 12px; }
 .adv-section { padding: 0 0 4px; }
 .adv-field { display: flex; flex-direction: column; gap: 4px; }
