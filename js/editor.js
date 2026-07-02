@@ -535,6 +535,59 @@
     img.src = dataURL;
   });
 
+  // ---- Remove Background (KI) ----
+  document.getElementById("removeBgBtn").addEventListener("click", function () {
+    var btn = document.getElementById("removeBgBtn");
+    var statusEl = document.getElementById("bgStatus");
+
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el || el.type !== "image" || !el._img) {
+      statusEl.textContent = "Bitte zuerst ein Bild auswählen.";
+      return;
+    }
+
+    btn.disabled = true;
+    statusEl.textContent = "Entferne Hintergrund … (lädt beim ersten Mal ~16 MB)";
+
+    (function () {
+      // Draw _img to offscreen canvas at natural size to get ImageData.
+      var src = document.createElement("canvas");
+      src.width = el._img.naturalWidth || el._img.width || 320;
+      src.height = el._img.naturalHeight || el._img.height || 320;
+      src.getContext("2d").drawImage(el._img, 0, 0, src.width, src.height);
+      var imageData = src.getContext("2d").getImageData(0, 0, src.width, src.height);
+
+      window.removeBackground(imageData).then(function (cut) {
+        // Put the cut ImageData onto a canvas and convert to data URL.
+        var outCanvas = document.createElement("canvas");
+        outCanvas.width = cut.width;
+        outCanvas.height = cut.height;
+        outCanvas.getContext("2d").putImageData(cut, 0, 0);
+        var url = outCanvas.toDataURL("image/png");
+
+        // Decode into a new Image, then swap into the element.
+        var img = new Image();
+        img.onload = function () {
+          el._img = img;
+          el.src = url;
+          el.depth.threshold = 256;
+          render2D();
+          scheduleRebuild3D();
+          btn.disabled = false;
+          statusEl.textContent = "Fertig.";
+        };
+        img.onerror = function () {
+          btn.disabled = false;
+          statusEl.textContent = "Hintergrundentfernung fehlgeschlagen.";
+        };
+        img.src = url;
+      }).catch(function (e) {
+        btn.disabled = false;
+        statusEl.textContent = (e && e.message) || "Hintergrundentfernung fehlgeschlagen.";
+      });
+    }());
+  });
+
   // Initialize Simple panel UI from doc on load.
   (function initSimpleUI() {
     // Shape
