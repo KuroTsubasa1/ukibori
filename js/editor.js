@@ -76,6 +76,211 @@
     ctx.arcTo(0, h, 0, 0, rr); ctx.arcTo(0, 0, w, 0, rr); ctx.closePath();
   }
 
+  // ---- Image-processing display cache (WYSIWYG: what-you-see == what-prints) ----
+
+  // Cache key: encodes all processing params that affect the display canvas.
+  function elementDisplayKey(el) {
+    var d = el.depth;
+    var r = (d && d.reduce) || {};
+    return [
+      (d && d.mode) || 'solid',
+      el.color || '',
+      (d && d.threshold != null ? d.threshold : 128),
+      !!(d && d.invert),
+      r.method || '', r.numColors || '', r.levels || '',
+      JSON.stringify(r.remap || {}),
+      JSON.stringify(r.order || [])
+    ].join('|');
+  }
+
+  // hex helper (uppercase) — local, not a global redeclaration.
+  function __hexOfRGB(r, g, b) {
+    return ('#' + [r, g, b].map(function (x) { return x.toString(16).padStart(2, '0'); }).join('')).toUpperCase();
+  }
+
+  // Build a shim that looks like a v1 element for __orderedNaturalHexes / __imagePaletteFromImg.
+  // They read el.colorMode, el._img, el.reduce.* — so we bridge from v2 depth.reduce.
+  function __makeV1Shim(el) {
+    return {
+      type: 'image',
+      colorMode: 'reduce',
+      _img: el._img,
+      reduce: (el.depth && el.depth.reduce) || {},
+    };
+  }
+
+  // Returns a cached off-screen canvas showing the processed image for the given element:
+  //   heightmap  → grayscale (brightness-inverted when el.depth.invert).
+  //   colorLayers → each opaque pixel mapped to the nearest palette color + remap applied.
+  //   solid       → luminance threshold → silhouette in el.color, rest transparent.
+  // Cache lives on el._display / el._displayKey; invalidated by deleting el._display.
+  function processImageForDisplay(el) {
+    if (el.type !== 'image' || !el._img) return null;
+    var key = elementDisplayKey(el);
+    if (el._display && el._displayKey === key) return el._display;
+
+    var img = el._img;
+    var iw = img.naturalWidth || img.width || 1;
+    var ih = img.naturalHeight || img.height || 1;
+    var scale = Math.min(1, 256 / Math.max(iw, ih, 1));
+    var w = Math.max(1, Math.round(iw * scale));
+    var h = Math.max(1, Math.round(ih * scale));
+    var n = w * h;
+
+    var src = document.createElement('canvas');
+    src.width = w; src.height = h;
+    var sx = src.getContext('2d', { willReadFrequently: true });
+    sx.drawImage(img, 0, 0, w, h);
+    var imgData = sx.getImageData(0, 0, w, h);
+    var d = imgData.data;
+    var out = sx.createImageData(w, h);
+    var o = out.data;
+
+    var depth = el.depth || {};
+    var mode = depth.mode || 'solid';
+
+    if (mode === 'heightmap') {
+      // Grayscale: brightness of each opaque pixel, optionally inverted.
+      for (var i = 0; i < n; i++) {
+        if (d[i * 4 + 3] < 128) continue;
+        var lum = Math.round(0.299 * d[i*4] + 0.587 * d[i*4+1] + 0.114 * d[i*4+2]);
+        var v = depth.invert ? (255 - lum) : lum;
+        o[i*4] = v; o[i*4+1] = v; o[i*4+2] = v; o[i*4+3] = 255;
+      }
+    } else if (mode === 'colorLayers') {
+      // Reduced palette + remap: mirrors what the engine exports.
+      var shim = __makeV1Shim(el);
+      var r = depth.reduce || {};
+      try {
+        var pal = window.__imagePaletteFromImg(img, r.method || 'posterize', r.numColors || 8, r.levels || 4);
+        var remap = r.remap || {};
+        for (var j = 0; j < n; j++) {
+          if (d[j * 4 + 3] < 128) continue;
+          var near = window.__nearestColor(pal, d[j*4], d[j*4+1], d[j*4+2]);
+          var cr = near[0], cg = near[1], cb = near[2];
+          var natHex = __hexOfRGB(cr, cg, cb);
+          var mapped = remap[natHex];
+          if (mapped && window.hexToRgb) {
+            var mc = window.hexToRgb(mapped);
+            if (mc) { cr = mc[0]; cg = mc[1]; cb = mc[2]; }
+          }
+          o[j*4] = cr; o[j*4+1] = cg; o[j*4+2] = cb; o[j*4+3] = 255;
+        }
+      } catch (e) {
+        // Fallback: draw raw image (palette helper unavailable).
+        for (var k = 0; k < n; k++) {
+          o[k*4] = d[k*4]; o[k*4+1] = d[k*4+1]; o[k*4+2] = d[k*4+2]; o[k*4+3] = d[k*4+3];
+        }
+      }
+    } else {
+      // solid: luminance threshold → silhouette in el.color.
+      var threshold = (depth.threshold != null ? depth.threshold : 128);
+      var colRGB = (window.hexToRgb && el.color) ? window.hexToRgb(el.color) : null;
+      var colR = colRGB ? colRGB[0] : 255;
+      var colG = colRGB ? colRGB[1] : 255;
+      var colB = colRGB ? colRGB[2] : 255;
+      for (var p = 0; p < n; p++) {
+        if (d[p * 4 + 3] < 128) continue;
+        var lp = 0.299 * d[p*4] + 0.587 * d[p*4+1] + 0.114 * d[p*4+2];
+        var on = depth.invert ? (lp >= threshold) : (lp < threshold);
+        if (on) { o[p*4] = colR; o[p*4+1] = colG; o[p*4+2] = colB; o[p*4+3] = 255; }
+      }
+    }
+
+    var cv2 = document.createElement('canvas');
+    cv2.width = w; cv2.height = h;
+    cv2.getContext('2d').putImageData(out, 0, 0);
+    el._display = cv2;
+    el._displayKey = key;
+    return cv2;
+  }
+
+  // ---- Palette swatch UI (Advanced Umwandlung, colorLayers mode) ----
+
+  function renderPaletteSwatches(el) {
+    var cont = document.getElementById('advPaletteSwatch');
+    var field = document.getElementById('advPaletteField');
+    if (!cont || !field) return;
+    var isColorLayers = el && el.type === 'image' && el._img &&
+      ((el.depth && el.depth.mode) || 'solid') === 'colorLayers';
+    field.hidden = !isColorLayers;
+    if (!isColorLayers) { cont.innerHTML = ''; return; }
+    // Use the v1 shim to call __orderedNaturalHexes.
+    var shim = __makeV1Shim(el);
+    var hexes = [];
+    try { hexes = window.__orderedNaturalHexes(shim); } catch (e) {}
+    if (!hexes || hexes.length === 0) {
+      cont.innerHTML = '<span class="hint">Keine Farben gefunden</span>';
+      return;
+    }
+    var remap = (el.depth && el.depth.reduce && el.depth.reduce.remap) || {};
+    var html = hexes.map(function (nat) {
+      var eff = remap[nat] || nat.toLowerCase();
+      return '<span class="pal-entry" draggable="true" data-orig="' + nat + '">'
+        + '<span class="grip" aria-hidden="true">⠿</span>'
+        + '<input type="color" class="sw-edit" data-orig="' + nat + '" value="' + eff + '" title="' + nat + ' → ' + eff + '">'
+        + '</span>';
+    }).join('');
+    cont.innerHTML = html || '<span class="hint">–</span>';
+    wirePaletteSwatches(el);
+  }
+
+  function wirePaletteSwatches(el) {
+    var cont = document.getElementById('advPaletteSwatch');
+    if (!cont) return;
+    cont.querySelectorAll('.sw-edit').forEach(function (inp) {
+      inp.addEventListener('input', function (e) {
+        if (!el.depth.reduce) el.depth.reduce = {};
+        if (!el.depth.reduce.remap) el.depth.reduce.remap = {};
+        el.depth.reduce.remap[e.target.dataset.orig] = e.target.value;
+        e.target.title = e.target.dataset.orig + ' → ' + e.target.value;
+        delete el._display; // invalidate cache
+        render2D();
+        scheduleRebuild3D();
+      });
+    });
+    var dragSrc = null;
+    cont.querySelectorAll('.pal-entry').forEach(function (entry) {
+      entry.addEventListener('dragstart', function (e) {
+        dragSrc = entry.dataset.orig;
+        e.dataTransfer.effectAllowed = 'move';
+        entry.classList.add('dragging');
+      });
+      entry.addEventListener('dragend', function () {
+        dragSrc = null;
+        entry.classList.remove('dragging');
+        cont.querySelectorAll('.pal-entry').forEach(function (e2) { e2.classList.remove('drag-over'); });
+      });
+      entry.addEventListener('dragover', function (e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        entry.classList.add('drag-over');
+      });
+      entry.addEventListener('dragleave', function () {
+        entry.classList.remove('drag-over');
+      });
+      entry.addEventListener('drop', function (e) {
+        e.preventDefault();
+        entry.classList.remove('drag-over');
+        var tgt = entry.dataset.orig;
+        if (!dragSrc || dragSrc === tgt) return;
+        // Get current ordered hexes via shim, reorder.
+        var shim = __makeV1Shim(el);
+        var ord = [];
+        try { ord = window.__orderedNaturalHexes(shim).slice(); } catch (err) {}
+        var from = ord.indexOf(dragSrc), to = ord.indexOf(tgt);
+        if (from < 0 || to < 0) return;
+        ord.splice(to, 0, ord.splice(from, 1)[0]);
+        if (!el.depth.reduce) el.depth.reduce = {};
+        el.depth.reduce.order = ord;
+        delete el._display;
+        renderPaletteSwatches(el);
+        render2D();
+        scheduleRebuild3D();
+      });
+    });
+  }
+
   // ---- Draw element ----
   function drawElement(ctx, el, s) {
     ctx.save();
@@ -89,7 +294,9 @@
       ctx.fillText(el.text || "", 0, 0);
     } else if (el.type === "image") {
       if (el._img) {
-        ctx.drawImage(el._img, -w / 2, -h / 2, w, h);
+        // Use processed display canvas (threshold/invert/reduce applied) so 2D == print.
+        var disp = processImageForDisplay(el);
+        ctx.drawImage(disp || el._img, -w / 2, -h / 2, w, h);
       } else {
         // Placeholder when image hasn't loaded yet.
         ctx.fillStyle = "#888"; ctx.fillRect(-w / 2, -h / 2, w, h);
@@ -851,6 +1058,9 @@
       if (advDirRaised) advDirRaised.classList.add("seg-active");
       if (advDirEngraved) advDirEngraved.classList.remove("seg-active");
     }
+
+    // Palette swatches: show only for image elements in colorLayers mode.
+    renderPaletteSwatches(el);
   }
 
   // -- Depth mode buttons --
@@ -858,12 +1068,14 @@
     var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
     if (!el) return;
     el.depth.mode = mode;
+    delete el._display; // invalidate processed display cache on mode change
     var modeSolid = document.getElementById("modeSolid");
     var modeColorLayers = document.getElementById("modeColorLayers");
     var modeHeightmap = document.getElementById("modeHeightmap");
     if (modeSolid) modeSolid.classList.toggle("seg-active", mode === "solid");
     if (modeColorLayers) modeColorLayers.classList.toggle("seg-active", mode === "colorLayers");
     if (modeHeightmap) modeHeightmap.classList.toggle("seg-active", mode === "heightmap");
+    renderPaletteSwatches(el);
     render2D();
     scheduleRebuild3D();
   }
@@ -879,6 +1091,7 @@
     el.depth.threshold = v;
     var badge = document.getElementById("advThresholdVal");
     if (badge) badge.textContent = v;
+    delete el._display; // invalidate processed display cache
     render2D();
     scheduleRebuild3D();
   });
@@ -887,6 +1100,7 @@
     var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
     if (!el) return;
     el.depth.invert = this.checked;
+    delete el._display; // invalidate processed display cache
     render2D();
     scheduleRebuild3D();
   });
@@ -897,6 +1111,8 @@
     var v = Number(this.value);
     if (!isNaN(v) && v >= 2) {
       el.depth.reduce.numColors = v;
+      delete el._display; // invalidate processed display cache; regenerate palette
+      renderPaletteSwatches(el);
       render2D();
       scheduleRebuild3D();
     }
@@ -907,6 +1123,7 @@
     var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
     if (!el) return;
     el.color = this.value;
+    delete el._display; // invalidate (solid mode color changes silhouette)
     render2D();
     scheduleRebuild3D();
   });

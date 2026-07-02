@@ -323,6 +323,13 @@
 .adv-layers-list .adv-lbtn:hover { opacity: 1; }
 .acc > summary { padding: 11px 0; }
 #sidebarAdvanced .acc-body { gap: 10px; }
+/* Palette swatches */
+.adv-swatches { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
+.pal-entry { display: flex; align-items: center; gap: 3px; background: var(--surface2,#2a2a30); border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; cursor: grab; user-select: none; }
+.pal-entry.dragging { opacity: 0.45; }
+.pal-entry.drag-over { border-color: var(--accent); }
+.grip { font-size: 14px; color: var(--muted); cursor: grab; line-height: 1; }
+.sw-edit { width: 32px; height: 24px; border: none; border-radius: 3px; padding: 0; cursor: pointer; background: none; }
 
 /* === Coach-marks tutorial overlay (Task 6) === */
 #cmOverlay {
