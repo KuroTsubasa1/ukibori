@@ -14,15 +14,16 @@
 <body>
 <header id="topbar">
   <span class="brand">ukibori</span>
+  <span class="tagline">Lesezeichen · Untersetzer · Schlüsselanhänger</span>
   <div id="viewToggle" class="seg-group" role="tablist" aria-label="Ansicht">
-    <button type="button" id="viewSimple" class="seg seg-active">Einfach</button>
-    <button type="button" id="viewAdvanced" class="seg">Erweitert</button>
+    <button type="button" id="viewSimple" class="seg seg-active" title="Einfache Ansicht">Einfach</button>
+    <button type="button" id="viewAdvanced" class="seg" title="Alle Optionen">Erweitert</button>
   </div>
   <div class="topbar-actions">
-    <button type="button" id="openBtn">Öffnen</button>
-    <button type="button" id="saveBtn">Speichern</button>
-    <button type="button" id="exportBtn">Exportieren</button>
-    <button type="button" id="tourBtn" aria-label="Tour">?</button>
+    <button type="button" id="openBtn" title="Projekt öffnen (.json)">Öffnen</button>
+    <button type="button" id="saveBtn" title="Projekt speichern (.json)">Speichern</button>
+    <button type="button" id="exportBtn" title="3D-Modell exportieren (3MF/STL/PNG)">Exportieren</button>
+    <button type="button" id="tourBtn" aria-label="Tour" title="Kurze Einführung">?</button>
   </div>
 </header>
 <main id="editor">
@@ -31,41 +32,41 @@
     <div class="sp-section">
       <div class="sp-label">Hinzufügen</div>
       <div class="sp-add-row">
-        <button type="button" id="addImageBtn" class="btn">Bild</button>
-        <button type="button" id="addTextBtn" class="btn">Text</button>
-        <button type="button" id="addQrBtn" class="btn">QR</button>
+        <button type="button" id="addImageBtn" class="btn" title="Bild hinzufügen">Bild</button>
+        <button type="button" id="addTextBtn" class="btn" title="Text hinzufügen">Text</button>
+        <button type="button" id="addQrBtn" class="btn" title="QR-Code hinzufügen">QR</button>
       </div>
     </div>
     <div class="sp-section">
       <div class="sp-label">Bild</div>
-      <button type="button" id="removeBgBtn" class="btn" style="width:100%">Hintergrund entfernen (KI)</button>
+      <button type="button" id="removeBgBtn" class="btn" style="width:100%" title="Hintergrund per KI entfernen">Hintergrund entfernen (KI)</button>
       <div id="bgStatus" class="hint" aria-live="polite"></div>
     </div>
     <div class="sp-section">
       <div class="sp-label">Tiefe</div>
       <div id="depthSeg" class="seg-group seg-sm" style="width:100%">
-        <button type="button" id="depthRaised" class="seg seg-active" style="flex:1">Erhaben</button>
-        <button type="button" id="depthEngraved" class="seg" style="flex:1">Vertieft</button>
+        <button type="button" id="depthRaised" class="seg seg-active" style="flex:1" title="Erhaben (steht hervor)">Erhaben</button>
+        <button type="button" id="depthEngraved" class="seg" style="flex:1" title="Vertieft (eingraviert)">Vertieft</button>
       </div>
     </div>
     <div class="sp-section">
       <div class="sp-label">Form</div>
       <div id="shapeSeg" class="seg-group seg-sm" style="width:100%">
-        <button type="button" id="shapeRect" class="seg seg-active" style="flex:1">Rechteck</button>
-        <button type="button" id="shapeCircle" class="seg" style="flex:1">Kreis</button>
-        <button type="button" id="shapeFree" class="seg" style="flex:1">Frei</button>
+        <button type="button" id="shapeRect" class="seg seg-active" style="flex:1" title="Rechteckige Form">Rechteck</button>
+        <button type="button" id="shapeCircle" class="seg" style="flex:1" title="Kreisförmige Form">Kreis</button>
+        <button type="button" id="shapeFree" class="seg" style="flex:1" title="Freie Form (Bildkontur)">Frei</button>
       </div>
       <div id="borderField" class="sp-inline-field" hidden>
         <label for="borderMm" class="sp-inline-label">Rand (mm)</label>
-        <input type="number" id="borderMm" class="sp-num" min="0" max="50" step="0.5" value="2">
+        <input type="number" id="borderMm" class="sp-num" min="0" max="50" step="0.5" value="2" title="Randbreite in mm (Freiform)">
       </div>
     </div>
     <div class="sp-section">
       <div class="sp-label">Befestigung</div>
       <div id="mountSeg" class="seg-group seg-sm" style="width:100%">
-        <button type="button" id="mountNone" class="seg seg-active" style="flex:1">Keine</button>
-        <button type="button" id="mountHole" class="seg" style="flex:1">Loch</button>
-        <button type="button" id="mountLoop" class="seg" style="flex:1">Öse</button>
+        <button type="button" id="mountNone" class="seg seg-active" style="flex:1" title="Keine Befestigung">Keine</button>
+        <button type="button" id="mountHole" class="seg" style="flex:1" title="Loch zum Aufhängen">Loch</button>
+        <button type="button" id="mountLoop" class="seg" style="flex:1" title="Öse (verstärkter Ring)">Öse</button>
       </div>
     </div>
     <div class="sp-section">
@@ -78,11 +79,11 @@
       <div class="sp-size-row">
         <div class="sp-size-field">
           <label for="sizeW" class="sp-inline-label">B</label>
-          <input type="number" id="sizeW" class="sp-num" min="5" max="500" step="1" value="50">
+          <input type="number" id="sizeW" class="sp-num" min="5" max="500" step="1" value="50" title="Breite in mm">
         </div>
         <div class="sp-size-field">
           <label for="sizeH" class="sp-inline-label">H</label>
-          <input type="number" id="sizeH" class="sp-num" min="5" max="500" step="1" value="150">
+          <input type="number" id="sizeH" class="sp-num" min="5" max="500" step="1" value="150" title="Höhe in mm">
         </div>
       </div>
     </div>
@@ -97,17 +98,17 @@
         <div class="acc-body adv-section">
           <div class="adv-field">
             <label for="advThreshold" class="adv-label">Schwellwert (0–255)</label>
-            <input type="range" id="advThreshold" min="0" max="255" step="1" value="128">
+            <input type="range" id="advThreshold" min="0" max="255" step="1" value="128" title="Schwellwert für Schwarz/Weiß-Umwandlung (0–255)">
             <span class="badge" id="advThresholdVal">128</span>
           </div>
           <div class="adv-field">
             <label class="adv-label toggle">
-              <input type="checkbox" id="advInvert"> Invertieren
+              <input type="checkbox" id="advInvert" title="Hell/Dunkel tauschen"> Invertieren
             </label>
           </div>
           <div class="adv-field">
             <label for="advNumColors" class="adv-label">Anzahl Farben</label>
-            <input type="number" id="advNumColors" class="sp-num" min="2" max="16" step="1" value="8">
+            <input type="number" id="advNumColors" class="sp-num" min="2" max="16" step="1" value="8" title="Anzahl reduzierter Farben (2–16)">
           </div>
           <!-- Palette swatches (visible only in colorLayers mode) -->
           <div class="adv-field" id="advPaletteField" hidden>
@@ -122,9 +123,9 @@
         <summary>Tiefenmodus</summary>
         <div class="acc-body adv-section">
           <div id="modeSeg" class="seg-group seg-sm adv-seg-full">
-            <button type="button" id="modeSolid" class="seg seg-active" style="flex:1">Voll</button>
-            <button type="button" id="modeColorLayers" class="seg" style="flex:1">Farbebenen</button>
-            <button type="button" id="modeHeightmap" class="seg" style="flex:1">Höhenrelief</button>
+            <button type="button" id="modeSolid" class="seg seg-active" style="flex:1" title="Einfarbig (eine Tiefe)">Voll</button>
+            <button type="button" id="modeColorLayers" class="seg" style="flex:1" title="Mehrfarbig: jede Farbe auf eigener Schicht">Farbebenen</button>
+            <button type="button" id="modeHeightmap" class="seg" style="flex:1" title="Helligkeit als Höhe (Graustufenrelief)">Höhenrelief</button>
           </div>
         </div>
       </details>
@@ -144,43 +145,43 @@
         <div class="acc-body adv-section">
           <div class="adv-field">
             <label for="advColor" class="adv-label">Farbe</label>
-            <input type="color" id="advColor" value="#ffffff">
+            <input type="color" id="advColor" value="#ffffff" title="Farbe des ausgewählten Elements">
           </div>
           <div class="adv-two-col">
             <div class="adv-field">
               <label for="advCx" class="adv-label">X (mm)</label>
-              <input type="number" id="advCx" class="sp-num adv-num-full" step="0.5" value="25">
+              <input type="number" id="advCx" class="sp-num adv-num-full" step="0.5" value="25" title="Horizontale Position des Elements (Mitte, mm)">
             </div>
             <div class="adv-field">
               <label for="advCy" class="adv-label">Y (mm)</label>
-              <input type="number" id="advCy" class="sp-num adv-num-full" step="0.5" value="75">
+              <input type="number" id="advCy" class="sp-num adv-num-full" step="0.5" value="75" title="Vertikale Position des Elements (Mitte, mm)">
             </div>
           </div>
           <div class="adv-two-col">
             <div class="adv-field">
               <label for="advW" class="adv-label">Breite (mm)</label>
-              <input type="number" id="advW" class="sp-num adv-num-full" step="0.5" min="0.5" value="30">
+              <input type="number" id="advW" class="sp-num adv-num-full" step="0.5" min="0.5" value="30" title="Breite des Elements in mm">
             </div>
             <div class="adv-field">
               <label for="advH" class="adv-label">Höhe (mm)</label>
-              <input type="number" id="advH" class="sp-num adv-num-full" step="0.5" min="0.5" value="30">
+              <input type="number" id="advH" class="sp-num adv-num-full" step="0.5" min="0.5" value="30" title="Höhe des Elements in mm">
             </div>
           </div>
           <div class="adv-field">
             <label for="advRot" class="adv-label">Drehung (°)</label>
-            <input type="range" id="advRot" min="-180" max="180" step="1" value="0">
+            <input type="range" id="advRot" min="-180" max="180" step="1" value="0" title="Drehung des Elements in Grad (−180 bis 180)">
             <span class="badge" id="advRotVal">0°</span>
           </div>
           <div class="adv-field">
             <label class="adv-label">Richtung</label>
             <div id="advDirSeg" class="seg-group seg-sm" style="width:100%">
-              <button type="button" id="advDirRaised" class="seg seg-active" style="flex:1">Erhaben</button>
-              <button type="button" id="advDirEngraved" class="seg" style="flex:1">Vertieft</button>
+              <button type="button" id="advDirRaised" class="seg seg-active" style="flex:1" title="Element steht hervor">Erhaben</button>
+              <button type="button" id="advDirEngraved" class="seg" style="flex:1" title="Element ist eingraviert">Vertieft</button>
             </div>
           </div>
           <div class="adv-field">
             <label class="adv-label toggle">
-              <input type="checkbox" id="advCutout"> Als Loch ausschneiden
+              <input type="checkbox" id="advCutout" title="Element als Aussparung (Loch) aus dem Objekt herausschneiden"> Als Loch ausschneiden
             </label>
           </div>
         </div>
@@ -192,19 +193,19 @@
         <div class="acc-body adv-section">
           <div class="adv-field">
             <label for="advThickness" class="adv-label">Dicke (mm)</label>
-            <input type="number" id="advThickness" class="sp-num adv-num-full" step="0.5" min="0.5" value="3">
+            <input type="number" id="advThickness" class="sp-num adv-num-full" step="0.5" min="0.5" value="3" title="Gesamtdicke des Objekts in mm">
           </div>
           <div class="adv-field">
             <label for="advLayerHeight" class="adv-label">Schichthöhe (mm)</label>
-            <input type="number" id="advLayerHeight" class="sp-num adv-num-full" step="0.01" min="0.01" value="0.2">
+            <input type="number" id="advLayerHeight" class="sp-num adv-num-full" step="0.01" min="0.01" value="0.2" title="Schichthöhe des 3D-Druckers in mm (z. B. 0,2)">
           </div>
           <div class="adv-field">
             <label for="advResolution" class="adv-label">Auflösung</label>
-            <input type="number" id="advResolution" class="sp-num adv-num-full" step="64" min="64" value="1024">
+            <input type="number" id="advResolution" class="sp-num adv-num-full" step="64" min="64" value="1024" title="Bildauflösung für die Umwandlung (Pixel, höher = genauer/langsamer)">
           </div>
           <div class="adv-field">
             <label for="advColorStep" class="adv-label">Farbschichten</label>
-            <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="2">
+            <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="2" title="Höhenunterschied zwischen Farbschichten in Schichten">
           </div>
         </div>
       </details>
@@ -212,7 +213,7 @@
     </div><!-- /adv-scroll -->
   </aside>
   <section id="preview">
-    <div class="view-toggle"><button id="view2dBtn" class="seg seg-active">2D</button><button id="view3dBtn" class="seg">3D</button></div>
+    <div class="view-toggle"><button id="view2dBtn" class="seg seg-active" title="2D-Vorschau">2D</button><button id="view3dBtn" class="seg" title="3D-Vorschau (rotierbar)">3D</button></div>
     <canvas id="canvas2d" width="800" height="1000"></canvas>
     <canvas id="preview3dCanvas" width="800" height="1000" hidden></canvas>
   </section>
@@ -233,10 +234,10 @@
       <div class="field">
         <div class="field-head"><label>Format</label></div>
         <div class="export-formats">
-          <button id="exportPng" class="btn" type="button">PNG <span class="hint">Bild</span></button>
-          <button id="exportSvg" class="btn" type="button" disabled>SVG <span class="hint">Vektor, je Farbe</span></button>
-          <button id="exportMf" class="btn btn-primary" type="button">.3mf <span class="hint">3D · S/W &amp; Farbe</span></button>
-          <button id="exportStl" class="btn" type="button">STL <span class="hint">3D · Geometrie</span></button>
+          <button id="exportPng" class="btn" type="button" title="Als PNG-Bild exportieren">PNG <span class="hint">Bild</span></button>
+          <button id="exportSvg" class="btn" type="button" disabled title="Als SVG-Vektorgrafik exportieren (je Farbe)">SVG <span class="hint">Vektor, je Farbe</span></button>
+          <button id="exportMf" class="btn btn-primary" type="button" title="Als 3MF-Datei exportieren (3D-Druck, Farbe)">3mf <span class="hint">3D · S/W &amp; Farbe</span></button>
+          <button id="exportStl" class="btn" type="button" title="Als STL-Datei exportieren (3D-Geometrie)">STL <span class="hint">3D · Geometrie</span></button>
         </div>
       </div>
       <p id="exportStatus" class="status"></p>

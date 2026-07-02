@@ -298,6 +298,7 @@
 /* === Unified editor shell (Phase 3) === */
 #topbar{display:flex;align-items:center;gap:16px;padding:8px 12px;border-bottom:1px solid #ccc}
 #topbar .brand{font-weight:600}
+#topbar .tagline{font-size:11px;color:#888;letter-spacing:.01em;white-space:nowrap}
 #topbar .topbar-actions{margin-left:auto;display:flex;gap:8px}
 #editor{display:flex;flex-direction:row;gap:12px;padding:12px;align-items:flex-start}
 #editor .sidebar{flex:0 0 280px}

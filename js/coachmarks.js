@@ -8,7 +8,7 @@
   var STEPS = [
     {
       id: 'addImageBtn',
-      text: 'Füge ein Bild, Text oder QR hinzu — oder zieh ein Bild hierher.'
+      text: 'Füge ein Bild, Text oder QR hinzu — für Lesezeichen, Untersetzer, Schlüsselanhänger u. v. m.'
     },
     {
       id: 'depthRaised',
@@ -16,7 +16,7 @@
     },
     {
       id: 'shapeRect',
-      text: 'Wähle Form und Größe deines Lesezeichens.'
+      text: 'Wähle Form und Größe deines Objekts — Rechteck für Lesezeichen oder Untersetzer, Kreis für Untersetzer oder Schlüsselanhänger.'
     },
     {
       id: 'exportBtn',
