@@ -898,10 +898,11 @@
     offctx.fillRect(0, 0, cols, rows);
 
     // Elements on top (WYSIWYG — processImageForDisplay applied inside drawElement).
-    // Offset by grid origin (x0,y0) so elements in doc-space land correctly in the
-    // expanded raster. When x0=y0=0 (no overhang) these args are 0,0 — byte-identical.
+    // drawElement's trailing args are a view origin in MM (subtracted from el.cxMm
+    // before scaling), so pass the grid origin (x0,y0) directly. When x0=y0=0 (no
+    // overhang) this reduces to the old (0,0) — byte-identical.
     for (var ei = 0; ei < d.elements.length; ei++) {
-      drawElement(offctx, d.elements[ei], s, -x0 * s, -y0 * s);
+      drawElement(offctx, d.elements[ei], s, x0, y0);
     }
 
     // Enforce footprint: blank out pixels outside the plate (overhang + mount hole).
