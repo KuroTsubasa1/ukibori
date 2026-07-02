@@ -451,11 +451,16 @@
   }
 
   // Compute the Rand-Rahmen band mask (Uint8Array[cols*rows], 1 = band cell), or
-  // null when the frame is off (body.frame absent, widthMm <= 0, or free body).
+  // null when the frame is off (body.frame absent, widthMm <= 0, heightMm <= 0,
+  // or free body).
   // band(c,r) = footprint(c,r) > 0 && plateSdfMm(x,y) <= frame.widthMm && !cutout.
   function __frameBand(doc, grid, footprint, comp, domainExpanded) {
     const frame = doc.body.frame;
     if (doc.body.shape === "free" || !frame || !((frame.widthMm || 0) > 0)) return null;
+    // heightMm <= 0 emits no "rand" part, so the frame must be FULLY off (no band
+    // either) — otherwise content in the band is silently swallowed with nothing
+    // added (review finding).
+    if (!((frame.heightMm || 0) > 0)) return null;
     const { cols, rows, pitch } = grid;
     const plateSdfMm = window.bodySdfMm(doc.body);
     const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;

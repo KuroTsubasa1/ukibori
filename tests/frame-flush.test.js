@@ -82,6 +82,25 @@
     assert(noFrame.some(p => p.name.indexOf("erhaben") === 0), "erhaben part present when frame is off");
   });
 
+  // ---- (b2) heightMm=0 must turn the frame FULLY off (review finding: a band
+  // with no rand part would silently swallow content) ----
+  test("frame: heightMm=0 with widthMm>0 is fully off — content kept, no rand, parity", async () => {
+    const img = await solidImg("#ff0000", 8, 8);
+    const mk = (frameW, frameH) => {
+      const d = frameW === null ? sqDoc() : setFrame(sqDoc(), frameW, frameH, "#00ff00");
+      if (frameW === null) delete d.body.frame;
+      const el = makeElementV2("image", { src: "a", cxMm: 3, cyMm: 25, wMm: 4, hMm: 20 });
+      el.depth.direction = "raised"; el.depth.mode = "solid"; el.depth.heightMm = 2;
+      el.color = "#ff0000"; el._img = img;
+      d.elements = [el];
+      return d;
+    };
+    const zeroH = buildParts(mk(6, 0));      // width 6, height 0 -> frame OFF
+    assert(zeroH.some(p => p.name.indexOf("erhaben") === 0), "content survives (not swallowed by a rand-less band)");
+    assert(!zeroH.some(p => p.name === "rand"), "no rand part at heightMm=0");
+    assertEqual(partsJson(zeroH), partsJson(buildParts(mk(null))), "byte-identical to no-frame doc");
+  });
+
   // ---- (c) parity: widthMm=0 === no frame field; free body ignores frame ----
   test("frame: parity — widthMm=0 deep-equals a doc without any frame field", async () => {
     const img = await solidImg("#ff0000", 8, 8);
