@@ -294,16 +294,22 @@
     const comp = composeDesignV2(doc, cols, rows, grid);
     const free = doc.body.shape === "free";
 
-    // Build the composed footprint. For loop with valid params:
-    //   rect/circle: max(plateSDF, washerSDF) min holeSDF, in cell units
-    //   free: washer unioned into freeFootprintField (inside freeFootprintField)
+    // Determine whether the domain actually expanded beyond the body box.
+    // An unexpanded domain has x0=y0=0 and the same dimensions as the body box.
+    const domainExpanded = domain.x0 !== 0 || domain.y0 !== 0 ||
+      domain.wMm !== doc.body.widthMm || domain.hMm !== doc.body.heightMm;
+
+    // Build the composed footprint.
+    // ONLY use the union (washer-expanded) path when the domain actually expanded.
+    // When fully inside: degrade to the exact plain-hole path (spec decision 3).
     let footprint;
     const m = doc.mount;
     const isLoop = m && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0;
     if (free) {
-      footprint = freeFootprintField(doc, cols, rows, pitch, grid);
-    } else if (isLoop) {
-      // Expanded path: union plate SDF with washer disk SDF, then cut hole
+      // Pass grid only for expanded domain; default branch uses rect-cell mapping.
+      footprint = freeFootprintField(doc, cols, rows, pitch, domainExpanded ? grid : null);
+    } else if (isLoop && domainExpanded) {
+      // Expanded path: union plate SDF with washer disk SDF, then cut hole.
       const plateSdf = window.bodySdfMm(doc.body);
       const outerR = m.diameterMm / 2 + m.ringThicknessMm;
       const holeR = m.diameterMm / 2;
@@ -318,6 +324,8 @@
         return Math.min(unionDist, holeDist) * s;        // hole cut, cell units
       };
     } else {
+      // Default path (no expansion, or degenerate loop): plain shapeFootprintField.
+      // For a loop fully inside the body, this cuts the hole exactly like type='hole'.
       footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
     }
 
@@ -491,9 +499,13 @@
   // Free-outline footprint: the content silhouette dilated outward by body.borderMm
   // (the offset-margin border), with the mount hole cut. >0 inside the plate. Same
   // contract as shapeFootprintField (cell units, sign-based).
-  // grid: optional shared {cols,rows,pitch,x0,y0} for expanded-domain mapping.
-  // When mount.type==='loop' with valid params, the washer is unioned into the plate
-  // BEFORE the hole cut (washer tab extends the free footprint).
+  // grid: optional shared {cols,rows,pitch,x0,y0} for an EXPANDED domain (washer
+  // overhangs the body box). When grid is provided and the domain is expanded
+  // (x0≠0 or y0≠0 or the domain differs from the body box), the washer is unioned
+  // into the plate BEFORE the hole cut using square-pitch mapping on the shared grid.
+  // When grid is absent or the domain equals the body box, the ORIGINAL rectangular-
+  // cell mapping is used (sx=cols/W, sy=rows/H, s=(sx+sy)/2) — byte-identical to
+  // pre-T1 behavior on the default path.
   function freeFootprintField(doc, cols, rows, pitch, grid) {
     const dt = __chamferDT(__silhouetteMask(doc, cols, rows, grid), cols, rows);
     const borderCells = (doc.body.borderMm || 0) / pitch;
@@ -501,31 +513,46 @@
     const m = doc.mount || { type: "none" };
     const hasHole = m.type === "hole" || m.type === "loop";
     const holeR = hasHole ? (m.diameterMm || 0) / 2 : 0;
-    // For mm→cells scale, use the grid pitch if provided, else body-box mapping
-    const s = 1 / pitch;
     const cx = hasHole ? m.xMm : 0, cy = hasHole ? m.yMm : 0;
-    // Washer union for loop (free body path mirrors rect/circle path)
-    const hasWasher = m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0;
+    // Washer union only when called with an expanded shared grid (overhanging case).
+    const hasWasher = grid && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0;
     const outerR = hasWasher ? m.diameterMm / 2 + m.ringThicknessMm : 0;
-    // x0/y0 from shared grid (0 when default body-box)
-    const x0 = grid ? grid.x0 : 0, y0 = grid ? grid.y0 : 0;
-    return (c, r) => {
-      const x = x0 + (c + 0.5) * pitch, yy = y0 + (r + 0.5) * pitch;
-      let v = borderCells - dt[idx(c, r)];              // >0 within borderCells of silhouette
-      if (hasWasher) {
-        const washerSdf = (outerR - Math.hypot(x - cx, yy - cy)) * s; // >0 inside washer disk
-        v = Math.max(v, washerSdf);                     // union: inside plate OR inside washer
-      }
-      if (hasHole) {
-        v = Math.min(v, (Math.hypot(x - cx, yy - cy) - holeR) * s); // hole cut
-      }
-      return v;
-    };
+
+    if (grid) {
+      // EXPANDED path: square-pitch mapping on the shared grid, washer unioned in.
+      const s = 1 / pitch;
+      const x0 = grid.x0, y0 = grid.y0;
+      return (c, r) => {
+        const x = x0 + (c + 0.5) * pitch, yy = y0 + (r + 0.5) * pitch;
+        let v = borderCells - dt[idx(c, r)];            // >0 within borderCells of silhouette
+        if (hasWasher) {
+          const washerSdf = (outerR - Math.hypot(x - cx, yy - cy)) * s; // >0 inside washer disk
+          v = Math.max(v, washerSdf);                   // union: inside plate OR inside washer
+        }
+        if (hasHole) {
+          v = Math.min(v, (Math.hypot(x - cx, yy - cy) - holeR) * s); // hole cut
+        }
+        return v;
+      };
+    } else {
+      // DEFAULT path: ORIGINAL rectangular-cell mapping (byte-identical to pre-T1).
+      // sx/sy account for non-square cells; s=(sx+sy)/2 scales mm→cell-units.
+      const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm, s = (sx + sy) / 2;
+      return (c, r) => {
+        let v = borderCells - dt[idx(c, r)];            // >0 within borderCells of silhouette
+        if (hasHole) {
+          const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
+          v = Math.min(v, (Math.hypot(x - cx, y - cy) - holeR) * s); // hole cut
+        }
+        return v;
+      };
+    }
   }
 
   // Single public entry point for domain + footprint. Consumed by buildParts internally
   // and by T3's SVG. Returns {grid:{cols,rows,pitch,x0,y0}, footprint:(c,r)=>cellUnits}.
   // Non-loop docs return the body-box grid (x0=y0=0) and the standard shapeFootprintField.
+  // Loop fully inside the body → degrades to shapeFootprintField (plain hole, spec decision 3).
   function docGridAndFootprint(doc) {
     const domain = docDomain(doc);
     const grid = gridForDomain(domain, doc.resolution);
@@ -533,10 +560,14 @@
     const m = doc.mount;
     const free = doc.body.shape === "free";
     const isLoop = m && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0;
+    const domainExpanded = domain.x0 !== 0 || domain.y0 !== 0 ||
+      domain.wMm !== doc.body.widthMm || domain.hMm !== doc.body.heightMm;
     let footprint;
     if (free) {
-      footprint = freeFootprintField(doc, cols, rows, pitch, grid);
-    } else if (isLoop) {
+      // Pass grid only when domain expanded; default branch uses rect-cell mapping.
+      footprint = freeFootprintField(doc, cols, rows, pitch, domainExpanded ? grid : null);
+    } else if (isLoop && domainExpanded) {
+      // Expanded path: washer overhangs body box — union SDF.
       const plateSdf = window.bodySdfMm(doc.body);
       const outerR = m.diameterMm / 2 + m.ringThicknessMm;
       const holeR = m.diameterMm / 2;
@@ -551,6 +582,7 @@
         return Math.min(unionDist, holeDist) * s;
       };
     } else {
+      // Default / loop-fully-inside: plain shapeFootprintField (cuts hole for type='loop').
       footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
     }
     return { grid, footprint };
