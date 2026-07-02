@@ -256,10 +256,14 @@
   // (Body extracted verbatim from buildEngravedParts so a pure-engraved comp is
   // unchanged — parity preserved. buildParts feeds it a comp where non-engraved
   // pixels have been reclassified as base.)
-  function __engravedBaseAndFloors(doc, comp, cols, rows, pitch, footprint) {
+  // band: optional Rand-Rahmen mask (see __frameBand). Ring wins: band cells emit
+  // no color floors/recesses — they are treated as full-height base instead (the
+  // "rand" part sits on top of them). band == null => byte-identical to pre-band code.
+  function __engravedBaseAndFloors(doc, comp, cols, rows, pitch, footprint, band) {
     const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
     const baseHex = doc.body.baseColor.toUpperCase();
     const idx = (c, r) => r * cols + c;
+    const inBand = band ? ((i) => band[i] === 1) : (() => false);
     const colorParts = [], baseParts = [];
     const tracedFacets = (member, thickness, z0) => window.orientOutward(
       window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
@@ -273,7 +277,7 @@
     const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
     const ownerEff = new Map();
     for (let i = 0; i < cols * rows; i++) {
-      if (comp.isBase[i] || comp.cutout[i] || comp.owner[i] < 0) continue;
+      if (comp.isBase[i] || comp.cutout[i] || comp.owner[i] < 0 || inBand(i)) continue;
       const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
       let s = ownerEff.get(comp.owner[i]); if (!s) ownerEff.set(comp.owner[i], s = new Set());
       s.add(hex);
@@ -300,7 +304,7 @@
     const groups = new Map();
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const i = idx(c, r);
-      if (comp.isBase[i] || comp.cutout[i]) continue;
+      if (comp.isBase[i] || comp.cutout[i] || inBand(i)) continue;
       const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
       let grp = groups.get(hex); if (!grp) groups.set(hex, grp = { hex, set: new Uint8Array(cols * rows) });
       grp.set[i] = 1;
@@ -317,11 +321,12 @@
       if (facets.length) baseParts.push({ name: "grundplatte", color: window.hexToRgb(baseHex), facets });
     };
     baseAdd((c, r) => comp.cutout[idx(c, r)] !== 1, minBase, 0);
-    baseAdd((c, r) => comp.isBase[idx(c, r)] === 1, T - minBase, minBase);
+    // Band cells count as base at full height (ring wins; band never contains cutouts).
+    baseAdd((c, r) => comp.isBase[idx(c, r)] === 1 || inBand(idx(c, r)), T - minBase, minBase);
     const behind = new Map();
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const i = idx(c, r);
-      if (comp.cutout[i] || comp.isBase[i]) continue;
+      if (comp.cutout[i] || comp.isBase[i] || inBand(i)) continue;
       const h = baseUnder(depthFor(__hex(comp.r[i], comp.g[i], comp.b[i])));
       if (h - minBase <= 1e-6) continue;
       const key = h.toFixed(4);
@@ -333,12 +338,12 @@
     return [...baseParts, ...colorParts];
   }
 
-  function buildEngravedParts(doc, gridArg, footprintArg) {
+  function buildEngravedParts(doc, gridArg, footprintArg, band) {
     const grid = gridArg || gridForBody(doc.body, doc.resolution);
     const { cols, rows, pitch } = grid;
     const comp = composeDesignV2(doc, cols, rows, gridArg);
     const footprint = footprintArg || window.shapeFootprintField(cols, rows, doc.body, doc.mount);
-    return __engravedBaseAndFloors(doc, comp, cols, rows, pitch, footprint);
+    return __engravedBaseAndFloors(doc, comp, cols, rows, pitch, footprint, band);
   }
 
   // Unified entry: base (recessed under engraved pixels, full-thickness elsewhere) +
@@ -409,6 +414,15 @@
       footprint = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
     }
 
+    // Rand-Rahmen band (rect/circle only; frame.widthMm > 0): footprint cells whose
+    // center lies within frame.widthMm of the plate edge (plate SDF <= widthMm).
+    // Cell-center mm mapping matches the footprint's own mapping (expanded: square
+    // pitch with x0/y0 shift; default: rectangular cells sx=cols/W, sy=rows/H).
+    // "Ring wins": band cells are excluded from content parts (band passed down);
+    // element cutout holes win over the ring (cutout cells never join the band).
+    // band === null => frame off => all content builders byte-identical (parity).
+    const band = __frameBand(doc, grid, footprint, comp, domainExpanded);
+
     const isEngravedEi = (ei) => {
       const d = doc.elements[ei] && doc.elements[ei].depth;
       return !!(d && d.direction === "engraved" && d.mode !== "heightmap");
@@ -428,11 +442,45 @@
       }
     }
     return [
-      ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint),
-      ...buildRaisedParts(doc, footprint, comp, grid),
-      ...buildHeightmapParts(doc, footprint, grid),
+      ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint, band),
+      ...buildRaisedParts(doc, footprint, comp, grid, band),
+      ...buildHeightmapParts(doc, footprint, grid, band),
+      ...buildFrameParts(doc, band, cols, rows, pitch),
       ...buildMountRingParts(doc),
     ];
+  }
+
+  // Compute the Rand-Rahmen band mask (Uint8Array[cols*rows], 1 = band cell), or
+  // null when the frame is off (body.frame absent, widthMm <= 0, or free body).
+  // band(c,r) = footprint(c,r) > 0 && plateSdfMm(x,y) <= frame.widthMm && !cutout.
+  function __frameBand(doc, grid, footprint, comp, domainExpanded) {
+    const frame = doc.body.frame;
+    if (doc.body.shape === "free" || !frame || !((frame.widthMm || 0) > 0)) return null;
+    const { cols, rows, pitch } = grid;
+    const plateSdfMm = window.bodySdfMm(doc.body);
+    const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
+    const band = new Uint8Array(cols * rows);
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const i = r * cols + c;
+      if (comp && comp.cutout[i]) continue;        // cutout holes win over the ring
+      if (!(footprint(c, r) > 0)) continue;        // respects mount hole + Öse tab
+      const x = domainExpanded ? grid.x0 + (c + 0.5) * pitch : (c + 0.5) / sx;
+      const y = domainExpanded ? grid.y0 + (r + 0.5) * pitch : (r + 0.5) / sy;
+      if (plateSdfMm(x, y) <= frame.widthMm) band[i] = 1;
+    }
+    return band;
+  }
+
+  // The Rand-Rahmen part: the band extruded from the base top face (thicknessMm)
+  // up by frame.heightMm, in frame.color. Emitted as a single "rand" part.
+  function buildFrameParts(doc, band, cols, rows, pitch) {
+    if (!band) return [];
+    const frame = doc.body.frame;
+    if (!((frame.heightMm || 0) > 0)) return [];   // no degenerate zero-height solid
+    const facets = window.orientOutward(window.traceMaskToFacets(
+      (c, r) => band[r * cols + c] === 1, cols, rows, pitch, frame.heightMm, doc.body.thicknessMm));
+    if (!facets.length) return [];
+    return [{ name: "rand", color: window.hexToRgb(frame.color), facets }];
   }
 
   // The loop (Öse) ring: formerly emitted a raised annulus rim.
@@ -444,10 +492,12 @@
 
   // Raised element prisms: for depth.direction==='raised' elements, extrude their
   // colored regions UP from the base top face. Base plate is built separately.
-  // Height: depth.heightMm for solid/text; (rank+1)*step per color for colorLayers.
+  // Height: depth.heightMm for solid/text; (rank+1)*step per color for colorLayers —
+  // unless depth.flush (Bündig): then every color gets step (one flat surface).
   // Uses the shared composeDesignV2 rasterizer; a raised "colored stamp" that should
   // keep bright pixels uses a high depth.threshold (256 => alpha-only).
-  function buildRaisedParts(doc, footprintArg, compArg, gridArg) {
+  // band: optional Rand-Rahmen mask; band cells are skipped (ring wins).
+  function buildRaisedParts(doc, footprintArg, compArg, gridArg, band) {
     const grid = gridArg || gridForBody(doc.body, doc.resolution);
     const { cols, rows, pitch } = grid;
     const comp = compArg || composeDesignV2(doc, cols, rows, gridArg);
@@ -460,6 +510,7 @@
 
     const heightForElemColor = (el, hex) => {
       if (el.depth && el.depth.mode === "colorLayers") {
+        if (el.depth.flush) return step; // Bündig: all colors span [T, T+step]
         const remap = (el.depth.reduce && el.depth.reduce.remap) || {};
         const seq = __orderedNaturalHexesV2(el).map(nat => { const c = window.hexToRgb(remap[nat] || nat); return __hex(c[0], c[1], c[2]); });
         const rank = seq.indexOf(hex);
@@ -471,7 +522,7 @@
     const groups = new Map(); // "ei|hex" -> {ei, hex, set}
     for (let i = 0; i < cols * rows; i++) {
       const ei = comp.owner[i];
-      if (ei < 0 || comp.cutout[i]) continue;
+      if (ei < 0 || comp.cutout[i] || (band && band[i] === 1)) continue;
       const el = doc.elements[ei];
       if (!(el.depth && el.depth.direction === "raised")) continue;
       const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
@@ -492,12 +543,14 @@
   // a floor slab over the silhouette + K super-level slabs (region where brightness
   // >= k/K), each a flat extrusion. Prints identically to a smooth surface after
   // slicing. Single color (el.color); height from luminance.
-  function buildHeightmapParts(doc, footprintArg, gridArg) {
+  // band: optional Rand-Rahmen mask; band cells are skipped (ring wins).
+  function buildHeightmapParts(doc, footprintArg, gridArg, band) {
     const grid = gridArg || gridForBody(doc.body, doc.resolution);
     const { cols, rows, pitch } = grid;
     const footprint = footprintArg || window.shapeFootprintField(cols, rows, doc.body, doc.mount);
     const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
     const idx = (c, r) => r * cols + c;
+    const inBand = band ? ((i) => band[i] === 1) : (() => false);
     const tracedFacets = (member, thickness, z0) => window.orientOutward(
       window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
     const parts = [];
@@ -519,13 +572,13 @@
         if (invert) lum = 1 - lum;
         bright[i] = lum; inRegion[i] = 1;
       }
-      const floor = tracedFacets((c, r) => inRegion[idx(c, r)] === 1, baseFloor, T);
+      const floor = tracedFacets((c, r) => inRegion[idx(c, r)] === 1 && !inBand(idx(c, r)), baseFloor, T);
       if (floor.length) parts.push({ name: "hoehe-" + (ei + 1) + "-boden", color: col, facets: floor });
       const K = Math.max(0, Math.min(48, Math.round(availH / layerH)));
       const dz = K > 0 ? availH / K : 0;
       for (let k = 1; k <= K; k++) {
         const thr = k / K, z0 = T + baseFloor + (k - 1) * dz;
-        const facets = tracedFacets((c, r) => inRegion[idx(c, r)] === 1 && bright[idx(c, r)] >= thr, dz, z0);
+        const facets = tracedFacets((c, r) => inRegion[idx(c, r)] === 1 && bright[idx(c, r)] >= thr && !inBand(idx(c, r)), dz, z0);
         if (facets.length) parts.push({ name: "hoehe-" + (ei + 1) + "-" + k, color: col, facets });
       }
     });
@@ -701,6 +754,7 @@
   window.buildMountRingParts = buildMountRingParts;
   window.buildRaisedParts = buildRaisedParts;
   window.buildHeightmapParts = buildHeightmapParts;
+  window.buildFrameParts = buildFrameParts;
   window.buildParts = buildParts;
   window.freeFootprintField = freeFootprintField;
   // Test-only: expose __renderElementV2 so island-removal.test.js can inspect mask/r/g/b

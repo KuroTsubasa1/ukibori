@@ -76,7 +76,14 @@ function defaultDepth(type) {
     smooth: 0.5,
     baseFloorMm: 0,
     minIsland: 0,                  // pixels; 0 = off (Inseln entfernen disabled by default)
+    flush: false,                  // colorLayers: all colors at the same height (Bündig); false = stacked (parity)
   };
+}
+
+// Rand-Rahmen (raised ring frame) default for rect/circle bodies.
+// widthMm 0 = OFF (parity); heightMm = extrusion above the base top face.
+function defaultFrame() {
+  return { widthMm: 0, heightMm: 2, color: "#000000" };
 }
 
 function defaultDoc() {
@@ -86,6 +93,7 @@ function defaultDoc() {
       shape: "rect",
       widthMm: 50, heightMm: 150, cornerRadiusMm: 4,
       thicknessMm: 3, layerHeightMm: 0.2, baseColor: "#000000", borderMm: 2,
+      frame: defaultFrame(),
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
     // xMm/yMm = hole/loop CENTER (see migrateProject); yMm = marginMm + diameterMm/2.
@@ -113,6 +121,7 @@ function migrateElement(el, doc, layerHmm) {
     smooth: doc.smooth != null ? doc.smooth : 0.5,
     baseFloorMm: 0,
     minIsland: 0,                  // v1 had no island removal → fill with 0
+    flush: false,                  // v1 had no flush surface → fill with false
   };
   const out = {
     id: el.id, type: el.type,
@@ -126,7 +135,15 @@ function migrateElement(el, doc, layerHmm) {
 }
 
 function migrateProject(doc) {
-  if (!doc || doc.version === DOC_VERSION) return doc;
+  if (!doc) return doc;
+  if (doc.version === DOC_VERSION) {
+    // Already v2: fill fields added after the v2 schema shipped (older saves lack them).
+    if (doc.body && doc.body.frame == null) doc.body.frame = defaultFrame();
+    for (const el of doc.elements || []) {
+      if (el.depth && el.depth.flush == null) el.depth.flush = false;
+    }
+    return doc;
+  }
   const layerH = doc.layerHeightMm != null ? doc.layerHeightMm : 0.2;
   const hole = doc.hole || null;
   return {
@@ -137,6 +154,7 @@ function migrateProject(doc) {
       cornerRadiusMm: doc.cornerRadiusMm != null ? doc.cornerRadiusMm : 0,
       thicknessMm: doc.thicknessMm, layerHeightMm: layerH,
       baseColor: doc.baseColor || "#000000", borderMm: 2,
+      frame: defaultFrame(),
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
     // mount.xMm/yMm are the hole/loop CENTER (matches js/geometry.js roundedRectHoleField:
@@ -175,6 +193,7 @@ window.serializeProject = serializeProject;
 window.deserializeProject = deserializeProject;
 window.DOC_VERSION = DOC_VERSION;
 window.defaultDepth = defaultDepth;
+window.defaultFrame = defaultFrame;
 window.defaultDoc = defaultDoc;
 window.migrateProject = migrateProject;
 window.makeElementV2 = makeElementV2;

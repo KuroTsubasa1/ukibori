@@ -60,6 +60,11 @@
         <label for="borderMm" class="sp-inline-label">Rand (mm)</label>
         <input type="number" id="borderMm" class="sp-num" min="0" max="50" step="0.5" value="2" title="Randbreite in mm (Freiform)">
       </div>
+      <div id="frameField" class="sp-inline-field" hidden>
+        <label for="frameMm" class="sp-inline-label">Rahmen (mm)</label>
+        <input type="number" id="frameMm" class="sp-num" min="0" max="20" step="0.5" value="0" title="Erhabener Rahmen am Plattenrand (0 = aus)">
+        <input type="color" id="frameColor" value="#000000" title="Farbe des Rahmens">
+      </div>
     </div>
     <div class="sp-section">
       <div class="sp-label">Befestigung</div>
@@ -121,6 +126,12 @@
             <label class="adv-label">Palette (Farbe ändern / Reihenfolge ziehen)</label>
             <div id="advPaletteSwatch" class="adv-swatches"></div>
           </div>
+          <!-- Bündig (flush surface; visible only in colorLayers mode, same group as palette) -->
+          <div class="adv-field" id="advFlushField" hidden>
+            <label class="adv-label toggle">
+              <input type="checkbox" id="advFlush" title="Alle Farben auf gleicher Höhe — eine ebene Fläche (statt gestufter Ebenen)"> Bündig (eine Fläche)
+            </label>
+          </div>
         </div>
       </details>
 
@@ -129,7 +140,7 @@
         <summary>Tiefenmodus</summary>
         <div class="acc-body adv-section">
           <div id="modeSeg" class="seg-group seg-sm adv-seg-full">
-            <button type="button" id="modeSolid" class="seg seg-active" style="flex:1" title="Einfarbig (eine Tiefe)">Voll</button>
+            <button type="button" id="modeSolid" class="seg seg-active" style="flex:1" title="Einfarbig (eine Tiefe)">Einfarbig</button>
             <button type="button" id="modeColorLayers" class="seg" style="flex:1" title="Mehrfarbig: jede Farbe auf eigener Schicht">Farbebenen</button>
             <button type="button" id="modeHeightmap" class="seg" style="flex:1" title="Helligkeit als Höhe (Graustufenrelief)">Höhenrelief</button>
           </div>
@@ -212,6 +223,10 @@
           <div class="adv-field">
             <label for="advColorStep" class="adv-label">Farbschichten</label>
             <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="2" title="Höhenunterschied zwischen Farbschichten in Schichten">
+          </div>
+          <div class="adv-field">
+            <label for="advFrameHeight" class="adv-label">Rahmenhöhe (mm)</label>
+            <input type="number" id="advFrameHeight" class="sp-num adv-num-full" step="0.2" min="0" max="12" value="2" title="Höhe des erhabenen Rahmens über der Platte in mm">
           </div>
         </div>
       </details>

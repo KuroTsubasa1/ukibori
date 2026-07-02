@@ -119,6 +119,26 @@
     ctx.closePath();
   }
 
+  // Rounded-rect path inset by insetMm on all sides (Rand-Rahmen 2D preview).
+  // Returns false when the inset collapses the rect. Preview-approximation:
+  // the inset corner radius is max(0, cornerRadius - inset); geometry is authoritative.
+  function insetBodyPath(ctx, insetMm) {
+    const body = doc.body;
+    const x0 = mmX(insetMm), y0 = mmY(insetMm);
+    const x1 = mmX(body.widthMm - insetMm), y1 = mmY(body.heightMm - insetMm);
+    if (x1 <= x0 || y1 <= y0) return false;
+    const w = x1 - x0, h = y1 - y0;
+    const rr = Math.min(Math.max(0, (body.cornerRadiusMm || 0) - insetMm) * state.scale, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x0 + rr, y0);
+    ctx.arcTo(x1, y0, x1, y1, rr);
+    ctx.arcTo(x1, y1, x0, y1, rr);
+    ctx.arcTo(x0, y1, x0, y0, rr);
+    ctx.arcTo(x0, y0, x1, y0, rr);
+    ctx.closePath();
+    return true;
+  }
+
   // ---- Image-processing display cache (WYSIWYG: what-you-see == what-prints) ----
 
   // Cache key: encodes all processing params that affect the display canvas.
@@ -290,6 +310,9 @@
     var isColorLayers = el && el.type === 'image' && el._img &&
       ((el.depth && el.depth.mode) || 'solid') === 'colorLayers';
     field.hidden = !isColorLayers;
+    // Bündig toggle shares the palette's visibility group (colorLayers only).
+    var flushField = document.getElementById('advFlushField');
+    if (flushField) flushField.hidden = !isColorLayers;
     if (!isColorLayers) { cont.innerHTML = ''; return; }
     // Use the v1 shim to call __orderedNaturalHexes.
     var shim = __makeV1Shim(el);
@@ -435,6 +458,16 @@
       ctx.restore();
       // Outline.
       bodyPath(ctx); ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
+      // Rand-Rahmen preview: stroke inset by widthMm/2 with lineWidth widthMm*s
+      // (drawn over the content — "ring wins"; exact band comes from the engine).
+      const frame = body.frame;
+      if (frame && frame.widthMm > 0 && insetBodyPath(ctx, frame.widthMm / 2)) {
+        ctx.save();
+        ctx.strokeStyle = frame.color || "#000000";
+        ctx.lineWidth = frame.widthMm * s;
+        ctx.stroke();
+        ctx.restore();
+      }
     } else if (shape === "circle") {
       // Circle plate: outline only (B5: no solid fill so elements/relief are visible).
       const r = Math.min(body.widthMm, body.heightMm) / 2 * s;
@@ -446,6 +479,19 @@
       ctx.restore();
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
+      // Rand-Rahmen preview: ring stroke at r - widthMm/2 ("ring wins" over content).
+      const frame = body.frame;
+      if (frame && frame.widthMm > 0) {
+        const fr = r - (frame.widthMm / 2) * s;
+        if (fr > 0) {
+          ctx.save();
+          ctx.beginPath(); ctx.arc(cx, cy, fr, 0, Math.PI * 2);
+          ctx.strokeStyle = frame.color || "#000000";
+          ctx.lineWidth = frame.widthMm * s;
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
     } else {
       // free shape: draw elements only (no plate frame in 2D).
       // NOTE: true free-shape plate outline only shown in 3D/export (2D simplification).
@@ -1039,6 +1085,8 @@
     doc.body.shape = shape;
     setSegActive("shapeSeg", shape === "rect" ? "shapeRect" : shape === "circle" ? "shapeCircle" : "shapeFree");
     document.getElementById("borderField").hidden = (shape !== "free");
+    // Rand-Rahmen: only meaningful for rect/circle plates (engine ignores it for free).
+    document.getElementById("frameField").hidden = (shape === "free");
     render2D();
     scheduleRebuild3D();
   }
@@ -1053,6 +1101,25 @@
       doc.body.borderMm = v;
       scheduleRebuild3D();
     }
+  });
+
+  // Rand-Rahmen (shown for Rechteck/Kreis; engine ignores it for Frei)
+  function ensureFrame() {
+    if (!doc.body.frame) doc.body.frame = window.defaultFrame ? window.defaultFrame() : { widthMm: 0, heightMm: 2, color: "#000000" };
+    return doc.body.frame;
+  }
+  document.getElementById("frameMm").addEventListener("input", function () {
+    var v = parseFloat(this.value);
+    if (!isNaN(v) && v >= 0) {
+      ensureFrame().widthMm = v;
+      render2D();
+      scheduleRebuild3D();
+    }
+  });
+  document.getElementById("frameColor").addEventListener("input", function () {
+    ensureFrame().color = this.value;
+    render2D();
+    scheduleRebuild3D();
   });
 
   // Mount: Keine / Loch / Öse
@@ -1254,6 +1321,10 @@
     document.getElementById("sizeH").value = doc.body.heightMm;
     // Border
     document.getElementById("borderMm").value = doc.body.borderMm != null ? doc.body.borderMm : 2;
+    // Rahmen (Rand-Rahmen)
+    var fr = doc.body.frame;
+    document.getElementById("frameMm").value = fr && fr.widthMm != null ? fr.widthMm : 0;
+    document.getElementById("frameColor").value = (fr && fr.color) || "#000000";
     // Depth (defaultDirection already 'raised'; reflect it)
     setSegActive("depthSeg", defaultDirection === "raised" ? "depthRaised" : "depthEngraved");
   }
@@ -1441,6 +1512,8 @@
       minIsland.value = el ? (el.depth.minIsland != null ? el.depth.minIsland : 0) : 0;
     }
     if (minIslandVal) minIslandVal.textContent = el ? (el.depth.minIsland != null ? el.depth.minIsland : 0) : 0;
+    var advFlush = document.getElementById("advFlush");
+    if (advFlush) { advFlush.disabled = disabled; advFlush.checked = el ? !!(el.depth && el.depth.flush) : false; }
 
     var modeSolid = document.getElementById("modeSolid");
     var modeColorLayers = document.getElementById("modeColorLayers");
@@ -1533,6 +1606,12 @@
     var badge = document.getElementById("advMinIslandVal"); if (badge) badge.textContent = Math.round(v);
   }, { invalidate: true });
 
+  // Bündig (flush): all colorLayers colors at the same height. No {invalidate} —
+  // 2D colors are unchanged; withSelected already triggers the 3D rebuild.
+  bindElementField("advFlush", "change", function (el, node) {
+    el.depth.flush = node.checked;
+  });
+
   // -- Element inputs --
   bindElementField("advColor", "input", function (el, node) {
     el.color = node.value;
@@ -1597,6 +1676,11 @@
     if (!isNaN(v) && v >= 1) { doc.colorStepLayers = v; scheduleRebuild3D(); }
   });
 
+  document.getElementById("advFrameHeight").addEventListener("input", function () {
+    var v = parseFloat(this.value);
+    if (!isNaN(v) && v >= 0) { ensureFrame().heightMm = v; scheduleRebuild3D(); }
+  });
+
   // -- Init Advanced panel doc-level values (also called by resetDocTo) --
   function initAdvancedUI() {
     var t = document.getElementById("advThickness");
@@ -1607,6 +1691,8 @@
     if (res) res.value = doc.resolution != null ? doc.resolution : 1024;
     var cs = document.getElementById("advColorStep");
     if (cs) cs.value = doc.colorStepLayers != null ? doc.colorStepLayers : 2;
+    var fh = document.getElementById("advFrameHeight");
+    if (fh) fh.value = (doc.body.frame && doc.body.frame.heightMm != null) ? doc.body.frame.heightMm : 2;
     refreshAdvancedForSelection();
     renderAdvancedLayers();
   }
