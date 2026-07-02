@@ -898,10 +898,130 @@
 
   // ---- Advanced panel (Task 4b) ----
 
-  // -- Layers list --
-  function renderAdvancedLayers() {
-    var list = document.getElementById("advLayers");
-    var empty = document.getElementById("advLayersEmpty");
+  // -- Layers list (shared: populates both #advLayers and #simpleLayers) --
+
+  // Build a small thumbnail node for a layer row.
+  function buildLayerThumb(el) {
+    if (el.type === "image" || (el.type === "image" && el.qrData)) {
+      var disp = processImageForDisplay(el);
+      if (disp) {
+        // Scale the processed display canvas into a 28×28 thumb canvas.
+        var thumb = document.createElement("canvas");
+        thumb.className = "layer-thumb";
+        thumb.width = 28; thumb.height = 28;
+        var ctx = thumb.getContext("2d");
+        var sw = disp.width, sh = disp.height;
+        var scale = Math.min(28 / sw, 28 / sh);
+        var dw = Math.round(sw * scale), dh = Math.round(sh * scale);
+        var dx = Math.round((28 - dw) / 2), dy = Math.round((28 - dh) / 2);
+        ctx.drawImage(disp, 0, 0, sw, sh, dx, dy, dw, dh);
+        return thumb;
+      }
+    }
+    // Text / QR / fallback: a coloured chip with the first character(s).
+    var chip = document.createElement("span");
+    chip.className = "layer-thumb-text";
+    if (el.type === "text") {
+      chip.style.color = el.color || "#333";
+      chip.textContent = el.text ? el.text.charAt(0).toUpperCase() : "T";
+    } else if (el.type === "qr" || el.qrData) {
+      chip.textContent = "QR";
+    } else {
+      chip.textContent = "?";
+    }
+    return chip;
+  }
+
+  // Build a single layer <li> for element at index i. Clicking triggers renderLayers().
+  function buildLayerRow(i) {
+    var el = doc.elements[i];
+    var li = document.createElement("li");
+    if (el.id === state.selectedId) li.classList.add("adv-sel");
+    if (el._hidden) li.classList.add("adv-hidden");
+
+    var thumb = buildLayerThumb(el);
+    li.appendChild(thumb);
+
+    var nameSpan = document.createElement("span");
+    nameSpan.className = "adv-lname";
+    var isQR = el.type === "qr" || (el.type === "image" && el.qrData);
+    var typeLabel = el.type === "text" ? "Text" : isQR ? "QR" : "Bild";
+    nameSpan.textContent = typeLabel + " " + (i + 1);
+    if (el.type === 'text' && el.text) nameSpan.textContent = '„' + el.text + '“';
+
+    var vis = document.createElement("button");
+    vis.className = "adv-lbtn";
+    vis.textContent = el._hidden ? "🙈" : "👁";
+    vis.title = el._hidden ? "Einblenden" : "Ausblenden";
+
+    var up = document.createElement("button");
+    up.className = "adv-lbtn";
+    up.textContent = "▲";
+    up.title = "Nach oben";
+
+    var dn = document.createElement("button");
+    dn.className = "adv-lbtn";
+    dn.textContent = "▼";
+    dn.title = "Nach unten";
+
+    var del = document.createElement("button");
+    del.className = "adv-lbtn";
+    del.textContent = "🗑";
+    del.title = "Löschen";
+
+    li.append(nameSpan, vis, up, dn, del);
+
+    li.addEventListener("click", function (e) {
+      if (e.target.classList.contains("adv-lbtn")) return;
+      state.selectedId = el.id;
+      refreshAdvancedForSelection();
+      renderLayers();
+      render2D();
+    });
+
+    vis.addEventListener("click", function (e) {
+      e.stopPropagation();
+      el._hidden = !el._hidden;
+      renderLayers();
+      render2D();
+      scheduleRebuild3D();
+    });
+
+    up.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (i < doc.elements.length - 1) {
+        var tmp = doc.elements[i]; doc.elements[i] = doc.elements[i + 1]; doc.elements[i + 1] = tmp;
+        renderLayers();
+        render2D();
+        scheduleRebuild3D();
+      }
+    });
+
+    dn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (i > 0) {
+        var tmp = doc.elements[i]; doc.elements[i] = doc.elements[i - 1]; doc.elements[i - 1] = tmp;
+        renderLayers();
+        render2D();
+        scheduleRebuild3D();
+      }
+    });
+
+    del.addEventListener("click", function (e) {
+      e.stopPropagation();
+      doc.elements.splice(i, 1);
+      if (state.selectedId === el.id) state.selectedId = null;
+      refreshAdvancedForSelection();
+      renderLayers();
+      render2D();
+      scheduleRebuild3D();
+    });
+
+    return li;
+  }
+
+  // Populate a layers <ul> container (and its paired empty <p>) with the current doc elements.
+  function populateLayersList(list, empty) {
     if (!list) return;
     list.innerHTML = "";
     var els = doc.elements;
@@ -910,93 +1030,26 @@
       return;
     }
     if (empty) empty.hidden = true;
-    // Render back-to-front (last index = topmost layer)
+    // Render back-to-front (last index = topmost layer shown first).
     for (var idx = els.length - 1; idx >= 0; idx--) {
-      (function (i) {
-        var el = els[i];
-        var li = document.createElement("li");
-        if (el.id === state.selectedId) li.classList.add("adv-sel");
-        if (el._hidden) li.classList.add("adv-hidden");
-
-        var nameSpan = document.createElement("span");
-        nameSpan.className = "adv-lname";
-        var typeLabel = el.type === "text" ? "Text" : el.type === "qr" ? "QR" : (el.type === "image" && el.qrData) ? "QR" : el.type === "image" ? "Bild" : el.type;
-        nameSpan.textContent = typeLabel + " " + (i + 1);
-        if (el.type === "text" && el.text) nameSpan.textContent = "„" + el.text + "“";
-
-        var vis = document.createElement("button");
-        vis.className = "adv-lbtn";
-        vis.textContent = el._hidden ? "🙈" : "👁";
-        vis.title = el._hidden ? "Einblenden" : "Ausblenden";
-
-        var up = document.createElement("button");
-        up.className = "adv-lbtn";
-        up.textContent = "▲";
-        up.title = "Nach oben";
-
-        var dn = document.createElement("button");
-        dn.className = "adv-lbtn";
-        dn.textContent = "▼";
-        dn.title = "Nach unten";
-
-        var del = document.createElement("button");
-        del.className = "adv-lbtn";
-        del.textContent = "🗑";
-        del.title = "Löschen";
-
-        li.append(nameSpan, vis, up, dn, del);
-
-        li.addEventListener("click", function (e) {
-          if (e.target.classList.contains("adv-lbtn")) return;
-          state.selectedId = el.id;
-          refreshAdvancedForSelection();
-          renderAdvancedLayers();
-          render2D();
-        });
-
-        vis.addEventListener("click", function (e) {
-          e.stopPropagation();
-          el._hidden = !el._hidden;
-          renderAdvancedLayers();
-          render2D();
-          scheduleRebuild3D();
-        });
-
-        up.addEventListener("click", function (e) {
-          e.stopPropagation();
-          var elsCopy = doc.elements;
-          if (i < elsCopy.length - 1) {
-            var tmp = elsCopy[i]; elsCopy[i] = elsCopy[i + 1]; elsCopy[i + 1] = tmp;
-            renderAdvancedLayers();
-            render2D();
-            scheduleRebuild3D();
-          }
-        });
-
-        dn.addEventListener("click", function (e) {
-          e.stopPropagation();
-          if (i > 0) {
-            var tmp = doc.elements[i]; doc.elements[i] = doc.elements[i - 1]; doc.elements[i - 1] = tmp;
-            renderAdvancedLayers();
-            render2D();
-            scheduleRebuild3D();
-          }
-        });
-
-        del.addEventListener("click", function (e) {
-          e.stopPropagation();
-          doc.elements.splice(i, 1);
-          if (state.selectedId === el.id) state.selectedId = null;
-          refreshAdvancedForSelection();
-          renderAdvancedLayers();
-          render2D();
-          scheduleRebuild3D();
-        });
-
-        list.appendChild(li);
-      }(idx));
+      list.appendChild(buildLayerRow(idx));
     }
   }
+
+  // Shared entry point: refresh both the Advanced and Simple layer lists.
+  function renderLayers() {
+    populateLayersList(
+      document.getElementById("advLayers"),
+      document.getElementById("advLayersEmpty")
+    );
+    populateLayersList(
+      document.getElementById("simpleLayers"),
+      document.getElementById("simpleLayersEmpty")
+    );
+  }
+
+  // Backward-compat alias so existing call sites (and window.editor export) still work.
+  function renderAdvancedLayers() { renderLayers(); }
 
   // -- Selection refresh hook --
   function refreshAdvancedForSelection() {
@@ -1302,7 +1355,7 @@
   }());
 
   // ---- View toggle wiring (Task 1, preserved) ----
-  document.getElementById("viewSimple").addEventListener("click", function () { setView("simple"); });
+  document.getElementById("viewSimple").addEventListener("click", function () { setView("simple"); renderLayers(); });
   document.getElementById("viewAdvanced").addEventListener("click", function () {
     setView("advanced");
     refreshAdvancedForSelection();
@@ -1313,9 +1366,10 @@
   // Initial render: fit scale first (B3: fitScale not in render2D anymore).
   fitScale();
   render2D();
+  renderLayers();
 
   // Public interface. Expose state so tests can inspect/mutate selection.
-  window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers, resetDocTo };
+  window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers, renderLayers, resetDocTo };
   // Expose for Playwright smoke tests.
   window.__editorState = state;
   window.__editorHitTest = hitTest;
