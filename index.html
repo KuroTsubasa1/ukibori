@@ -37,6 +37,10 @@
         <button type="button" id="addQrBtn" class="btn" title="QR-Code hinzufügen">QR</button>
       </div>
     </div>
+    <div class="sp-section" id="simpleTextSection" hidden>
+      <div class="sp-label">Text</div>
+      <input type="text" id="simpleText" class="text-input" style="width:100%" placeholder="Text eingeben…" title="Textinhalt">
+    </div>
     <div class="sp-section">
       <div class="sp-label">Bild</div>
       <button type="button" id="removeBgBtn" class="btn" style="width:100%" title="Hintergrund per KI entfernen">Hintergrund entfernen (KI)</button>
@@ -97,6 +101,9 @@
   <aside id="sidebarAdvanced" class="sidebar" hidden>
     <!-- Advanced controls (Task 4b) -->
     <div class="adv-scroll">
+
+      <!-- 0. Hinzufügen (Add row — mirrors Simple sidebar) -->
+      <div class="adv-section"><div class="sp-add-row"><button type="button" id="addImageBtnAdv" class="btn" title="Bild hinzufügen">Bild</button><button type="button" id="addTextBtnAdv" class="btn" title="Text hinzufügen">Text</button><button type="button" id="addQrBtnAdv" class="btn" title="QR-Code hinzufügen">QR</button></div></div>
 
       <!-- 1. Umwandlung (Convert — image threshold/invert/numColors) -->
       <details class="acc" id="accUmwandlung" open>
@@ -161,6 +168,7 @@
       <details class="acc" id="accElement" open>
         <summary>Element</summary>
         <div class="acc-body adv-section">
+          <div class="adv-field" id="advTextField" hidden><label for="advText" class="adv-label">Text</label><input type="text" id="advText" class="text-input" value="" title="Textinhalt des Elements"></div>
           <div class="adv-field">
             <label for="advColor" class="adv-label">Farbe</label>
             <input type="color" id="advColor" value="#ffffff" title="Farbe des ausgewählten Elements">
@@ -228,6 +236,10 @@
           <div class="adv-field">
             <label for="advFrameHeight" class="adv-label">Rahmenhöhe (mm)</label>
             <input type="number" id="advFrameHeight" class="sp-num adv-num-full" step="0.2" min="0" max="12" value="2" title="Höhe des erhabenen Rahmens über der Platte in mm">
+          </div>
+          <div class="adv-field">
+            <label for="advBaseColor" class="adv-label">Grundfarbe</label>
+            <input type="color" id="advBaseColor" value="#000000" title="Farbe der Grundplatte">
           </div>
         </div>
       </details>

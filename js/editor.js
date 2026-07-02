@@ -1236,8 +1236,9 @@
     }
   });
 
-  // Add Text
-  document.getElementById("addTextBtn").addEventListener("click", function () {
+  // ---- Named add-action functions (bound to both Simple and Advanced buttons) ----
+
+  function addTextAction() {
     var el = window.makeElementV2("text", {
       cxMm: doc.body.widthMm / 2,
       cyMm: doc.body.heightMm / 2,
@@ -1251,16 +1252,17 @@
     renderAdvancedLayers();
     render2D();
     scheduleRebuild3D();
-  });
+    // Auto-focus the visible text input so the user can type immediately.
+    var f = (getView() === "advanced") ? document.getElementById("advText") : document.getElementById("simpleText");
+    if (f) { f.value = selectedEl() && selectedEl().text || ""; f.focus(); if (f.select) f.select(); }
+  }
 
-  // Add Image (trigger hidden file input)
-  document.getElementById("addImageBtn").addEventListener("click", function () {
+  function addImageAction() {
     var inp = document.getElementById("addImageInput");
     if (inp) inp.click();
-  });
+  }
 
-  // Add QR
-  document.getElementById("addQrBtn").addEventListener("click", function () {
+  function addQrAction() {
     var data = prompt("QR-Inhalt:");
     if (!data || !data.trim()) return;
     var imgData;
@@ -1296,7 +1298,19 @@
       scheduleRebuild3D();
     };
     img.src = dataURL;
-  });
+  }
+
+  // Bind Simple buttons.
+  document.getElementById("addTextBtn").addEventListener("click", addTextAction);
+  document.getElementById("addImageBtn").addEventListener("click", addImageAction);
+  document.getElementById("addQrBtn").addEventListener("click", addQrAction);
+
+  // Bind Advanced buttons (guard each getElementById in case markup is missing).
+  (function () {
+    var ib = document.getElementById("addImageBtnAdv"); if (ib) ib.addEventListener("click", addImageAction);
+    var tb = document.getElementById("addTextBtnAdv");  if (tb) tb.addEventListener("click", addTextAction);
+    var qb = document.getElementById("addQrBtnAdv");    if (qb) qb.addEventListener("click", addQrAction);
+  }());
 
   // ---- Remove Background (KI) ----
   document.getElementById("removeBgBtn").addEventListener("click", function () {
@@ -1611,6 +1625,17 @@
       if (advDirEngraved) advDirEngraved.classList.remove("seg-active");
     }
 
+    // Text content fields: show only for text elements; seed from el.text.
+    var advTextField = document.getElementById("advTextField");
+    var simpleTextSection = document.getElementById("simpleTextSection");
+    var isText = el && el.type === "text";
+    if (advTextField) advTextField.hidden = !isText;
+    if (simpleTextSection) simpleTextSection.hidden = !isText;
+    var advTextNode = document.getElementById("advText");
+    var simpleTextNode = document.getElementById("simpleText");
+    if (advTextNode) advTextNode.value = isText ? (el.text || "") : "";
+    if (simpleTextNode) simpleTextNode.value = isText ? (el.text || "") : "";
+
     // Palette swatches: show only for image elements in colorLayers mode.
     renderPaletteSwatches(el);
   }
@@ -1692,6 +1717,25 @@
     el.cutout = node.checked;
   });
 
+  // -- Text content fields (advText + simpleText, kept in sync) --
+  bindElementField("advText", "input", function (el, node) {
+    if (el.type !== "text") return false;
+    el.text = node.value;
+    // Keep Simple field in sync.
+    var simple = document.getElementById("simpleText");
+    if (simple) simple.value = node.value;
+    renderLayers();
+  });
+
+  bindElementField("simpleText", "input", function (el, node) {
+    if (el.type !== "text") return false;
+    el.text = node.value;
+    // Keep Advanced field in sync.
+    var adv = document.getElementById("advText");
+    if (adv) adv.value = node.value;
+    renderLayers();
+  });
+
   // -- Per-element direction (Erhaben / Vertieft) --
   bindElementField("advDirRaised", "click", function (el) {
     el.depth.direction = "raised";
@@ -1736,6 +1780,16 @@
     }
   });
 
+  // Base color (Grundfarbe) for the base plate.
+  (function () {
+    var bc = document.getElementById("advBaseColor");
+    if (bc) bc.addEventListener("input", function () {
+      doc.body.baseColor = this.value;
+      render2D();
+      scheduleRebuild3D();
+    });
+  }());
+
   // -- Init Advanced panel doc-level values (also called by resetDocTo) --
   function initAdvancedUI() {
     var t = document.getElementById("advThickness");
@@ -1748,6 +1802,8 @@
     if (cs) cs.value = doc.colorStepLayers != null ? doc.colorStepLayers : 2;
     var fh = document.getElementById("advFrameHeight");
     if (fh) fh.value = (doc.body.frame && doc.body.frame.heightMm != null) ? doc.body.frame.heightMm : 2;
+    var bc = document.getElementById("advBaseColor");
+    if (bc) bc.value = doc.body.baseColor || "#000000";
     refreshAdvancedForSelection();
     renderAdvancedLayers();
   }
