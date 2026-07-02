@@ -580,6 +580,75 @@
 
   cv.addEventListener("dragover", handleDragOver);
   cv.addEventListener("drop", handleDrop);
+
+  // ---- Keyboard accessibility (WCAG 2.1) ----
+  function selectByIndex(i) {
+    var els = doc.elements;
+    if (!els.length) return;
+    var idx = ((i % els.length) + els.length) % els.length;   // wrap
+    state.selectedId = els[idx].id;
+    refreshAdvancedForSelection();
+    renderLayers();
+    render2D();
+  }
+  function selectedIndex() {
+    return doc.elements.findIndex(function (e) { return e.id === state.selectedId; });
+  }
+
+  cv.addEventListener("keydown", function (e) {
+    var els = doc.elements;
+    var cur = selectedIndex();
+
+    // --- Selection cycling ---
+    if (e.key === "Tab") {
+      if (!els.length) return;                       // nothing to cycle → let Tab move focus normally
+      if (!e.shiftKey) {
+        if (cur === -1) { e.preventDefault(); selectByIndex(0); return; }
+        if (cur < els.length - 1) { e.preventDefault(); selectByIndex(cur + 1); return; }
+        // at last element → release focus (deselect, allow default Tab) to avoid a keyboard trap
+        state.selectedId = null; refreshAdvancedForSelection(); renderLayers(); render2D();
+        return; // do NOT preventDefault: focus leaves the canvas
+      } else {
+        if (cur === -1) { e.preventDefault(); selectByIndex(els.length - 1); return; }
+        if (cur > 0) { e.preventDefault(); selectByIndex(cur - 1); return; }
+        state.selectedId = null; refreshAdvancedForSelection(); renderLayers(); render2D();
+        return; // release focus backward
+      }
+    }
+
+    if (e.key === "Enter") {                          // Enter cycles forward (wrap), stays on canvas
+      if (!els.length) return;
+      e.preventDefault();
+      selectByIndex(cur === -1 ? 0 : cur + 1);
+      return;
+    }
+
+    if (e.key === "Escape") {                         // deselect + release focus
+      if (state.selectedId != null) {
+        state.selectedId = null; refreshAdvancedForSelection(); renderLayers(); render2D();
+      }
+      cv.blur();
+      return;
+    }
+
+    // --- Arrow nudge of the selected element ---
+    var dx = 0, dy = 0;
+    if (e.key === "ArrowLeft") dx = -1;
+    else if (e.key === "ArrowRight") dx = 1;
+    else if (e.key === "ArrowUp") dy = -1;
+    else if (e.key === "ArrowDown") dy = 1;
+    else return;                                      // not a key we handle
+
+    e.preventDefault();                               // stop page scroll
+    if (cur === -1) { selectByIndex(0); return; }     // nothing selected → select first, don't move yet
+    var stepMm = e.shiftKey ? 0.25 : 1;               // Shift = fine 0.25 mm, else 1 mm
+    withSelected(function (el) {
+      el.cxMm = clamp(el.cxMm + dx * stepMm, 0, doc.body.widthMm);
+      el.cyMm = clamp(el.cyMm + dy * stepMm, 0, doc.body.heightMm);
+    });
+    refreshAdvancedForSelection();                    // keep advCx/advCy inputs in sync
+  });
+
   const previewEl = document.getElementById("preview");
   if (previewEl) {
     previewEl.addEventListener("dragover", handleDragOver);
