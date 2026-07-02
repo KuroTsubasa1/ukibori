@@ -25,6 +25,11 @@
     try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
   }
 
+  // ---- visibleDoc: filter _hidden elements for 3D preview + export ----
+  function visibleDoc() {
+    return Object.assign({}, doc, { elements: doc.elements.filter(function (e) { return !e._hidden; }) });
+  }
+
   // ---- 3D rebuild (debounced, 120 ms) ----
   let _rebuild3DTimer = null;
   function scheduleRebuild3D() {
@@ -229,6 +234,7 @@
     if (!drag) return;
     drag = null;
     refreshAdvancedForSelection();
+    renderAdvancedLayers();
     scheduleRebuild3D();
     render2D();
   }
@@ -298,7 +304,7 @@
   });
 
   // ---- 2D/3D toggle ----
-  function getPartsFn() { return { parts: window.buildParts(doc) }; }
+  function getPartsFn() { return { parts: window.buildParts(visibleDoc()) }; }
 
   document.getElementById("view3dBtn").addEventListener("click", function () {
     document.getElementById("canvas2d").hidden = true;
@@ -351,7 +357,7 @@
   document.getElementById("exportMf").addEventListener("click", function () {
     try {
       setExportStatus("Exportiere …");
-      const parts = window.buildParts(doc);
+      const parts = window.buildParts(visibleDoc());
       const blob = window.build3MF(parts);
       downloadBlob(blob, exportFileName() + ".3mf");
       setExportStatus("Fertig.");
@@ -363,7 +369,7 @@
   document.getElementById("exportStl").addEventListener("click", function () {
     try {
       setExportStatus("Exportiere …");
-      const parts = window.buildParts(doc);
+      const parts = window.buildParts(visibleDoc());
       const facets = parts.flatMap(function (p) { return p.facets; });
       const u8 = window.facetsToBinarySTL(facets);
       const blob = new Blob([u8], { type: "application/octet-stream" });
@@ -743,6 +749,7 @@
     var v = Number(this.value);
     if (!isNaN(v) && v >= 2) {
       el.depth.reduce.numColors = v;
+      render2D();
       scheduleRebuild3D();
     }
   });
