@@ -301,11 +301,13 @@
 #topbar .brand{font-weight:600}
 #topbar .tagline{font-size:11px;color:#888;letter-spacing:.01em;white-space:nowrap}
 #topbar .topbar-actions{margin-left:auto;display:flex;gap:8px}
-#editor{display:flex;flex-direction:row;gap:12px;padding:12px;align-items:flex-start}
+#editor{display:flex;flex-direction:row;gap:12px;padding:12px;align-items:stretch}
 #editor .sidebar{flex:0 0 280px}
-#editor #preview{flex:1;position:relative}
+#editor #preview{flex:1;position:relative;min-height:0;overflow:hidden}
 #editor #preview .view-toggle{position:absolute;top:6px;right:6px;z-index:1}
-#canvas2d,#preview3dCanvas{max-width:100%;height:auto;background:#fafafa;border:1px solid #ddd}
+#canvas2d,#preview3dCanvas{max-width:100%;max-height:100%;height:auto;background:#fafafa;border:1px solid #ddd}
+/* Non-split: center the canvas in the available space. */
+#preview:not(.split){display:flex;align-items:center;justify-content:center}
 
 /* === Split view (T8) === */
 #preview.split{display:flex;flex-direction:row;gap:8px;align-items:flex-start}

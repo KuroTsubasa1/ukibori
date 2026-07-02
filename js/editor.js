@@ -22,12 +22,16 @@
 
   // Module-local interaction state (scale = px per mm; ox/oy reserved for future pan).
   // viewX0/viewY0: mm offset of canvas top-left from plate origin (≤0 when tab overhangs top/left).
-  const state = { selectedId: null, scale: 1, ox: 0, oy: 0, viewX0: 0, viewY0: 0 };
+  // marginPx: pixel bleed border around the plate so off-plate handles stay on-canvas.
+  const state = { selectedId: null, scale: 1, ox: 0, oy: 0, viewX0: 0, viewY0: 0, marginPx: 48 };
+
+  var MARGIN_PX = 48;
 
   // ---- mm↔px helpers — all drawing/hit-test coordinates go through these ----
-  // mmX(x): mm doc-space x → canvas px. Inverse: (px / s) + viewX0.
-  function mmX(x) { return (x - state.viewX0) * state.scale; }
-  function mmY(y) { return (y - state.viewY0) * state.scale; }
+  // mmX(x): mm doc-space x → canvas px (includes marginPx bleed border).
+  // Inverse: (px - state.marginPx) / s + viewX0.
+  function mmX(x) { return state.marginPx + (x - state.viewX0) * state.scale; }
+  function mmY(y) { return state.marginPx + (y - state.viewY0) * state.scale; }
 
   // Default depth direction for newly created elements.
   let defaultDirection = "raised";
@@ -100,10 +104,15 @@
     var domain = (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm });
     state.viewX0 = domain.x0;
     state.viewY0 = domain.y0;
-    const s = Math.max(1, Math.min(availW / domain.wMm, availH / domain.hMm));
+    state.marginPx = MARGIN_PX;
+    // Subtract 2× margin from each dimension so the plate fits within the usable area.
+    var uw = availW - 2 * MARGIN_PX;
+    var uh = availH - 2 * MARGIN_PX;
+    // Fit BOTH dimensions (drop the max(1,…) floor so tall plates can shrink; keep 0.2 floor).
+    const s = Math.max(0.2, Math.min(uw / domain.wMm, uh / domain.hMm));
     state.scale = s;
-    cv.width = Math.round(domain.wMm * s);
-    cv.height = Math.round(domain.hMm * s);
+    cv.width = Math.round(domain.wMm * s + 2 * MARGIN_PX);
+    cv.height = Math.round(domain.hMm * s + 2 * MARGIN_PX);
   }
 
   // ---- Plate paths ----
@@ -397,11 +406,16 @@
   // ---- Draw element ----
   // vx0/vy0: view-origin offset in mm (default: state.viewX0/viewY0).
   // Pass vx0=0,vy0=0 when drawing into a non-canvas context (e.g. SVG raster offscreen).
-  function drawElement(ctx, el, s, vx0, vy0) {
+  // originPxX/originPxY: pixel offset added before the mm→px transform. Canvas paths use
+  // state.marginPx (default) so elements are inset from the canvas edge by the bleed border.
+  // SVG export passes 0,0 so the output is byte-identical to before (no margin baked in).
+  function drawElement(ctx, el, s, vx0, vy0, originPxX, originPxY) {
     var ox = (vx0 !== undefined ? vx0 : state.viewX0);
     var oy = (vy0 !== undefined ? vy0 : state.viewY0);
+    var ax = (originPxX !== undefined ? originPxX : state.marginPx);
+    var ay = (originPxY !== undefined ? originPxY : state.marginPx);
     ctx.save();
-    ctx.translate((el.cxMm - ox) * s, (el.cyMm - oy) * s);
+    ctx.translate(ax + (el.cxMm - ox) * s, ay + (el.cyMm - oy) * s);
     ctx.rotate((el.rotationDeg || 0) * Math.PI / 180);
     const w = el.wMm * s, h = el.hMm * s;
     if (el.type === "text") {
@@ -1027,8 +1041,10 @@
     // drawElement's trailing args are a view origin in MM (subtracted from el.cxMm
     // before scaling), so pass the grid origin (x0,y0) directly. When x0=y0=0 (no
     // overhang) this reduces to the old (0,0) — byte-identical.
+    // Pass originPxX=0, originPxY=0 so NO canvas margin is baked into the SVG raster
+    // (state.marginPx is a 2D-preview-only bleed border, not part of the SVG domain).
     for (var ei = 0; ei < d.elements.length; ei++) {
-      drawElement(offctx, d.elements[ei], s, x0, y0);
+      drawElement(offctx, d.elements[ei], s, x0, y0, 0, 0);
     }
 
     // Enforce footprint: blank out pixels outside the plate (overhang + mount hole).
