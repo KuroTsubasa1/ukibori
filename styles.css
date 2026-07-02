@@ -340,8 +340,8 @@
   position: fixed;
   inset: 0;
   z-index: 9000;
-  /* Dark backdrop with a cut-out hole for the spotlight */
-  background: rgba(16,16,26,.55);
+  /* Overlay bg is transparent; spotlight box-shadow is the sole dimmer */
+  background: transparent;
   pointer-events: none;
 }
 #cmSpotlight {

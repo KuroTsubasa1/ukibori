@@ -37,6 +37,8 @@
   var activeSteps = [];   // filtered steps whose target elements exist
   var currentIdx = 0;
   var resizeListener = null;
+  var keyListener = null;
+  var lastFocused = null;
 
   // --- Build the overlay DOM ---
   function buildDOM() {
@@ -47,6 +49,7 @@
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
     overlay.setAttribute('aria-label', 'Tour');
+    overlay.setAttribute('aria-describedby', 'cmBubbleText');
 
     spotlight = document.createElement('div');
     spotlight.id = 'cmSpotlight';
@@ -56,6 +59,7 @@
 
     bubbleText = document.createElement('p');
     bubbleText.id = 'cmBubbleText';
+    bubbleText.setAttribute('aria-live', 'polite');
 
     var footer = document.createElement('div');
     footer.id = 'cmBubbleFooter';
@@ -158,9 +162,18 @@
       window.removeEventListener('resize', resizeListener);
       resizeListener = null;
     }
+    if (keyListener) {
+      document.removeEventListener('keydown', keyListener, true);
+      keyListener = null;
+    }
     if (overlay) {
       overlay.style.display = 'none';
     }
+    // Restore focus to the element that was active before the tour opened
+    if (lastFocused && typeof lastFocused.focus === 'function') {
+      try { lastFocused.focus(); } catch (e) { /* element may be gone */ }
+    }
+    lastFocused = null;
   }
 
   // --- Close the overlay ---
@@ -173,8 +186,14 @@
 
   // --- Public: start the tour (always from step 1, regardless of seen-flag) ---
   function start() {
-    // Tear down any existing state first to avoid orphaned resize listeners
+    // Capture focus origin BEFORE teardown resets lastFocused
+    var triggerEl = document.activeElement;
+
+    // Tear down any existing state first to avoid orphaned resize/key listeners
     teardown();
+
+    // Restore the captured trigger (teardown nulled lastFocused, so stash it now)
+    lastFocused = triggerEl;
 
     buildDOM();
 
@@ -193,9 +212,26 @@
     overlay.style.display = 'block';
     showStep(0);
 
+    // Move focus into the dialog
+    nextBtn.focus();
+
     // Resize listener (removed on close)
     resizeListener = function () { position(); };
     window.addEventListener('resize', resizeListener);
+
+    // Keyboard listener: Esc closes, Tab stays trapped in the bubble (capture phase)
+    keyListener = function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); close(true); return; }
+      if (e.key === 'Tab') {
+        // Trap focus between the two buttons in the bubble.
+        var focusable = [skipBtn, nextBtn];
+        var idx = focusable.indexOf(document.activeElement);
+        if (idx === -1) { e.preventDefault(); nextBtn.focus(); return; }
+        if (e.shiftKey && document.activeElement === focusable[0]) { e.preventDefault(); focusable[focusable.length - 1].focus(); }
+        else if (!e.shiftKey && document.activeElement === focusable[focusable.length - 1]) { e.preventDefault(); focusable[0].focus(); }
+      }
+    };
+    document.addEventListener('keydown', keyListener, true);
   }
 
   // --- Wire #tourBtn and auto-start on DOMContentLoaded ---
