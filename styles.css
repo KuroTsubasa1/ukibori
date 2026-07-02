@@ -353,3 +353,80 @@ body:not(.bookmark-mode) #bmWorkspace { display: none; }
 .adv-layers-list .adv-lbtn:hover { opacity: 1; }
 .acc > summary { padding: 11px 0; }
 #sidebarAdvanced .acc-body { gap: 10px; }
+
+/* === Coach-marks tutorial overlay (Task 6) === */
+#cmOverlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  /* Dark backdrop with a cut-out hole for the spotlight */
+  background: rgba(16,16,26,.55);
+  pointer-events: none;
+}
+#cmSpotlight {
+  position: absolute;
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 4000px rgba(16,16,26,.55), /* outer dim */
+    0 0 0 3px var(--accent);          /* highlight ring */
+  pointer-events: none;
+  transition: top .18s ease, left .18s ease, width .18s ease, height .18s ease;
+}
+#cmBubble {
+  position: absolute;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 14px 16px 12px;
+  max-width: 280px;
+  pointer-events: all;
+  z-index: 9001;
+  transition: top .18s ease, left .18s ease;
+}
+#cmBubbleText {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+#cmBubbleFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+#cmCounter {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+}
+#cmActions {
+  display: flex;
+  gap: 6px;
+}
+#cmSkipBtn {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+#cmSkipBtn:hover { background: var(--bg); }
+#cmNextBtn {
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+#cmNextBtn:hover { opacity: .9; }
