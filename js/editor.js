@@ -590,8 +590,8 @@
     }());
   });
 
-  // Initialize Simple panel UI from doc on load.
-  (function initSimpleUI() {
+  // Initialize Simple panel UI from doc on load (also called by resetDocTo).
+  function initSimpleUI() {
     // Shape
     applyShape(doc.body.shape || "rect");
     // Mount
@@ -603,7 +603,8 @@
     document.getElementById("borderMm").value = doc.body.borderMm != null ? doc.body.borderMm : 2;
     // Depth (defaultDirection already 'raised'; reflect it)
     setSegActive("depthSeg", defaultDirection === "raised" ? "depthRaised" : "depthEngraved");
-  }());
+  }
+  initSimpleUI();
 
   // ---- Advanced panel (Task 4b) ----
 
@@ -629,7 +630,7 @@
 
         var nameSpan = document.createElement("span");
         nameSpan.className = "adv-lname";
-        var typeLabel = el.type === "text" ? "Text" : el.type === "image" ? "Bild" : el.type === "qr" ? "QR" : el.type;
+        var typeLabel = el.type === "text" ? "Text" : el.type === "qr" ? "QR" : (el.type === "image" && el.qrData) ? "QR" : el.type === "image" ? "Bild" : el.type;
         nameSpan.textContent = typeLabel + " " + (i + 1);
         if (el.type === "text" && el.text) nameSpan.textContent = "„" + el.text + "“";
 
@@ -747,7 +748,9 @@
     var advRot = document.getElementById("advRot");
     var advRotVal = document.getElementById("advRotVal");
     var advCutout = document.getElementById("advCutout");
-    [advColor, advCx, advCy, advW, advH, advRot, advCutout].forEach(function (inp) { if (inp) inp.disabled = disabled; });
+    var advDirRaised = document.getElementById("advDirRaised");
+    var advDirEngraved = document.getElementById("advDirEngraved");
+    [advColor, advCx, advCy, advW, advH, advRot, advCutout, advDirRaised, advDirEngraved].forEach(function (inp) { if (inp) inp.disabled = disabled; });
     if (el) {
       if (advColor) advColor.value = el.color || "#ffffff";
       if (advCx) advCx.value = (el.cxMm != null ? el.cxMm : 25).toFixed(1);
@@ -757,6 +760,13 @@
       if (advRot) advRot.value = Math.round(el.rotationDeg || 0);
       if (advRotVal) advRotVal.textContent = Math.round(el.rotationDeg || 0) + "°";
       if (advCutout) advCutout.checked = !!el.cutout;
+      // Per-element direction
+      var dir = (el.depth && el.depth.direction) || "raised";
+      if (advDirRaised) advDirRaised.classList.toggle("seg-active", dir === "raised");
+      if (advDirEngraved) advDirEngraved.classList.toggle("seg-active", dir === "engraved");
+    } else {
+      if (advDirRaised) advDirRaised.classList.add("seg-active");
+      if (advDirEngraved) advDirEngraved.classList.remove("seg-active");
     }
   }
 
@@ -865,6 +875,31 @@
     scheduleRebuild3D();
   });
 
+  // -- Per-element direction (Erhaben / Vertieft) --
+  document.getElementById("advDirRaised").addEventListener("click", function () {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    el.depth.direction = "raised";
+    var advDirRaised = document.getElementById("advDirRaised");
+    var advDirEngraved = document.getElementById("advDirEngraved");
+    if (advDirRaised) advDirRaised.classList.add("seg-active");
+    if (advDirEngraved) advDirEngraved.classList.remove("seg-active");
+    render2D();
+    scheduleRebuild3D();
+  });
+
+  document.getElementById("advDirEngraved").addEventListener("click", function () {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    el.depth.direction = "engraved";
+    var advDirRaised = document.getElementById("advDirRaised");
+    var advDirEngraved = document.getElementById("advDirEngraved");
+    if (advDirRaised) advDirRaised.classList.remove("seg-active");
+    if (advDirEngraved) advDirEngraved.classList.add("seg-active");
+    render2D();
+    scheduleRebuild3D();
+  });
+
   // -- 3D / Export doc-level inputs --
   document.getElementById("advThickness").addEventListener("input", function () {
     var v = parseFloat(this.value);
@@ -886,8 +921,8 @@
     if (!isNaN(v) && v >= 1) { doc.colorStepLayers = v; scheduleRebuild3D(); }
   });
 
-  // -- Init Advanced panel doc-level values --
-  (function initAdvancedUI() {
+  // -- Init Advanced panel doc-level values (also called by resetDocTo) --
+  function initAdvancedUI() {
     var t = document.getElementById("advThickness");
     if (t) t.value = doc.body.thicknessMm != null ? doc.body.thicknessMm : 3;
     var lh = document.getElementById("advLayerHeight");
@@ -898,6 +933,72 @@
     if (cs) cs.value = doc.colorStepLayers != null ? doc.colorStepLayers : 2;
     refreshAdvancedForSelection();
     renderAdvancedLayers();
+  }
+  initAdvancedUI();
+
+  // ---- resetDocTo: in-place doc replacement (used by Open) ----
+  function resetDocTo(newDoc) {
+    Object.keys(doc).forEach(function (k) { delete doc[k]; });
+    Object.assign(doc, newDoc);
+    state.selectedId = null;
+    defaultDirection = "raised";
+    // Re-decode images: deserializeProject sets _img=null; renderer skips images without _img.
+    doc.elements.forEach(function (el) {
+      if (el.type === "image" && el.src) {
+        var img = new Image();
+        img.onload = function () { el._img = img; render2D(); scheduleRebuild3D(); };
+        img.src = el.src;
+      }
+    });
+    initSimpleUI();
+    initAdvancedUI();
+    refreshAdvancedForSelection();
+    renderAdvancedLayers();
+    render2D();
+    scheduleRebuild3D();
+  }
+
+  // ---- Speichern (Save) ----
+  document.getElementById("saveBtn").addEventListener("click", function () {
+    try {
+      var json = window.serializeProject(doc);
+      var blob = new Blob([json], { type: "application/json" });
+      var name = (document.getElementById("exportName") && document.getElementById("exportName").value.trim()) || "ukibori";
+      downloadBlob(blob, name + ".json");
+    } catch (e) {
+      if (window.__errs) window.__errs.push(String(e && e.message || e));
+      alert("Fehler beim Speichern: " + (e && e.message || e));
+    }
+  });
+
+  // ---- Öffnen (Open) ----
+  document.getElementById("openBtn").addEventListener("click", function () {
+    var inp = document.getElementById("openInput");
+    if (inp) inp.click();
+  });
+
+  (function () {
+    var openInput = document.getElementById("openInput");
+    if (!openInput) return;
+    openInput.addEventListener("change", function (e) {
+      var f = e.target.files && e.target.files[0];
+      if (!f) return;
+      var rd = new FileReader();
+      rd.onload = function () {
+        try {
+          var loaded = window.migrateProject(window.deserializeProject(rd.result));
+          resetDocTo(loaded);
+        } catch (err) {
+          if (window.__errs) window.__errs.push(String(err && err.message || err));
+          alert("Fehler beim Öffnen: " + (err && err.message || err));
+        }
+      };
+      rd.onerror = function () {
+        alert("Fehler beim Lesen der Datei.");
+      };
+      rd.readAsText(f);
+      openInput.value = "";
+    });
   }());
 
   // ---- View toggle wiring (Task 1, preserved) ----
@@ -913,7 +1014,7 @@
   render2D();
 
   // Public interface. Expose state so tests can inspect/mutate selection.
-  window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers };
+  window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers, resetDocTo };
   // Expose for Playwright smoke tests.
   window.__editorState = state;
   window.__editorHitTest = hitTest;

@@ -58,7 +58,7 @@ Bild · Text · QR → Relief · Schwarz-Weiß & Farbe · KI-Freistellung · 3D-
 - **Kreis-Zuschnitt** mit erhabenem Rand — der klassische runde Untersetzer.
 - **Befestigung** — **Loch** zum Aufhängen/Verschrauben oder **Öse** (verstärkter
   Ring), per ziehbarem Marker frei platziert.
-- **Stempel-Modus** — gespiegelt & erhaben, damit der Abdruck seitenrichtig wird.
+- **Einfach/Erweitert-Umschalter** — der Einfach-Modus bietet kompakte Bedienelemente für Gelegenheitsnutzer; der Erweitert-Modus schaltet Ebenen-Liste, Tiefenmodus, Umwandlungsparameter und per-Element-Richtungssteuerung frei.
 - **Transparenz erhalten** — freigestellte Motive bleiben transparent (Vorschau,
   PNG **und** 3D: transparente Bereiche werden ausgespart).
 - **3D-Export** — **`.3mf`** (jede Farbe als eigenes Objekt für Mehrfarb-/AMS-Druck),
@@ -70,7 +70,7 @@ Bild · Text · QR → Relief · Schwarz-Weiß & Farbe · KI-Freistellung · 3D-
   (2D⇄3D-Umschalter).
 - **Vorlagen** — Einstellungen werden gespeichert; mitgelieferte Presets
   (Untersetzer / Schild / Magnet).
-- **Lesezeichen-Modus** — separater Editor zum Komponieren mehrteiliger Designs.
+- **Speichern / Öffnen** — Projekt als `.json`-Datei herunterladen und wieder laden (vollständige Rundreise inkl. Bildquellen und Tiefen-Einstellungen).
 - **PNG-Export** der umgewandelten Grafik · Live-Vorschau mit Transparenz-Karomuster.
 
 ---
@@ -129,25 +129,29 @@ optionalen leichten Nachglättung.
 
 ```mermaid
 flowchart TD
-    app["app.js<br/>DOM · Zustand · Render · Export"]
-    img["image-ops.js<br/>reine Pixel-Operationen"]
-    geo["geometry.js<br/>Marching-Squares · earcut · 3MF"]
-    app --> img
-    app --> geo
+    editor["js/editor.js<br/>Unified Editor · DOM · Zustand · Render · Export"]
+    bm["js/bookmark-model.js<br/>Dokument-Schema · (De)Serialisierung · Migration"]
+    img["js/image-ops.js<br/>reine Pixel-Operationen"]
+    geo["js/geometry.js<br/>Marching-Squares · earcut · 3MF"]
+    editor --> bm
+    editor --> img
+    editor --> geo
 ```
 
 | Datei | Rolle |
 | --- | --- |
 | `index.html` | Markup, Einbindung von CSS/JS, Favicon |
 | `styles.css` | Layout, Sidebar, Akkordeon-Optionen, Export-Dialog |
+| `js/editor.js` | Unified Editor: Einfach/Erweitert-Ansicht, Canvas-Rendering, Drag & Drop, Speichern/Öffnen, Export |
+| `js/bookmark-model.js` | v2-Dokument-Schema (`defaultDoc`, `makeElementV2`), Serialisierung, Migration von v1 |
+| `js/coachmarks.js` | Erster-Start-Tutorial (Coach-Marks) |
 | `js/image-ops.js` | Schwellwert, Otsu, Inseln, Posterize, Median-Cut, Kreismaske |
 | `js/geometry.js` | Sub-Pixel-Konturen, Triangulation (earcut), 3MF/STL-Erzeugung |
 | `js/sources.js` | Text- & QR-Eingabe → ImageData |
 | `js/bg-removal.js` | KI-Freistellung (u2netp via onnxruntime-web) |
 | `js/preview3d.js` | Live-3D-Vorschau (three.js, Szene aus `buildParts()`) |
-| `js/presets.js` | Vorlagen & gespeicherte Einstellungen (localStorage) |
-| `js/trace.js`, `js/bookmark-*.js` | Lesezeichen-Modus (Editor, Modell, Export, potrace-Tracing) |
-| `js/app.js` | DOM, Zustand, Render-Pipeline, Events, Export |
+| `js/build-parts.js` | Baut die geometrischen Teile aus dem Dokument für 3D-Vorschau und Export |
+| `js/trace.js` | potrace-Tracing (SVG-Export) |
 | `vendor/` | lokal mitgelieferte Bibliotheken: three.js, onnxruntime-web + `u2netp.onnx`, qrcode, potrace |
 | `favicon.svg` | Marken-Favicon (Kanji 浮, geprägt) |
 | `docs/superpowers/specs/` · `docs/superpowers/plans/` | Design- & Umsetzungs-Dokumente je Feature |
