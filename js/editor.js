@@ -17,13 +17,27 @@
   }
 
   const VIEW_KEY = "ukibori.view";
+  const SNAP_KEY = "ukibori.snap";
   const doc = window.defaultDoc();
   const cv = document.getElementById("canvas2d");
 
   // Module-local interaction state (scale = px per mm; ox/oy reserved for future pan).
   // viewX0/viewY0: mm offset of canvas top-left from plate origin (≤0 when tab overhangs top/left).
   // marginPx: pixel bleed border around the plate so off-plate handles stay on-canvas.
-  const state = { selectedId: null, scale: 1, ox: 0, oy: 0, viewX0: 0, viewY0: 0, marginPx: 48 };
+  // snap: editor-only snapping prefs (NOT stored in doc; persisted in localStorage SNAP_KEY).
+  // snapGuides: transient guide lines recorded during a move drag; cleared on drag end.
+  var _snapDefault = { plate: true, elements: true, gridMm: 0 };
+  var _snapLoaded = (function () { try { var v = JSON.parse(localStorage.getItem(SNAP_KEY)); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; } }());
+  const state = {
+    selectedId: null, scale: 1, ox: 0, oy: 0, viewX0: 0, viewY0: 0, marginPx: 48,
+    snap: {
+      plate:    _snapLoaded.plate    !== undefined ? !!_snapLoaded.plate    : _snapDefault.plate,
+      elements: _snapLoaded.elements !== undefined ? !!_snapLoaded.elements : _snapDefault.elements,
+      gridMm:   _snapLoaded.gridMm   !== undefined ? +_snapLoaded.gridMm   : _snapDefault.gridMm,
+    },
+    snapGuides: [],
+  };
+  function persistSnap() { try { localStorage.setItem(SNAP_KEY, JSON.stringify(state.snap)); } catch (e) {} }
 
   var MARGIN_PX = 48;
 
@@ -542,6 +556,28 @@
     // Selection handles on top.
     const sel = doc.elements.find(e => e.id === state.selectedId) || null;
     if (sel) drawSelection(ctx, sel, s);
+
+    // Snap guide lines (dashed accent; only while a move-drag is active).
+    if (drag && state.snapGuides.length) {
+      ctx.save();
+      ctx.strokeStyle = "#e0245e";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      for (var gi = 0; gi < state.snapGuides.length; gi++) {
+        var guide = state.snapGuides[gi];
+        ctx.beginPath();
+        if (guide.axis === 'x') {
+          var gx = mmX(guide.mm);
+          ctx.moveTo(gx, 0); ctx.lineTo(gx, cv.height);
+        } else {
+          var gy = mmY(guide.mm);
+          ctx.moveTo(0, gy); ctx.lineTo(cv.width, gy);
+        }
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
   }
 
   // ---- Hit test: pointer canvas-px → element/handle ----
@@ -575,6 +611,75 @@
       if (Math.abs(lx) <= w / 2 && Math.abs(ly) <= h / 2) return { id: el.id, handle: "move" };
     }
     return null;
+  }
+
+  // ---- Snap during move-drag ----
+  // Adjusts el.cxMm/cyMm toward the nearest snap target (plate edges/center, other element
+  // edges/centers) within a 6 px/scale threshold. Records guide lines in state.snapGuides.
+  // Grid snaps the center to the nearest multiple of gridMm on axes not already edge/element-snapped.
+  // NOTE: rotation is ignored — snap uses the axis-aligned bounding box only (see report).
+  function applyMoveSnap(el) {
+    state.snapGuides = [];
+    var s = state.scale;
+    var thr = 6 / s; // 6 canvas-px expressed in mm
+    var W = doc.body.widthMm, H = doc.body.heightMm;
+    var cx = el.cxMm, cy = el.cyMm;
+    var hw = el.wMm / 2, hh = el.hMm / 2;
+
+    // Snap points of the dragged element (axis-aligned).
+    var snapPtsX = [cx - hw, cx, cx + hw];
+    var snapPtsY = [cy - hh, cy, cy + hh];
+
+    // Candidate lines per axis.
+    var candidatesX = [], candidatesY = [];
+    if (state.snap.plate) {
+      candidatesX.push(0, W / 2, W);
+      candidatesY.push(0, H / 2, H);
+    }
+    if (state.snap.elements) {
+      for (var ei = 0; ei < doc.elements.length; ei++) {
+        var o = doc.elements[ei];
+        if (o.id === el.id || o._hidden) continue;
+        var ohw = o.wMm / 2, ohh = o.hMm / 2;
+        candidatesX.push(o.cxMm - ohw, o.cxMm, o.cxMm + ohw);
+        candidatesY.push(o.cyMm - ohh, o.cyMm, o.cyMm + ohh);
+      }
+    }
+
+    // Per-axis: find (snapPt, candidate) pair with smallest |Δ| < thr; shift cx/cy.
+    var snappedX = false, snappedY = false;
+
+    if (candidatesX.length) {
+      var bestDX = thr, bestShiftX = 0, bestCandX = 0;
+      for (var pi = 0; pi < snapPtsX.length; pi++) {
+        for (var ci = 0; ci < candidatesX.length; ci++) {
+          var dx = candidatesX[ci] - snapPtsX[pi];
+          if (Math.abs(dx) < bestDX) { bestDX = Math.abs(dx); bestShiftX = dx; bestCandX = candidatesX[ci]; }
+        }
+      }
+      if (bestDX < thr) { cx += bestShiftX; state.snapGuides.push({ axis: 'x', mm: bestCandX }); snappedX = true; }
+    }
+
+    if (candidatesY.length) {
+      var bestDY = thr, bestShiftY = 0, bestCandY = 0;
+      for (var pj = 0; pj < snapPtsY.length; pj++) {
+        for (var cj = 0; cj < candidatesY.length; cj++) {
+          var dy = candidatesY[cj] - snapPtsY[pj];
+          if (Math.abs(dy) < bestDY) { bestDY = Math.abs(dy); bestShiftY = dy; bestCandY = candidatesY[cj]; }
+        }
+      }
+      if (bestDY < thr) { cy += bestShiftY; state.snapGuides.push({ axis: 'y', mm: bestCandY }); snappedY = true; }
+    }
+
+    // Grid: snap center to nearest multiple on axes not already edge/element-snapped.
+    var g = state.snap.gridMm;
+    if (g > 0) {
+      if (!snappedX) { cx = Math.round(cx / g) * g; }
+      if (!snappedY) { cy = Math.round(cy / g) * g; }
+    }
+
+    el.cxMm = cx;
+    el.cyMm = cy;
   }
 
   // ---- Pointer handlers (move / scale / rotate) ----
@@ -707,6 +812,7 @@
     if (drag.handle === "move") {
       el.cxMm = drag.start.cx + (px - drag.px) / s;
       el.cyMm = drag.start.cy + (py - drag.py) / s;
+      applyMoveSnap(el);
     } else if (drag.handle === "rotate") {
       const ang = Math.atan2(py - mmY(el.cyMm), px - mmX(el.cxMm)) * 180 / Math.PI + 90;
       el.rotationDeg = Math.round(ang);
@@ -723,6 +829,7 @@
     if (!drag) return;
     var wasMountDrag = (drag.handle === "mount");
     drag = null;
+    state.snapGuides = []; // clear transient guide lines
     if (wasMountDrag) {
       // Re-fit the canvas now that the mount may have moved (expanded/contracted domain).
       fitScale();
@@ -1819,6 +1926,46 @@
       render2D();
       scheduleRebuild3D();
     });
+  }());
+
+  // ---- Snap settings UI wiring ----
+  (function () {
+    var snapPlate = document.getElementById("snapPlate");
+    var snapElements = document.getElementById("snapElements");
+    var snapGrid = document.getElementById("snapGrid");
+
+    if (snapPlate) {
+      snapPlate.checked = state.snap.plate;
+      snapPlate.addEventListener("change", function () { state.snap.plate = this.checked; persistSnap(); });
+    }
+    if (snapElements) {
+      snapElements.checked = state.snap.elements;
+      snapElements.addEventListener("change", function () { state.snap.elements = this.checked; persistSnap(); });
+    }
+    if (snapGrid) {
+      snapGrid.value = state.snap.gridMm;
+      snapGrid.addEventListener("input", function () {
+        var v = parseFloat(this.value);
+        if (!isNaN(v) && v >= 0) { state.snap.gridMm = v; persistSnap(); }
+      });
+    }
+  }());
+
+  // ---- Center buttons ----
+  function centerH() {
+    withSelected(function (el) { el.cxMm = doc.body.widthMm / 2; });
+    refreshAdvancedForSelection();
+  }
+  function centerV() {
+    withSelected(function (el) { el.cyMm = doc.body.heightMm / 2; });
+    refreshAdvancedForSelection();
+  }
+
+  (function () {
+    var ch = document.getElementById("centerH"); if (ch) ch.addEventListener("click", centerH);
+    var cv2 = document.getElementById("centerV"); if (cv2) cv2.addEventListener("click", centerV);
+    var chA = document.getElementById("centerHAdv"); if (chA) chA.addEventListener("click", centerH);
+    var cvA = document.getElementById("centerVAdv"); if (cvA) cvA.addEventListener("click", centerV);
   }());
 
   // -- Init Advanced panel doc-level values (also called by resetDocTo) --

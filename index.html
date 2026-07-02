@@ -75,6 +75,13 @@
         <input type="color" id="frameColor" value="#000000" title="Farbe des Rahmens">
       </div>
     </div>
+    <div class="sp-section" id="simpleCenterSection">
+      <div class="sp-label">Ausrichten</div>
+      <div class="sp-add-row">
+        <button type="button" id="centerH" class="btn" title="Element horizontal zentrieren (Mitte der Platte)">↔ Zentrieren</button>
+        <button type="button" id="centerV" class="btn" title="Element vertikal zentrieren (Mitte der Platte)">↕ Zentrieren</button>
+      </div>
+    </div>
     <div class="sp-section">
       <div class="sp-label">Befestigung</div>
       <div id="mountSeg" class="seg-group seg-sm" style="width:100%">
@@ -213,6 +220,34 @@
             <label class="adv-label toggle">
               <input type="checkbox" id="advCutout" title="Element als Aussparung (Loch) aus dem Objekt herausschneiden"> Als Loch ausschneiden
             </label>
+          </div>
+          <div class="adv-field">
+            <label class="adv-label">Ausrichten</label>
+            <div style="display:flex;gap:6px">
+              <button type="button" id="centerHAdv" class="btn" style="flex:1" title="Element horizontal zentrieren (Mitte der Platte)">↔ Zentrieren</button>
+              <button type="button" id="centerVAdv" class="btn" style="flex:1" title="Element vertikal zentrieren (Mitte der Platte)">↕ Zentrieren</button>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- 4b. Ausrichten (snap settings — editor-only, not stored in doc) -->
+      <details class="acc" open>
+        <summary>Einrasten</summary>
+        <div class="acc-body adv-section">
+          <div class="adv-field">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="snapPlate" title="Beim Ziehen an Plattenrändern und Plattenmitte einrasten"> An Platte (Kanten/Mitte)
+            </label>
+          </div>
+          <div class="adv-field">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="snapElements" title="Beim Ziehen an anderen Elementen einrasten"> An Elementen
+            </label>
+          </div>
+          <div class="adv-field">
+            <label for="snapGrid" class="adv-label">Raster (mm, 0 = aus)</label>
+            <input type="number" id="snapGrid" class="sp-num adv-num-full" min="0" max="50" step="0.5" value="0" title="Beim Ziehen am Raster einrasten (0 = kein Raster)">
           </div>
         </div>
       </details>
