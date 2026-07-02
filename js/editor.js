@@ -90,7 +90,11 @@
   function fitScale() {
     const pad = 24;
     const preview = document.getElementById("preview");
-    const availW = (preview ? preview.clientWidth : 600) - pad;
+    // In split mode the 2D canvas occupies only half the preview width; use cv.clientWidth
+    // if the flex layout has already settled it, otherwise halve the preview width.
+    var inSplit = preview && preview.classList.contains("split");
+    var rawW = preview ? (inSplit ? (cv.clientWidth || Math.floor(preview.clientWidth / 2)) : preview.clientWidth) : 600;
+    const availW = rawW - pad;
     const availH = (preview ? preview.clientHeight : 700) - pad;
     // Use expanded domain (docDomain exported by T1; falls back to body box if unavailable).
     var domain = (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm });
@@ -860,34 +864,67 @@
   }
 
   // ---- Single resize listener: 2D re-render; 3D resize is handled by preview3d ----
+  // In split mode, 3D is active but 2D still needs a re-fit on resize.
   window.addEventListener("resize", function () {
-    if (!window.preview3d || !window.preview3d.isActive()) {
+    var inSplit = document.getElementById("preview").classList.contains("split");
+    if (!window.preview3d || !window.preview3d.isActive() || inSplit) {
       fitScale(); // B3: re-fit available space on window resize.
       render2D();
     }
   });
 
-  // ---- 2D/3D toggle ----
+  // ---- 2D/3D/split preview mode ----
+  const PREVIEW_MODE_KEY = "ukibori.previewMode";
   function getPartsFn() { return { parts: window.buildParts(visibleDoc()) }; }
 
-  document.getElementById("view3dBtn").addEventListener("click", function () {
-    document.getElementById("canvas2d").hidden = true;
-    document.getElementById("preview3dCanvas").hidden = false;
-    document.getElementById("view3dBtn").classList.add("seg-active");
-    document.getElementById("view2dBtn").classList.remove("seg-active");
-    Promise.resolve(window.preview3d.show(document.getElementById("preview3dCanvas"), getPartsFn)).catch(function (err) {
-      if (window.__errs) window.__errs.push(String(err && err.message || err));
-    });
-  });
+  // setPreviewMode: unified handler for 2D, 3D, and split modes.
+  // Order: set layout class + visibility first so clientWidth is the split half-width
+  // before preview3d reads it, then fitScale (2D), then synthetic resize to settle both.
+  function setPreviewMode(mode) {
+    var preview = document.getElementById("preview");
+    var canvas2d = document.getElementById("canvas2d");
+    var canvas3d = document.getElementById("preview3dCanvas");
 
-  document.getElementById("view2dBtn").addEventListener("click", function () {
-    window.preview3d.hide();
-    document.getElementById("canvas2d").hidden = false;
-    document.getElementById("preview3dCanvas").hidden = true;
-    document.getElementById("view2dBtn").classList.add("seg-active");
-    document.getElementById("view3dBtn").classList.remove("seg-active");
-    render2D();
-  });
+    // 1. Layout and visibility (before any 3D show call so clientWidth is correct).
+    if (mode === "split") {
+      preview.classList.add("split");
+    } else {
+      preview.classList.remove("split");
+    }
+    canvas2d.hidden = (mode === "3d");
+    canvas3d.hidden = (mode === "2d");
+
+    // 2. Button active state.
+    document.getElementById("view2dBtn").classList.toggle("seg-active", mode === "2d");
+    document.getElementById("view3dBtn").classList.toggle("seg-active", mode === "3d");
+    document.getElementById("viewSplitBtn").classList.toggle("seg-active", mode === "split");
+
+    // 3. 3D lifecycle.
+    if (mode === "2d") {
+      window.preview3d.hide();
+      fitScale();
+      render2D();
+    } else {
+      // mode is '3d' or 'split': layout is already applied, so clientWidth is the half-width in split.
+      Promise.resolve(window.preview3d.show(canvas3d, getPartsFn)).catch(function (err) {
+        if (window.__errs) window.__errs.push(String(err && err.message || err));
+        // On GL failure fall back to 2D.
+        setPreviewMode("2d");
+        return;
+      });
+      fitScale();
+      render2D();
+      // Synthetic resize settles both: fitScale (2D) and preview3d's internal resize (3D).
+      window.dispatchEvent(new Event("resize"));
+    }
+
+    // 4. Persist.
+    try { localStorage.setItem(PREVIEW_MODE_KEY, mode); } catch (e) {}
+  }
+
+  document.getElementById("view2dBtn").addEventListener("click", function () { setPreviewMode("2d"); });
+  document.getElementById("view3dBtn").addEventListener("click", function () { setPreviewMode("3d"); });
+  document.getElementById("viewSplitBtn").addEventListener("click", function () { setPreviewMode("split"); });
 
   // ---- Export dialog ----
   function exportFileName() {
@@ -1791,8 +1828,8 @@
   setView((function () { try { return localStorage.getItem(VIEW_KEY) || "simple"; } catch (e) { return "simple"; } })());
 
   // Initial render: fit scale first (B3: fitScale not in render2D anymore).
-  fitScale();
-  render2D();
+  // Restore persisted preview mode (default '2d' so first-run is unchanged).
+  setPreviewMode((function () { try { return localStorage.getItem(PREVIEW_MODE_KEY) || "2d"; } catch (e) { return "2d"; } })());
   renderLayers();
 
   // Public interface. Expose state so tests can inspect/mutate selection.
