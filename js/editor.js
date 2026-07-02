@@ -1140,12 +1140,25 @@
     document.getElementById("borderField").hidden = (shape !== "free");
     // Rand-Rahmen: only meaningful for rect/circle plates (engine ignores it for free).
     document.getElementById("frameField").hidden = (shape === "free");
+    // Eckenradius: only meaningful for the rectangle plate.
+    var cf = document.getElementById("cornerField");
+    if (cf) cf.hidden = (shape !== "rect");
     render2D();
     scheduleRebuild3D();
   }
   document.getElementById("shapeRect").addEventListener("click", function () { applyShape("rect"); });
   document.getElementById("shapeCircle").addEventListener("click", function () { applyShape("circle"); });
   document.getElementById("shapeFree").addEventListener("click", function () { applyShape("free"); });
+
+  // Eckenradius (shown only for Rechteck)
+  document.getElementById("cornerMm").addEventListener("input", function () {
+    var v = parseFloat(this.value);
+    if (!isNaN(v) && v >= 0) {
+      doc.body.cornerRadiusMm = v;
+      render2D();
+      scheduleRebuild3D();
+    }
+  });
 
   // Border (shown only for Free)
   document.getElementById("borderMm").addEventListener("input", function () {
@@ -1400,6 +1413,8 @@
     document.getElementById("sizeH").value = doc.body.heightMm;
     // Border
     document.getElementById("borderMm").value = doc.body.borderMm != null ? doc.body.borderMm : 2;
+    // Eckenradius (rectangle)
+    document.getElementById("cornerMm").value = doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 4;
     // Rahmen (Rand-Rahmen)
     var fr = doc.body.frame;
     document.getElementById("frameMm").value = fr && fr.widthMm != null ? fr.widthMm : 0;
