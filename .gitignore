@@ -1,3 +1,6 @@
 .playwright-mcp/
 ui-check.png
 .superpowers/
+
+# stray Playwright screenshots dropped at repo root by test subagents
+/*.png
