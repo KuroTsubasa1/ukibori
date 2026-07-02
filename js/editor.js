@@ -87,7 +87,7 @@
       el.color || '',
       (d && d.threshold != null ? d.threshold : 128),
       !!(d && d.invert),
-      r.method || '', r.numColors || '', r.levels || '',
+      r.method || 'palette', r.numColors || '', r.levels || '',
       JSON.stringify(r.remap || {}),
       JSON.stringify(r.order || [])
     ].join('|');
@@ -152,7 +152,7 @@
       var shim = __makeV1Shim(el);
       var r = depth.reduce || {};
       try {
-        var pal = window.__imagePaletteFromImg(img, r.method || 'posterize', r.numColors || 8, r.levels || 4);
+        var pal = window.__imagePaletteFromImg(img, r.method || 'palette', r.numColors || 8, r.levels || 4);
         var remap = r.remap || {};
         for (var j = 0; j < n; j++) {
           if (d[j * 4 + 3] < 128) continue;
