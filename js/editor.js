@@ -155,15 +155,28 @@
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
     }
 
-    // Mount guide: dashed circle if mount is not 'none'.
+    // Mount marker: visible draggable circle + crosshair.
     const mount = doc.mount;
     if (mount && mount.type !== "none") {
       const mr = (mount.diameterMm / 2) * s;
       const mx = mount.xMm * s, my = mount.yMm * s;
       ctx.save();
-      ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2);
-      ctx.strokeStyle = "#888"; ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]); ctx.stroke();
+      ctx.strokeStyle = "#e0245e"; ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+      // Main circle.
+      ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.stroke();
+      // Crosshair (±8 px through center).
+      ctx.beginPath();
+      ctx.moveTo(mx - 8, my); ctx.lineTo(mx + 8, my);
+      ctx.moveTo(mx, my - 8); ctx.lineTo(mx, my + 8);
+      ctx.stroke();
+      // For loop type: hint the outer ring radius as a lighter circle.
+      if (mount.type === "loop" && mount.ringThicknessMm > 0) {
+        const or = (mount.diameterMm / 2 + mount.ringThicknessMm) * s;
+        ctx.globalAlpha = 0.4;
+        ctx.beginPath(); ctx.arc(mx, my, or, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       ctx.restore();
     }
 
@@ -181,6 +194,13 @@
 
   function hitTest(px, py) {
     const s = state.scale;
+    // Mount marker hit (checked first — small target on top).
+    const mount = doc.mount;
+    if (mount && mount.type !== "none") {
+      if (Math.hypot(px - mount.xMm * s, py - mount.yMm * s) <= 9) {
+        return { handle: "mount" };
+      }
+    }
     for (let i = doc.elements.length - 1; i >= 0; i--) {
       const el = doc.elements[i];
       const [lx, ly] = elemToLocal(el, px, py, s);
@@ -207,6 +227,16 @@
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
     const hit = hitTest(px, py);
     if (!hit) { state.selectedId = null; refreshAdvancedForSelection(); renderAdvancedLayers(); render2D(); return; }
+    // Mount drag: distinct path, does not select an element.
+    if (hit.handle === "mount") {
+      drag = {
+        handle: "mount", px, py,
+        startX: doc.mount.xMm, startY: doc.mount.yMm,
+      };
+      cv.setPointerCapture(e.pointerId);
+      render2D();
+      return;
+    }
     state.selectedId = hit.id;
     const el = doc.elements.find(el => el.id === hit.id);
     drag = {
@@ -219,11 +249,21 @@
     render2D();
   });
 
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
   cv.addEventListener("pointermove", function (e) {
     if (!drag) return;
     const rect = cv.getBoundingClientRect();
     const scaleC = cv.width / rect.width, s = state.scale;
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+    // Mount drag: update mm position clamped to plate.
+    if (drag.handle === "mount") {
+      doc.mount.xMm = clamp(drag.startX + (px - drag.px) / s, 0, doc.body.widthMm);
+      doc.mount.yMm = clamp(drag.startY + (py - drag.py) / s, 0, doc.body.heightMm);
+      render2D();
+      scheduleRebuild3D();
+      return;
+    }
     const el = doc.elements.find(el => el.id === state.selectedId);
     if (!el) return;
     if (drag.handle === "move") {
@@ -251,6 +291,22 @@
   }
   cv.addEventListener("pointerup", endDrag);
   cv.addEventListener("pointercancel", endDrag);
+
+  // Cursor: show 'move' over mount marker (or while dragging it), else reset.
+  cv.addEventListener("mousemove", function (e) {
+    if (drag && drag.handle === "mount") { cv.style.cursor = "move"; return; }
+    if (drag) return; // leave cursor as-is during other drags
+    const rect = cv.getBoundingClientRect();
+    const scaleC = cv.width / rect.width;
+    const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+    const mount = doc.mount;
+    if (mount && mount.type !== "none" &&
+        Math.hypot(px - mount.xMm * state.scale, py - mount.yMm * state.scale) <= 9) {
+      cv.style.cursor = "move";
+    } else {
+      cv.style.cursor = "";
+    }
+  });
 
   // ---- Add image from data URL ----
   function addImageFromDataURL(dataURL) {
@@ -1045,5 +1101,6 @@
   window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers, resetDocTo };
   // Expose for Playwright smoke tests.
   window.__editorState = state;
+  window.__editorHitTest = hitTest;
   window.__editorHitTest = hitTest;
 })();
