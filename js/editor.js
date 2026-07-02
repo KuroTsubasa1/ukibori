@@ -1121,6 +1121,18 @@
     render2D();
     scheduleRebuild3D();
   });
+  // Höhe in the Simple row; kept in sync with the Advanced #advFrameHeight field
+  // (both write body.frame.heightMm).
+  document.getElementById("frameHeightMm").addEventListener("input", function () {
+    var v = parseFloat(this.value);
+    if (!isNaN(v) && v >= 0) {
+      ensureFrame().heightMm = v;
+      var adv = document.getElementById("advFrameHeight");
+      if (adv) adv.value = v;
+      render2D();
+      scheduleRebuild3D();
+    }
+  });
 
   // Mount: Keine / Loch / Öse
   // opts.snap — when true the loop position is snapped to the top edge (used by the
@@ -1324,6 +1336,7 @@
     // Rahmen (Rand-Rahmen)
     var fr = doc.body.frame;
     document.getElementById("frameMm").value = fr && fr.widthMm != null ? fr.widthMm : 0;
+    document.getElementById("frameHeightMm").value = fr && fr.heightMm != null ? fr.heightMm : 2;
     document.getElementById("frameColor").value = (fr && fr.color) || "#000000";
     // Depth (defaultDirection already 'raised'; reflect it)
     setSegActive("depthSeg", defaultDirection === "raised" ? "depthRaised" : "depthEngraved");
@@ -1678,7 +1691,12 @@
 
   document.getElementById("advFrameHeight").addEventListener("input", function () {
     var v = parseFloat(this.value);
-    if (!isNaN(v) && v >= 0) { ensureFrame().heightMm = v; scheduleRebuild3D(); }
+    if (!isNaN(v) && v >= 0) {
+      ensureFrame().heightMm = v;
+      var simple = document.getElementById("frameHeightMm");
+      if (simple) simple.value = v; // keep the Simple row in sync
+      scheduleRebuild3D();
+    }
   });
 
   // -- Init Advanced panel doc-level values (also called by resetDocTo) --
