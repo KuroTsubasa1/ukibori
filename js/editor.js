@@ -675,6 +675,96 @@
     }
   });
 
+  // ---- SVG vector export ----
+  // Composes the design on the engine's own grid (same as buildParts), traces one
+  // evenodd-filled path per color, and returns an SVG string (or null if empty).
+  function buildDesignSVG() {
+    var d = visibleDoc();
+    var grid = window.gridForBody(d.body, d.resolution);
+    var cols = grid.cols, rows = grid.rows, pitch = grid.pitch;
+    var s = 1 / pitch; // px per mm so that drawElement places content on the engine grid
+
+    // Footprint field: >0 inside the plate (with mount hole already cut).
+    var field = d.body.shape === "free"
+      ? window.freeFootprintField(d, cols, rows, pitch)
+      : window.shapeFootprintField(cols, rows, d.body, d.mount);
+    var baseInside = function (c, r) { return field(c, r) > 0; };
+
+    // Composite raster: paint base color, then elements on top.
+    var offcanvas = document.createElement("canvas");
+    offcanvas.width = cols; offcanvas.height = rows;
+    var offctx = offcanvas.getContext("2d", { willReadFrequently: true });
+
+    // Base plate color.
+    offctx.fillStyle = d.body.baseColor;
+    offctx.fillRect(0, 0, cols, rows);
+
+    // Elements on top (WYSIWYG — processImageForDisplay applied inside drawElement).
+    for (var ei = 0; ei < d.elements.length; ei++) {
+      drawElement(offctx, d.elements[ei], s);
+    }
+
+    // Enforce footprint: blank out pixels outside the plate (overhang + mount hole).
+    var imgData = offctx.getImageData(0, 0, cols, rows);
+    var px = imgData.data;
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        if (!baseInside(c, r)) {
+          var i4 = (r * cols + c) * 4;
+          px[i4] = 0; px[i4 + 1] = 0; px[i4 + 2] = 0; px[i4 + 3] = 0;
+        }
+      }
+    }
+    offctx.putImageData(imgData, 0, 0);
+
+    // Re-read pixels and build per-color Uint8Array masks.
+    var final = offctx.getImageData(0, 0, cols, rows).data;
+    var n = cols * rows;
+    var masks = new Map();
+    for (var pi = 0; pi < n; pi++) {
+      if (final[pi * 4 + 3] < 128) continue;
+      var hex = "#" + [final[pi * 4], final[pi * 4 + 1], final[pi * 4 + 2]]
+        .map(function (v) { return v.toString(16).padStart(2, "0"); })
+        .join("").toUpperCase();
+      var mk = masks.get(hex);
+      if (!mk) { mk = new Uint8Array(n); masks.set(hex, mk); }
+      mk[pi] = 1;
+    }
+
+    if (!masks.size) return null;
+
+    // Trace each color mask into SVG paths (coords in mm = cell index × pitch).
+    var wMm = +(cols * pitch).toFixed(3), hMm = +(rows * pitch).toFixed(3);
+    var paths = "";
+    masks.forEach(function (mask, hex) {
+      var loops = window.traceMaskLoops(mask, cols, rows, {});
+      var dAttr = "";
+      for (var li = 0; li < loops.length; li++) {
+        var lp = loops[li];
+        if (lp.length < 3) continue;
+        dAttr += "M" + lp.map(function (pt) {
+          return (pt[0] * pitch).toFixed(3) + " " + (pt[1] * pitch).toFixed(3);
+        }).join(" L") + " Z ";
+      }
+      if (dAttr) paths += "  <path d=\"" + dAttr.trim() + "\" fill=\"" + hex + "\" fill-rule=\"evenodd\" />\n";
+    });
+
+    if (!paths) return null;
+
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
+      "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" + wMm + "mm\" height=\"" + hMm + "mm\" viewBox=\"0 0 " + wMm + " " + hMm + "\">\n" +
+      paths + "</svg>\n";
+  }
+
+  document.getElementById("exportSvg").addEventListener("click", function () {
+    try {
+      setExportStatus("Exportiere …");
+      var svg = buildDesignSVG();
+      if (!svg) { setExportStatus("Kein Inhalt für SVG."); return; }
+      downloadBlob(new Blob([svg], { type: "image/svg+xml" }), exportFileName() + ".svg");
+      setExportStatus("Fertig.");
+    } catch (e) { setExportStatus("Fehler: " + e.message); }
+  });
 
   // ---- Simple panel wiring (Task 4a) ----
 
@@ -1369,7 +1459,7 @@
   renderLayers();
 
   // Public interface. Expose state so tests can inspect/mutate selection.
-  window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers, renderLayers, resetDocTo };
+  window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers, renderLayers, resetDocTo, buildDesignSVG };
   // Expose for Playwright smoke tests.
   window.__editorState = state;
   window.__editorHitTest = hitTest;
