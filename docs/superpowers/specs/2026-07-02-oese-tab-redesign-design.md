@@ -30,9 +30,23 @@ signed fields, composed as closures). The existing trace/extrude pipeline then e
 plate + tab as ONE manifold solid with the hole through — slicer-safe by construction
 (no overlapping shells, no floating parts).
 
+**AMENDED 2026-07-02 (user-found gap):** the union fires for EVERY loop doc — it must
+NOT be gated on "domain expanded beyond the body box". The washer can be outside the
+PLATE while inside the body box (free plaque: Öse next to the silhouette; circle plate
+on a non-square body: Öse at the circle edge) — those need the tab too. Gating on
+plate-containment is unnecessary: when the washer IS fully inside the plate, its
+positive region is a subset of the plate's, so `max(plate, washer)` never changes the
+traced mask's sign — union is a provable no-op there, and the loop-inside==hole parity
+tests lock that. On the DEFAULT (unexpanded) branch the union composes with the
+branch's own rectangular-cell mapping via the lattice identity
+`min(max(p,w),h) = max(min(p,h), min(w,h))` — i.e. `max(shapeFootprintField_output,
+min(washerSdf, holeSdf)·s)` — so geometry.js stays untouched and non-loop parity holds.
+
 ### Expanded raster domain
 When `mount.type === 'loop'` and the washer extends beyond the body box, the raster
 domain expands from `[0,W]×[0,H]` to the union bbox of plate + washer (+1 cell pad).
+(Domain expansion controls only the RASTER BOUNDS; it is not the union trigger — see
+the amendment above.)
 A single shared `grid = {cols, rows, pitch, x0Mm, y0Mm}` is computed ONCE in `buildParts`
 and threaded through every build function (they currently each call `gridForBody`
 independently — 6 call sites). Cell→mm mapping becomes `x = x0Mm + (c+0.5)·pitch`.
