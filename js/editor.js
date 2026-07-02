@@ -28,8 +28,6 @@
   // mmX(x): mm doc-space x → canvas px. Inverse: (px / s) + viewX0.
   function mmX(x) { return (x - state.viewX0) * state.scale; }
   function mmY(y) { return (y - state.viewY0) * state.scale; }
-  function pxToMmX(px) { return px / state.scale + state.viewX0; }
-  function pxToMmY(py) { return py / state.scale + state.viewY0; }
 
   // Default depth direction for newly created elements.
   let defaultDirection = "raised";
@@ -538,7 +536,9 @@
         sdf = function (x, y) {
           var dx = Math.max(0 - x, x - body.widthMm);
           var dy = Math.max(0 - y, y - body.heightMm);
-          return -Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) || Math.min(-dx, -dy);
+          // Outside: negative distance to nearest edge. Inside: positive min distance to edge.
+          var outside = dx > 0 || dy > 0;
+          return outside ? -Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) : Math.min(-dx, -dy);
         };
       } else {
         sdf = function (x, y) {
@@ -584,10 +584,8 @@
         }
         mount.xMm = nx;
         mount.yMm = ny;
-        // Update view origin without rezoom (just update viewX0/viewY0 from domain).
-        var domain = (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm });
-        state.viewX0 = domain.x0;
-        state.viewY0 = domain.y0;
+        // Do NOT update viewX0/viewY0 mid-drag — keeping them fixed lets the marker track
+        // the cursor via the delta math above. Re-anchor happens in endDrag via fitScale().
       } else {
         // Hole: classic inside-plate clamp.
         mount.xMm = clamp(rawX, 0, doc.body.widthMm);
@@ -1013,32 +1011,37 @@
   });
 
   // Mount: Keine / Loch / Öse
-  function applyMount(type) {
+  // opts.snap — when true the loop position is snapped to the top edge (used by the
+  // button click handler). initSimpleUI and resetDocTo call WITHOUT opts so a saved
+  // position is preserved across load.
+  function applyMount(type, opts) {
     doc.mount.type = type;
     if (type === "loop") {
       // B1: ensure non-zero ring dimensions.
       if (!(doc.mount.ringThicknessMm > 0)) doc.mount.ringThicknessMm = 2;
       if (!(doc.mount.ringHeightMm > 0)) doc.mount.ringHeightMm = 2;
-      // Snap to top edge based on body shape.
-      var body = doc.body;
-      var W = body.widthMm, H = body.heightMm;
-      var shape = body.shape || 'rect';
-      if (shape === 'rect') {
-        doc.mount.xMm = W / 2;
-        doc.mount.yMm = 0;
-      } else if (shape === 'circle') {
-        var R = Math.min(W, H) / 2;
-        doc.mount.xMm = W / 2;
-        doc.mount.yMm = H / 2 - R;
-      } else {
-        // free: content bbox top-center.
-        var bb = contentBbox();
-        if (bb) {
-          doc.mount.xMm = (bb.x0 + bb.x1) / 2;
-          doc.mount.yMm = bb.y0;
-        } else {
+      // Snap to top edge only when the user explicitly requests it (button click).
+      if (opts && opts.snap) {
+        var body = doc.body;
+        var W = body.widthMm, H = body.heightMm;
+        var shape = body.shape || 'rect';
+        if (shape === 'rect') {
           doc.mount.xMm = W / 2;
           doc.mount.yMm = 0;
+        } else if (shape === 'circle') {
+          var R = Math.min(W, H) / 2;
+          doc.mount.xMm = W / 2;
+          doc.mount.yMm = H / 2 - R;
+        } else {
+          // free: content bbox top-center.
+          var bb = contentBbox();
+          if (bb) {
+            doc.mount.xMm = (bb.x0 + bb.x1) / 2;
+            doc.mount.yMm = bb.y0;
+          } else {
+            doc.mount.xMm = W / 2;
+            doc.mount.yMm = 0;
+          }
         }
       }
     }
@@ -1048,9 +1051,9 @@
     render2D();
     scheduleRebuild3D();
   }
-  document.getElementById("mountNone").addEventListener("click", function () { applyMount("none"); });
-  document.getElementById("mountHole").addEventListener("click", function () { applyMount("hole"); });
-  document.getElementById("mountLoop").addEventListener("click", function () { applyMount("loop"); });
+  document.getElementById("mountNone").addEventListener("click", function () { applyMount("none", { snap: true }); });
+  document.getElementById("mountHole").addEventListener("click", function () { applyMount("hole", { snap: true }); });
+  document.getElementById("mountLoop").addEventListener("click", function () { applyMount("loop", { snap: true }); });
 
   // Size W/H
   document.getElementById("sizeW").addEventListener("input", function () {
