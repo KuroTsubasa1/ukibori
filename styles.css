@@ -333,7 +333,12 @@
 .pal-entry.dragging { opacity: 0.45; }
 .pal-entry.drag-over { border-color: var(--accent); }
 .grip { font-size: 14px; color: var(--muted); cursor: grab; line-height: 1; }
-.sw-edit { width: 32px; height: 24px; border: none; border-radius: 3px; padding: 0; cursor: pointer; background: none; }
+/* Must out-rank the global `input[type=color]` rule (0,1,1) — otherwise its
+   width:100%/padding:2px/background:#fff win and the swatch collapses to a
+   colorless ~12px sliver. */
+input[type=color].sw-edit { width: 32px; height: 24px; border: none; border-radius: 3px; padding: 0; cursor: pointer; background: none; }
+input[type=color].sw-edit::-webkit-color-swatch-wrapper { padding: 0; }
+input[type=color].sw-edit::-webkit-color-swatch { border: 1px solid var(--line); border-radius: 3px; }
 
 /* === Coach-marks tutorial overlay (Task 6) === */
 #cmOverlay {
