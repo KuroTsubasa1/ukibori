@@ -296,7 +296,9 @@
     document.getElementById("preview3dCanvas").hidden = false;
     document.getElementById("view3dBtn").classList.add("seg-active");
     document.getElementById("view2dBtn").classList.remove("seg-active");
-    window.preview3d.show(document.getElementById("preview3dCanvas"), getPartsFn);
+    Promise.resolve(window.preview3d.show(document.getElementById("preview3dCanvas"), getPartsFn)).catch(function (err) {
+      if (window.__errs) window.__errs.push(String(err && err.message || err));
+    });
   });
 
   document.getElementById("view2dBtn").addEventListener("click", function () {
@@ -368,18 +370,19 @@
       setExportStatus("Exportiere …");
       const name = exportFileName();
       document.getElementById("canvas2d").toBlob(function (b) {
-        if (!b) { setExportStatus("Fehler: PNG konnte nicht erstellt werden."); return; }
-        downloadBlob(b, name + ".png");
-        setExportStatus("Fertig.");
+        try {
+          if (!b) { setExportStatus("Fehler: PNG konnte nicht erstellt werden."); return; }
+          downloadBlob(b, name + ".png");
+          setExportStatus("Fertig.");
+        } catch (e) {
+          setExportStatus("Fehler: " + e.message);
+        }
       }, "image/png");
     } catch (e) {
       setExportStatus("Fehler: " + e.message);
     }
   });
 
-  document.getElementById("exportSvg").addEventListener("click", function () {
-    setExportStatus("SVG folgt – Format noch nicht verfügbar.");
-  });
 
   // ---- View toggle wiring (Task 1, preserved) ----
   document.getElementById("viewSimple").addEventListener("click", function () { setView("simple"); });
