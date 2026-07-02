@@ -21,7 +21,15 @@
   const cv = document.getElementById("canvas2d");
 
   // Module-local interaction state (scale = px per mm; ox/oy reserved for future pan).
-  const state = { selectedId: null, scale: 1, ox: 0, oy: 0 };
+  // viewX0/viewY0: mm offset of canvas top-left from plate origin (≤0 when tab overhangs top/left).
+  const state = { selectedId: null, scale: 1, ox: 0, oy: 0, viewX0: 0, viewY0: 0 };
+
+  // ---- mm↔px helpers — all drawing/hit-test coordinates go through these ----
+  // mmX(x): mm doc-space x → canvas px. Inverse: (px / s) + viewX0.
+  function mmX(x) { return (x - state.viewX0) * state.scale; }
+  function mmY(y) { return (y - state.viewY0) * state.scale; }
+  function pxToMmX(px) { return px / state.scale + state.viewX0; }
+  function pxToMmY(py) { return py / state.scale + state.viewY0; }
 
   // Default depth direction for newly created elements.
   let defaultDirection = "raised";
@@ -79,28 +87,38 @@
   }
 
   // ---- Canvas fit scale ----
-  // Returns px-per-mm to fit doc.body.widthMm × heightMm into the preview element.
+  // Fits the full domain (plate ∪ washer bbox) into the preview element.
+  // Also updates state.viewX0/viewY0 from docDomain so all conversions stay in sync.
   function fitScale() {
     const pad = 24;
     const preview = document.getElementById("preview");
     const availW = (preview ? preview.clientWidth : 600) - pad;
     const availH = (preview ? preview.clientHeight : 700) - pad;
-    const body = doc.body;
-    const s = Math.max(1, Math.min(availW / body.widthMm, availH / body.heightMm));
+    // Use expanded domain (docDomain exported by T1; falls back to body box if unavailable).
+    var domain = (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm });
+    state.viewX0 = domain.x0;
+    state.viewY0 = domain.y0;
+    const s = Math.max(1, Math.min(availW / domain.wMm, availH / domain.hMm));
     state.scale = s;
-    cv.width = Math.round(body.widthMm * s);
-    cv.height = Math.round(body.heightMm * s);
+    cv.width = Math.round(domain.wMm * s);
+    cv.height = Math.round(domain.hMm * s);
   }
 
   // ---- Plate paths ----
   // Rounded-rect path for body.shape === 'rect'.
-  function bodyPath(ctx, s) {
+  function bodyPath(ctx) {
     const body = doc.body;
-    const w = body.widthMm * s, h = body.heightMm * s;
-    const rr = Math.min((body.cornerRadiusMm || 0) * s, w / 2, h / 2);
+    const x0 = mmX(0), y0 = mmY(0);
+    const x1 = mmX(body.widthMm), y1 = mmY(body.heightMm);
+    const w = x1 - x0, h = y1 - y0;
+    const rr = Math.min((body.cornerRadiusMm || 0) * state.scale, w / 2, h / 2);
     ctx.beginPath();
-    ctx.moveTo(rr, 0); ctx.arcTo(w, 0, w, h, rr); ctx.arcTo(w, h, 0, h, rr);
-    ctx.arcTo(0, h, 0, 0, rr); ctx.arcTo(0, 0, w, 0, rr); ctx.closePath();
+    ctx.moveTo(x0 + rr, y0);
+    ctx.arcTo(x1, y0, x1, y1, rr);
+    ctx.arcTo(x1, y1, x0, y1, rr);
+    ctx.arcTo(x0, y1, x0, y0, rr);
+    ctx.arcTo(x0, y0, x1, y0, rr);
+    ctx.closePath();
   }
 
   // ---- Image-processing display cache (WYSIWYG: what-you-see == what-prints) ----
@@ -309,9 +327,13 @@
   }
 
   // ---- Draw element ----
-  function drawElement(ctx, el, s) {
+  // vx0/vy0: view-origin offset in mm (default: state.viewX0/viewY0).
+  // Pass vx0=0,vy0=0 when drawing into a non-canvas context (e.g. SVG raster offscreen).
+  function drawElement(ctx, el, s, vx0, vy0) {
+    var ox = (vx0 !== undefined ? vx0 : state.viewX0);
+    var oy = (vy0 !== undefined ? vy0 : state.viewY0);
     ctx.save();
-    ctx.translate(el.cxMm * s, el.cyMm * s);
+    ctx.translate((el.cxMm - ox) * s, (el.cyMm - oy) * s);
     ctx.rotate((el.rotationDeg || 0) * Math.PI / 180);
     const w = el.wMm * s, h = el.hMm * s;
     if (el.type === "text") {
@@ -337,7 +359,7 @@
   // ---- Selection handles ----
   function drawSelection(ctx, el, s) {
     ctx.save();
-    ctx.translate(el.cxMm * s, el.cyMm * s);
+    ctx.translate(mmX(el.cxMm), mmY(el.cyMm)); // always uses state view origin
     ctx.rotate((el.rotationDeg || 0) * Math.PI / 180);
     const w = el.wMm * s, h = el.hMm * s;
     ctx.strokeStyle = "#6b4fb0"; ctx.lineWidth = 1.5;
@@ -367,15 +389,15 @@
     if (shape === "rect") {
       // Rounded-rect plate: outline only (B5: no solid fill so elements/relief are visible).
       // Clip elements inside the body outline.
-      ctx.save(); bodyPath(ctx, s); ctx.clip();
+      ctx.save(); bodyPath(ctx); ctx.clip();
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
       ctx.restore();
       // Outline.
-      bodyPath(ctx, s); ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
+      bodyPath(ctx); ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
     } else if (shape === "circle") {
       // Circle plate: outline only (B5: no solid fill so elements/relief are visible).
       const r = Math.min(body.widthMm, body.heightMm) / 2 * s;
-      const cx = body.widthMm / 2 * s, cy = body.heightMm / 2 * s;
+      const cx = mmX(body.widthMm / 2), cy = mmY(body.heightMm / 2);
       // Clip to circle.
       ctx.save();
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
@@ -393,24 +415,22 @@
     const mount = doc.mount;
     if (mount && mount.type !== "none") {
       const mr = (mount.diameterMm / 2) * s;
-      const mx = mount.xMm * s, my = mount.yMm * s;
+      const mx = mmX(mount.xMm), my = mmY(mount.yMm);
       ctx.save();
       ctx.strokeStyle = "#e0245e"; ctx.lineWidth = 2;
       ctx.setLineDash([]);
-      // Main circle.
+      // For loop type: draw the outer ring as a solid-stroke outline (it IS printed geometry).
+      if (mount.type === "loop" && mount.ringThicknessMm > 0) {
+        const or = (mount.diameterMm / 2 + mount.ringThicknessMm) * s;
+        ctx.beginPath(); ctx.arc(mx, my, or, 0, Math.PI * 2); ctx.stroke();
+      }
+      // Main (hole) circle.
       ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.stroke();
       // Crosshair (±8 px through center).
       ctx.beginPath();
       ctx.moveTo(mx - 8, my); ctx.lineTo(mx + 8, my);
       ctx.moveTo(mx, my - 8); ctx.lineTo(mx, my + 8);
       ctx.stroke();
-      // For loop type: hint the outer ring radius as a lighter circle.
-      if (mount.type === "loop" && mount.ringThicknessMm > 0) {
-        const or = (mount.diameterMm / 2 + mount.ringThicknessMm) * s;
-        ctx.globalAlpha = 0.4;
-        ctx.beginPath(); ctx.arc(mx, my, or, 0, Math.PI * 2); ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
       ctx.restore();
     }
 
@@ -421,7 +441,7 @@
 
   // ---- Hit test: pointer canvas-px → element/handle ----
   function elemToLocal(el, px, py, s) {
-    const dx = px - el.cxMm * s, dy = py - el.cyMm * s;
+    const dx = px - mmX(el.cxMm), dy = py - mmY(el.cyMm);
     const a = -(el.rotationDeg || 0) * Math.PI / 180;
     return [dx * Math.cos(a) - dy * Math.sin(a), dx * Math.sin(a) + dy * Math.cos(a)];
   }
@@ -431,7 +451,7 @@
     // Mount marker hit (checked first — small target on top).
     const mount = doc.mount;
     if (mount && mount.type !== "none") {
-      if (Math.hypot(px - mount.xMm * s, py - mount.yMm * s) <= 9) {
+      if (Math.hypot(px - mmX(mount.xMm), py - mmY(mount.yMm)) <= 9) {
         return { handle: "mount" };
       }
     }
@@ -474,7 +494,9 @@
     state.selectedId = hit.id;
     const el = doc.elements.find(el => el.id === hit.id);
     drag = {
-      handle: hit.handle, px, py,
+      handle: hit.handle,
+      // Store drag start in canvas px
+      px, py,
       start: { cx: el.cxMm, cy: el.cyMm, w: el.wMm, h: el.hMm, rot: el.rotationDeg || 0 },
     };
     cv.setPointerCapture(e.pointerId);
@@ -485,15 +507,92 @@
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
+  // Helper: compute content bbox for free-shape plates (used in attach clamp).
+  function contentBbox() {
+    var els = doc.elements.filter(function (e) { return !e._hidden; });
+    if (!els.length) return null;
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      x0 = Math.min(x0, el.cxMm - el.wMm / 2);
+      y0 = Math.min(y0, el.cyMm - el.hMm / 2);
+      x1 = Math.max(x1, el.cxMm + el.wMm / 2);
+      y1 = Math.max(y1, el.cyMm + el.hMm / 2);
+    }
+    return { x0, y0, x1, y1 };
+  }
+
+  // Returns true if the candidate (nx, ny) satisfies the attach clamp for the loop mount.
+  // Must have bodySdfMm(body)(nx,ny) >= -(outerR - 1) — the washer always bites >=1mm into plate.
+  function loopAttachOk(nx, ny) {
+    var mount = doc.mount;
+    var outerR = mount.diameterMm / 2 + mount.ringThicknessMm;
+    var limit = -(outerR - 1);
+    var body = doc.body;
+    var sdf;
+    if (body.shape === 'free') {
+      // Approximate plate with content bbox.
+      var bb = contentBbox();
+      if (!bb) {
+        // Fallback: use body box
+        sdf = function (x, y) {
+          var dx = Math.max(0 - x, x - body.widthMm);
+          var dy = Math.max(0 - y, y - body.heightMm);
+          return -Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) || Math.min(-dx, -dy);
+        };
+      } else {
+        sdf = function (x, y) {
+          // Box SDF for the content bbox.
+          var cx = (bb.x0 + bb.x1) / 2, cy = (bb.y0 + bb.y1) / 2;
+          var hw = (bb.x1 - bb.x0) / 2, hh = (bb.y1 - bb.y0) / 2;
+          var qx = Math.abs(x - cx) - hw, qy = Math.abs(y - cy) - hh;
+          return -(Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0));
+        };
+      }
+    } else {
+      sdf = window.bodySdfMm ? window.bodySdfMm(body) : null;
+      if (!sdf) return true; // bodySdfMm unavailable — allow
+    }
+    return sdf(nx, ny) >= limit;
+  }
+
   cv.addEventListener("pointermove", function (e) {
     if (!drag) return;
     const rect = cv.getBoundingClientRect();
     const scaleC = cv.width / rect.width, s = state.scale;
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
-    // Mount drag: update mm position clamped to plate.
+    // Mount drag: update mm position.
     if (drag.handle === "mount") {
-      doc.mount.xMm = clamp(drag.startX + (px - drag.px) / s, 0, doc.body.widthMm);
-      doc.mount.yMm = clamp(drag.startY + (py - drag.py) / s, 0, doc.body.heightMm);
+      var mount = doc.mount;
+      var rawX = drag.startX + (px - drag.px) / s;
+      var rawY = drag.startY + (py - drag.py) / s;
+      if (mount.type === "loop") {
+        // Attach clamp: ensure washer bites >=1mm into the plate.
+        // Try full move first; if not valid, try axis-by-axis fallback.
+        var nx = rawX, ny = rawY;
+        if (!loopAttachOk(nx, ny)) {
+          // Try X only
+          if (loopAttachOk(rawX, mount.yMm)) {
+            nx = rawX; ny = mount.yMm;
+          // Try Y only
+          } else if (loopAttachOk(mount.xMm, rawY)) {
+            nx = mount.xMm; ny = rawY;
+          } else {
+            // Reject entirely — stay at last valid position
+            nx = mount.xMm; ny = mount.yMm;
+          }
+        }
+        mount.xMm = nx;
+        mount.yMm = ny;
+        // Update view origin without rezoom (just update viewX0/viewY0 from domain).
+        var domain = (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm });
+        state.viewX0 = domain.x0;
+        state.viewY0 = domain.y0;
+      } else {
+        // Hole: classic inside-plate clamp.
+        mount.xMm = clamp(rawX, 0, doc.body.widthMm);
+        mount.yMm = clamp(rawY, 0, doc.body.heightMm);
+      }
       render2D();
       scheduleRebuild3D();
       return;
@@ -504,7 +603,7 @@
       el.cxMm = drag.start.cx + (px - drag.px) / s;
       el.cyMm = drag.start.cy + (py - drag.py) / s;
     } else if (drag.handle === "rotate") {
-      const ang = Math.atan2(py - el.cyMm * s, px - el.cxMm * s) * 180 / Math.PI + 90;
+      const ang = Math.atan2(py - mmY(el.cyMm), px - mmX(el.cxMm)) * 180 / Math.PI + 90;
       el.rotationDeg = Math.round(ang);
     } else {
       // Corner handle: scale width/height symmetrically.
@@ -517,7 +616,12 @@
 
   function endDrag() {
     if (!drag) return;
+    var wasMountDrag = (drag.handle === "mount");
     drag = null;
+    if (wasMountDrag) {
+      // Re-fit the canvas now that the mount may have moved (expanded/contracted domain).
+      fitScale();
+    }
     refreshAdvancedForSelection();
     renderAdvancedLayers();
     scheduleRebuild3D();
@@ -535,7 +639,7 @@
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
     const mount = doc.mount;
     if (mount && mount.type !== "none" &&
-        Math.hypot(px - mount.xMm * state.scale, py - mount.yMm * state.scale) <= 9) {
+        Math.hypot(px - mmX(mount.xMm), py - mmY(mount.yMm)) <= 9) {
       cv.style.cursor = "move";
     } else {
       cv.style.cursor = "";
@@ -796,8 +900,9 @@
     offctx.fillRect(0, 0, cols, rows);
 
     // Elements on top (WYSIWYG — processImageForDisplay applied inside drawElement).
+    // Pass explicit vx0=0,vy0=0: SVG grid has no view-origin offset; it starts at grid origin.
     for (var ei = 0; ei < d.elements.length; ei++) {
-      drawElement(offctx, d.elements[ei], s);
+      drawElement(offctx, d.elements[ei], s, 0, 0);
     }
 
     // Enforce footprint: blank out pixels outside the plate (overhang + mount hole).
@@ -911,11 +1016,35 @@
   function applyMount(type) {
     doc.mount.type = type;
     if (type === "loop") {
-      // B1: ensure non-zero ring dimensions so buildMountRingParts returns geometry.
+      // B1: ensure non-zero ring dimensions.
       if (!(doc.mount.ringThicknessMm > 0)) doc.mount.ringThicknessMm = 2;
       if (!(doc.mount.ringHeightMm > 0)) doc.mount.ringHeightMm = 2;
+      // Snap to top edge based on body shape.
+      var body = doc.body;
+      var W = body.widthMm, H = body.heightMm;
+      var shape = body.shape || 'rect';
+      if (shape === 'rect') {
+        doc.mount.xMm = W / 2;
+        doc.mount.yMm = 0;
+      } else if (shape === 'circle') {
+        var R = Math.min(W, H) / 2;
+        doc.mount.xMm = W / 2;
+        doc.mount.yMm = H / 2 - R;
+      } else {
+        // free: content bbox top-center.
+        var bb = contentBbox();
+        if (bb) {
+          doc.mount.xMm = (bb.x0 + bb.x1) / 2;
+          doc.mount.yMm = bb.y0;
+        } else {
+          doc.mount.xMm = W / 2;
+          doc.mount.yMm = 0;
+        }
+      }
     }
     setSegActive("mountSeg", type === "none" ? "mountNone" : type === "hole" ? "mountHole" : "mountLoop");
+    // Re-fit canvas: domain may have expanded/contracted.
+    fitScale();
     render2D();
     scheduleRebuild3D();
   }
