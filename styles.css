@@ -310,9 +310,12 @@
 #preview:not(.split){display:flex;align-items:center;justify-content:center}
 
 /* === Split view (T8) === */
-#preview.split{display:flex;flex-direction:row;gap:8px;align-items:flex-start}
-#preview.split #canvas2d,#preview.split #preview3dCanvas{flex:1 1 0;min-width:0;max-width:50%;height:auto}
-#preview.split #preview3dCanvas{align-self:stretch;min-height:360px}
+#preview.split{display:flex;flex-direction:row;gap:8px;align-items:center;justify-content:center}
+/* 2D: preserve aspect — do NOT force-stretch width (flex-grow), or the bitmap
+   squishes when max-height caps a portrait plate. fitScale sizes the buffer to
+   fit half-width × full-height, so let it display at that intrinsic size. */
+#preview.split #canvas2d{flex:0 1 auto;min-width:0;max-width:50%;max-height:100%;width:auto;height:auto}
+#preview.split #preview3dCanvas{flex:1 1 0;min-width:0;max-width:50%;align-self:stretch;min-height:360px}
 @media(max-width:900px){#preview.split{flex-direction:column}#preview.split #canvas2d,#preview.split #preview3dCanvas{max-width:100%}}
 
 /* === Advanced panel (Task 4b) === */

@@ -108,10 +108,12 @@
   function fitScale() {
     const pad = 24;
     const preview = document.getElementById("preview");
-    // In split mode the 2D canvas occupies only half the preview width; use cv.clientWidth
-    // if the flex layout has already settled it, otherwise halve the preview width.
+    // In split mode the 2D canvas occupies half the preview width. The canvas is now
+    // aspect-preserving (flex:0 1 auto), so cv.clientWidth follows the buffer — using it
+    // here would be circular. Always derive the split width from the preview (minus the
+    // 8px inter-pane gap).
     var inSplit = preview && preview.classList.contains("split");
-    var rawW = preview ? (inSplit ? (cv.clientWidth || Math.floor(preview.clientWidth / 2)) : preview.clientWidth) : 600;
+    var rawW = preview ? (inSplit ? Math.floor((preview.clientWidth - 8) / 2) : preview.clientWidth) : 600;
     const availW = rawW - pad;
     const availH = (preview ? preview.clientHeight : 700) - pad;
     // Use expanded domain (docDomain exported by T1; falls back to body box if unavailable).
