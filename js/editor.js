@@ -1500,5 +1500,4 @@
   // Expose for Playwright smoke tests.
   window.__editorState = state;
   window.__editorHitTest = hitTest;
-  window.__editorHitTest = hitTest;
 })();
