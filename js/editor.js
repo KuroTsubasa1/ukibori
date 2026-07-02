@@ -10,6 +10,9 @@
   // Module-local interaction state (scale = px per mm; ox/oy reserved for future pan).
   const state = { selectedId: null, scale: 1, ox: 0, oy: 0 };
 
+  // Default depth direction for newly created elements.
+  let defaultDirection = "raised";
+
   // ---- View toggle (Task 1, preserved) ----
   function getView() { return document.body.classList.contains("mode-advanced") ? "advanced" : "simple"; }
   function setView(v) {
@@ -243,6 +246,7 @@
         cxMm: body.widthMm / 2, cyMm: body.heightMm / 2,
         wMm, hMm,
       });
+      el.depth.direction = defaultDirection;
       doc.elements.push(el);
       state.selectedId = el.id;
       scheduleRebuild3D();
@@ -383,6 +387,153 @@
     }
   });
 
+
+  // ---- Simple panel wiring (Task 4a) ----
+
+  // -- Helpers --
+  function setSegActive(groupId, activeId) {
+    const group = document.getElementById(groupId);
+    if (!group) return;
+    group.querySelectorAll(".seg").forEach(function (btn) {
+      btn.classList.toggle("seg-active", btn.id === activeId);
+    });
+  }
+
+  // Depth: Erhaben / Vertieft
+  function applyDepth(direction) {
+    defaultDirection = direction;
+    for (var i = 0; i < doc.elements.length; i++) {
+      doc.elements[i].depth.direction = direction;
+    }
+    setSegActive("depthSeg", direction === "raised" ? "depthRaised" : "depthEngraved");
+    render2D();
+    scheduleRebuild3D();
+  }
+  document.getElementById("depthRaised").addEventListener("click", function () { applyDepth("raised"); });
+  document.getElementById("depthEngraved").addEventListener("click", function () { applyDepth("engraved"); });
+
+  // Shape: Rechteck / Kreis / Frei
+  function applyShape(shape) {
+    doc.body.shape = shape;
+    setSegActive("shapeSeg", shape === "rect" ? "shapeRect" : shape === "circle" ? "shapeCircle" : "shapeFree");
+    document.getElementById("borderField").hidden = (shape !== "free");
+    render2D();
+    scheduleRebuild3D();
+  }
+  document.getElementById("shapeRect").addEventListener("click", function () { applyShape("rect"); });
+  document.getElementById("shapeCircle").addEventListener("click", function () { applyShape("circle"); });
+  document.getElementById("shapeFree").addEventListener("click", function () { applyShape("free"); });
+
+  // Border (shown only for Free)
+  document.getElementById("borderMm").addEventListener("input", function () {
+    var v = parseFloat(this.value);
+    if (!isNaN(v) && v >= 0) {
+      doc.body.borderMm = v;
+      scheduleRebuild3D();
+    }
+  });
+
+  // Mount: Keine / Loch / Öse
+  function applyMount(type) {
+    doc.mount.type = type;
+    setSegActive("mountSeg", type === "none" ? "mountNone" : type === "hole" ? "mountHole" : "mountLoop");
+    render2D();
+    scheduleRebuild3D();
+  }
+  document.getElementById("mountNone").addEventListener("click", function () { applyMount("none"); });
+  document.getElementById("mountHole").addEventListener("click", function () { applyMount("hole"); });
+  document.getElementById("mountLoop").addEventListener("click", function () { applyMount("loop"); });
+
+  // Size W/H
+  document.getElementById("sizeW").addEventListener("input", function () {
+    var v = parseFloat(this.value);
+    if (!isNaN(v) && v >= 5) {
+      doc.body.widthMm = v;
+      render2D();
+      scheduleRebuild3D();
+    }
+  });
+  document.getElementById("sizeH").addEventListener("input", function () {
+    var v = parseFloat(this.value);
+    if (!isNaN(v) && v >= 5) {
+      doc.body.heightMm = v;
+      render2D();
+      scheduleRebuild3D();
+    }
+  });
+
+  // Add Text
+  document.getElementById("addTextBtn").addEventListener("click", function () {
+    var el = window.makeElementV2("text", {
+      cxMm: doc.body.widthMm / 2,
+      cyMm: doc.body.heightMm / 2,
+      wMm: Math.min(40, doc.body.widthMm * 0.6),
+      hMm: 12,
+    });
+    el.depth.direction = defaultDirection;
+    doc.elements.push(el);
+    state.selectedId = el.id;
+    render2D();
+    scheduleRebuild3D();
+  });
+
+  // Add Image (trigger hidden file input)
+  document.getElementById("addImageBtn").addEventListener("click", function () {
+    var inp = document.getElementById("addImageInput");
+    if (inp) inp.click();
+  });
+
+  // Add QR
+  document.getElementById("addQrBtn").addEventListener("click", function () {
+    var data = prompt("QR-Inhalt:");
+    if (!data || !data.trim()) return;
+    var imgData;
+    try {
+      imgData = window.qrToImageData({ text: data, ecLevel: "M" });
+    } catch (err) {
+      alert("QR-Fehler: " + (err && err.message || err));
+      return;
+    }
+    // Rasterize the ImageData to a canvas → dataURL → Image onload.
+    var tmpCanvas = document.createElement("canvas");
+    tmpCanvas.width = imgData.width;
+    tmpCanvas.height = imgData.height;
+    tmpCanvas.getContext("2d").putImageData(imgData, 0, 0);
+    var dataURL = tmpCanvas.toDataURL("image/png");
+    var img = new Image();
+    img.onload = function () {
+      var sz = Math.min(doc.body.widthMm * 0.7, doc.body.heightMm * 0.7, 40);
+      var el = window.makeElementV2("image", {
+        src: dataURL, _img: img,
+        cxMm: doc.body.widthMm / 2,
+        cyMm: doc.body.heightMm / 2,
+        wMm: sz, hMm: sz,
+      });
+      el.qrData = data;
+      el.depth.direction = defaultDirection;
+      el.depth.threshold = 256;
+      doc.elements.push(el);
+      state.selectedId = el.id;
+      render2D();
+      scheduleRebuild3D();
+    };
+    img.src = dataURL;
+  });
+
+  // Initialize Simple panel UI from doc on load.
+  (function initSimpleUI() {
+    // Shape
+    applyShape(doc.body.shape || "rect");
+    // Mount
+    applyMount(doc.mount.type || "none");
+    // Size
+    document.getElementById("sizeW").value = doc.body.widthMm;
+    document.getElementById("sizeH").value = doc.body.heightMm;
+    // Border
+    document.getElementById("borderMm").value = doc.body.borderMm != null ? doc.body.borderMm : 2;
+    // Depth (defaultDirection already 'raised'; reflect it)
+    setSegActive("depthSeg", defaultDirection === "raised" ? "depthRaised" : "depthEngraved");
+  }());
 
   // ---- View toggle wiring (Task 1, preserved) ----
   document.getElementById("viewSimple").addEventListener("click", function () { setView("simple"); });

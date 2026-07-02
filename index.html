@@ -26,7 +26,57 @@
   </div>
 </header>
 <main id="editor">
-  <aside id="sidebarSimple" class="sidebar"><!-- Simple controls (Task 4) --></aside>
+  <aside id="sidebarSimple" class="sidebar">
+    <!-- Simple controls (Task 4a) -->
+    <div class="sp-section">
+      <div class="sp-label">Hinzufügen</div>
+      <div class="sp-add-row">
+        <button type="button" id="addImageBtn" class="btn">Bild</button>
+        <button type="button" id="addTextBtn" class="btn">Text</button>
+        <button type="button" id="addQrBtn" class="btn">QR</button>
+      </div>
+    </div>
+    <div class="sp-section">
+      <div class="sp-label">Tiefe</div>
+      <div id="depthSeg" class="seg-group seg-sm" style="width:100%">
+        <button type="button" id="depthRaised" class="seg seg-active" style="flex:1">Erhaben</button>
+        <button type="button" id="depthEngraved" class="seg" style="flex:1">Vertieft</button>
+      </div>
+    </div>
+    <div class="sp-section">
+      <div class="sp-label">Form</div>
+      <div id="shapeSeg" class="seg-group seg-sm" style="width:100%">
+        <button type="button" id="shapeRect" class="seg seg-active" style="flex:1">Rechteck</button>
+        <button type="button" id="shapeCircle" class="seg" style="flex:1">Kreis</button>
+        <button type="button" id="shapeFree" class="seg" style="flex:1">Frei</button>
+      </div>
+      <div id="borderField" class="sp-inline-field" hidden>
+        <label for="borderMm" class="sp-inline-label">Rand (mm)</label>
+        <input type="number" id="borderMm" class="sp-num" min="0" max="50" step="0.5" value="2">
+      </div>
+    </div>
+    <div class="sp-section">
+      <div class="sp-label">Befestigung</div>
+      <div id="mountSeg" class="seg-group seg-sm" style="width:100%">
+        <button type="button" id="mountNone" class="seg seg-active" style="flex:1">Keine</button>
+        <button type="button" id="mountHole" class="seg" style="flex:1">Loch</button>
+        <button type="button" id="mountLoop" class="seg" style="flex:1">Öse</button>
+      </div>
+    </div>
+    <div class="sp-section">
+      <div class="sp-label">Größe (mm)</div>
+      <div class="sp-size-row">
+        <div class="sp-size-field">
+          <label for="sizeW" class="sp-inline-label">B</label>
+          <input type="number" id="sizeW" class="sp-num" min="5" max="500" step="1" value="50">
+        </div>
+        <div class="sp-size-field">
+          <label for="sizeH" class="sp-inline-label">H</label>
+          <input type="number" id="sizeH" class="sp-num" min="5" max="500" step="1" value="150">
+        </div>
+      </div>
+    </div>
+  </aside>
   <aside id="sidebarAdvanced" class="sidebar" hidden><!-- Advanced controls (Task 4) --></aside>
   <section id="preview">
     <div class="view-toggle"><button id="view2dBtn" class="seg seg-active">2D</button><button id="view3dBtn" class="seg">3D</button></div>
