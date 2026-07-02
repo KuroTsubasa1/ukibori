@@ -117,12 +117,13 @@
 
     // Same number of parts.
     assertEqual(partsWithField.length, partsNoField.length, "same part count");
-    // Same facet count in each part.
+    // Byte-identical facets in each part (deep compare, not just counts —
+    // review finding: count equality alone could mask a vertex-level drift).
     for (let i = 0; i < partsWithField.length; i++) {
       assertEqual(
-        partsWithField[i].facets.length,
-        partsNoField[i].facets.length,
-        "part " + i + " same facet count"
+        JSON.stringify(partsWithField[i].facets),
+        JSON.stringify(partsNoField[i].facets),
+        "part " + i + " byte-identical facets"
       );
     }
   });
