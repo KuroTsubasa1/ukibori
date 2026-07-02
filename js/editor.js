@@ -878,15 +878,15 @@
   // evenodd-filled path per color, and returns an SVG string (or null if empty).
   function buildDesignSVG() {
     var d = visibleDoc();
-    var grid = window.gridForBody(d.body, d.resolution);
-    var cols = grid.cols, rows = grid.rows, pitch = grid.pitch;
+    // Use shared expanded-domain grid+footprint (T1). For non-loop docs this is identical
+    // to the old gridForBody + shapeFootprintField/freeFootprintField path (x0=y0=0).
+    var gf = window.docGridAndFootprint(d);
+    var cols = gf.grid.cols, rows = gf.grid.rows, pitch = gf.grid.pitch;
+    var x0 = gf.grid.x0, y0 = gf.grid.y0;
     var s = 1 / pitch; // px per mm so that drawElement places content on the engine grid
 
-    // Footprint field: >0 inside the plate (with mount hole already cut).
-    var field = d.body.shape === "free"
-      ? window.freeFootprintField(d, cols, rows, pitch)
-      : window.shapeFootprintField(cols, rows, d.body, d.mount);
-    var baseInside = function (c, r) { return field(c, r) > 0; };
+    // Footprint field: >0 inside the footprint (plate ∪ washer, with hole cut).
+    var baseInside = function (c, r) { return gf.footprint(c, r) > 0; };
 
     // Composite raster: paint base color, then elements on top.
     var offcanvas = document.createElement("canvas");
@@ -898,9 +898,10 @@
     offctx.fillRect(0, 0, cols, rows);
 
     // Elements on top (WYSIWYG — processImageForDisplay applied inside drawElement).
-    // Pass explicit vx0=0,vy0=0: SVG grid has no view-origin offset; it starts at grid origin.
+    // Offset by grid origin (x0,y0) so elements in doc-space land correctly in the
+    // expanded raster. When x0=y0=0 (no overhang) these args are 0,0 — byte-identical.
     for (var ei = 0; ei < d.elements.length; ei++) {
-      drawElement(offctx, d.elements[ei], s, 0, 0);
+      drawElement(offctx, d.elements[ei], s, -x0 * s, -y0 * s);
     }
 
     // Enforce footprint: blank out pixels outside the plate (overhang + mount hole).
