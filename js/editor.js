@@ -107,6 +107,7 @@
 
   // ---- Main render (exported as render2D) ----
   function render2D() {
+    if (!cv) return;
     fitScale();
     const s = state.scale;
     const ctx = cv.getContext("2d");
@@ -554,8 +555,9 @@
       var src = document.createElement("canvas");
       src.width = el._img.naturalWidth || el._img.width || 320;
       src.height = el._img.naturalHeight || el._img.height || 320;
-      src.getContext("2d").drawImage(el._img, 0, 0, src.width, src.height);
-      var imageData = src.getContext("2d").getImageData(0, 0, src.width, src.height);
+      var ctx2d = src.getContext("2d");
+      ctx2d.drawImage(el._img, 0, 0, src.width, src.height);
+      var imageData = ctx2d.getImageData(0, 0, src.width, src.height);
 
       window.removeBackground(imageData).then(function (cut) {
         // Put the cut ImageData onto a canvas and convert to data URL.
