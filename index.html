@@ -9,388 +9,57 @@
 <title>Ukibori · 浮彫</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="styles.css">
+<script>window.__errs=[];addEventListener('error',e=>window.__errs.push(String(e.message)))</script>
 </head>
 <body>
-<header class="app-header">
-  <span class="logo" aria-hidden="true">浮</span>
-  <div>
-    <h1>Ukibori <span class="kanji">浮彫</span></h1>
-    <p class="tagline">Bilder als erhabenes 3D-Relief · Schwarz-Weiß &amp; flache Farben · komplett lokal im Browser</p>
+<header id="topbar">
+  <span class="brand">ukibori</span>
+  <div id="viewToggle" class="seg-group" role="tablist" aria-label="Ansicht">
+    <button type="button" id="viewSimple" class="seg seg-active">Einfach</button>
+    <button type="button" id="viewAdvanced" class="seg">Erweitert</button>
+  </div>
+  <div class="topbar-actions">
+    <button type="button" id="openBtn">Öffnen</button>
+    <button type="button" id="saveBtn">Speichern</button>
+    <button type="button" id="exportBtn">Exportieren</button>
+    <button type="button" id="tourBtn" aria-label="Tour">?</button>
   </div>
 </header>
-
-<main>
-  <div class="app-mode seg-group" role="tablist" aria-label="App-Modus">
-    <button type="button" id="appModeRelief" class="seg seg-active">Bild → Relief</button>
-    <button type="button" id="appModeBookmark" class="seg">Lesezeichen</button>
-  </div>
-  <div id="reliefWorkspace">
-  <div id="sourceTabs" class="seg-group source-tabs" role="tablist" aria-label="Quelle">
-    <button type="button" id="srcBild" class="seg seg-active">Bild</button>
-    <button type="button" id="srcText" class="seg">Text</button>
-    <button type="button" id="srcQR" class="seg">QR</button>
-  </div>
-  <section id="drop" class="dropzone" tabindex="0">
-    <div class="drop-full">
-      <div class="drop-icon" aria-hidden="true">⬆</div>
-      <p class="drop-title">Bild hierher ziehen</p>
-      <p class="drop-sub">oder <span class="link">Datei auswählen</span></p>
-    </div>
-    <div class="drop-compact">↻ Anderes Bild laden — ziehen oder klicken</div>
-    <input id="file" type="file" accept="image/*" hidden>
+<main id="editor">
+  <aside id="sidebarSimple" class="sidebar"><!-- Simple controls (Task 4) --></aside>
+  <aside id="sidebarAdvanced" class="sidebar" hidden><!-- Advanced controls (Task 4) --></aside>
+  <section id="preview">
+    <div class="view-toggle"><button id="view2dBtn" class="seg seg-active">2D</button><button id="view3dBtn" class="seg">3D</button></div>
+    <canvas id="canvas2d" width="800" height="1000"></canvas>
+    <canvas id="preview3dCanvas" width="800" height="1000" hidden></canvas>
   </section>
-
-  <section id="textPanel" class="source-panel" hidden>
-    <textarea id="textInput" rows="2" placeholder="Text eingeben… (Zeilenumbruch erlaubt)"></textarea>
-    <div class="source-row">
-      <label class="toggle"><input id="textBold" type="checkbox" checked> Fett</label>
-      <label class="source-size">Größe <input id="textSize" type="range" min="24" max="200" value="80"></label>
-      <button id="textApply" type="button" class="btn btn-primary">Anwenden</button>
-    </div>
-  </section>
-
-  <section id="qrPanel" class="source-panel" hidden>
-    <input id="qrInput" type="text" placeholder="Text oder URL…">
-    <div class="source-row">
-      <label class="source-size">Fehlerkorrektur
-        <select id="qrEc">
-          <option value="L">L</option>
-          <option value="M" selected>M</option>
-          <option value="Q">Q</option>
-          <option value="H">H</option>
-        </select>
-      </label>
-      <button id="qrApply" type="button" class="btn btn-primary">Anwenden</button>
-    </div>
-  </section>
-
-  <div class="workspace">
-    <aside class="sidebar">
-      <div class="sidebar-head">
-        <div class="seg-group mode-switch" role="tablist" aria-label="Modus">
-          <button type="button" id="modeBw" class="seg seg-active">Schwarz / Weiß</button>
-          <button type="button" id="modeColor" class="seg">Farben reduzieren</button>
-        </div>
-        <div class="preset-row">
-          <select id="presetSelect" class="preset-select" aria-label="Vorlage"></select>
-          <button type="button" id="presetSave" class="btn btn-sm">Speichern</button>
-          <button type="button" id="presetDelete" class="btn btn-sm">Löschen</button>
-        </div>
-      </div>
-
-      <div id="controls" class="toolbar disabled">
-        <details class="acc" open>
-          <summary>Konvertierung</summary>
-          <div class="acc-body">
-            <div class="fields">
-              <!-- Gilt für beide Modi -->
-              <div class="field">
-                <label class="toggle"><input id="keepAlpha" type="checkbox" disabled> Transparenten Hintergrund erhalten</label>
-                <span class="hint">Transparente Bereiche bleiben transparent statt weiß (Vorschau, PNG &amp; 3D)</span>
-              </div>
-
-              <div class="field">
-                <button id="bgRemove" type="button" class="btn" disabled>Hintergrund entfernen (KI)</button>
-                <span class="hint">Lokales KI-Modell · erste Nutzung lädt Modell + Laufzeit (~16 MB)</span>
-              </div>
-
-              <!-- Schwarz/Weiß -->
-              <div class="field mode-bw">
-                <div class="field-head">
-                  <label for="thresh">Schwellwert</label>
-                  <span id="threshVal" class="badge">128</span>
-                </div>
-                <input id="thresh" type="range" min="0" max="255" value="128" disabled>
-              </div>
-              <div class="field mode-bw">
-                <div class="field-head">
-                  <label for="island">Inseln entfernen (max. px)</label>
-                  <span id="islandVal" class="badge">0</span>
-                </div>
-                <input id="island" type="range" min="0" max="2000" value="0" disabled>
-              </div>
-
-              <!-- Farben reduzieren -->
-              <div class="field mode-color" hidden>
-                <div class="field-head"><label>Methode</label></div>
-                <div class="seg-group seg-sm" role="tablist" aria-label="Methode">
-                  <button type="button" id="methPalette" class="seg seg-active">Palette</button>
-                  <button type="button" id="methPosterize" class="seg">Posterize</button>
-                </div>
-              </div>
-              <div class="field mode-color meth-palette" hidden>
-                <div class="field-head">
-                  <label for="numColors">Anzahl Farben</label>
-                  <span id="numColorsVal" class="badge">8</span>
-                </div>
-                <input id="numColors" type="range" min="2" max="32" value="8" disabled>
-              </div>
-              <div class="field mode-color meth-posterize" hidden>
-                <div class="field-head">
-                  <label for="levels">Stufen pro Kanal</label>
-                  <span id="levelsVal" class="badge">4</span>
-                </div>
-                <input id="levels" type="range" min="2" max="8" value="4" disabled>
-              </div>
-
-              <!-- Aufräumen (gilt für den ganzen Farbmodus) -->
-              <div class="field mode-color" hidden>
-                <div class="field-head">
-                  <label for="colorIsland">Inseln entfernen (max. px)</label>
-                  <span id="colorIslandVal" class="badge">0</span>
-                </div>
-                <input id="colorIsland" type="range" min="0" max="2000" value="0" disabled>
-              </div>
-              <div class="field mode-color" hidden>
-                <div class="field-head">
-                  <label for="smooth">Kanten glätten</label>
-                  <span id="smoothVal" class="badge">0</span>
-                </div>
-                <input id="smooth" type="range" min="0" max="5" value="0" disabled>
-              </div>
-            </div>
-
-            <div class="actions">
-              <button id="otsu" class="btn mode-bw" disabled>Auto (Otsu)</button>
-              <label class="toggle mode-bw"><input id="invert" type="checkbox" disabled> Invertieren</label>
-              <label class="toggle"><input id="stampMode" type="checkbox" disabled> Stempel-Modus (gespiegelt, erhaben)</label>
-            </div>
-          </div>
-        </details>
-
-        <details class="acc">
-          <summary>Kreis zuschneiden</summary>
-          <div class="acc-body">
-            <div class="fields circle-row">
-              <div class="field">
-                <label class="toggle"><input id="circleEnable" type="checkbox" disabled> Kreis zuschneiden</label>
-                <span class="hint">Im Bild ziehen zum Verschieben · Mausrad zum Zoomen</span>
-              </div>
-              <div class="field">
-                <div class="field-head">
-                  <label for="circleSize">Kreisgröße (Radius)</label>
-                  <span id="circleSizeVal" class="badge">0</span>
-                </div>
-                <input id="circleSize" type="range" min="10" max="1000" value="100" disabled>
-              </div>
-              <div class="field">
-                <div class="field-head">
-                  <label for="circleThickness">Rahmendicke (px)</label>
-                  <span id="circleThicknessVal" class="badge">10</span>
-                </div>
-                <input id="circleThickness" type="range" min="0" max="200" value="10" disabled>
-              </div>
-              <div class="field">
-                <div class="field-head"><label for="circleColor">Rahmenfarbe</label></div>
-                <input id="circleColor" type="color" value="#000000" disabled>
-              </div>
-            </div>
-          </div>
-        </details>
-
-        <details class="acc">
-          <summary>Befestigung</summary>
-          <div class="acc-body">
-            <div class="fields">
-              <div class="field">
-                <div class="field-head"><label>Typ</label></div>
-                <div class="seg-group seg-sm" role="tablist" aria-label="Befestigung">
-                  <button type="button" id="mountKein" class="seg seg-active">Kein</button>
-                  <button type="button" id="mountLoch" class="seg">Loch</button>
-                  <button type="button" id="mountOese" class="seg">Öse</button>
-                </div>
-                <input id="mountType" type="hidden" value="kein">
-                <span class="hint">Im Bild ziehen, um die Position zu setzen</span>
-              </div>
-              <div class="field mount-on" hidden>
-                <div class="field-head"><label for="mountDia">Lochdurchmesser (mm)</label><span id="mountDiaVal" class="badge">5.0</span></div>
-                <input id="mountDia" type="range" min="1" max="30" value="5" step="0.5" disabled>
-              </div>
-              <div class="field mount-oese" hidden>
-                <div class="field-head"><label for="mountBoss">Ringbreite (mm)</label><span id="mountBossVal" class="badge">3.0</span></div>
-                <input id="mountBoss" type="range" min="0.5" max="15" value="3" step="0.5" disabled>
-              </div>
-            </div>
-          </div>
-        </details>
-
-        <details class="acc">
-          <summary>3D-Modell</summary>
-          <div class="acc-body">
-            <div class="fields threed-row">
-              <div class="field">
-                <div class="field-head"><label for="modelWidth">3D-Breite (mm)</label><span id="modelWidthVal" class="badge">80</span></div>
-                <input id="modelWidth" type="range" min="20" max="300" value="80" step="1" disabled>
-              </div>
-              <div class="field mode-bw">
-                <div class="field-head"><label for="thickBlack">Dicke Schwarz (mm)</label><span id="thickBlackVal" class="badge">3.0</span></div>
-                <input id="thickBlack" type="range" min="0" max="10" value="3" step="0.2" disabled>
-              </div>
-              <div class="field mode-bw">
-                <div class="field-head"><label for="thickWhite">Dicke Weiß (mm)</label><span id="thickWhiteVal" class="badge">3.0</span></div>
-                <input id="thickWhite" type="range" min="0" max="10" value="3" step="0.2" disabled>
-              </div>
-              <div class="field mode-color" hidden>
-                <div class="field-head"><label>Höhenmodus</label></div>
-                <div class="seg-group seg-sm" role="tablist" aria-label="Höhenmodus">
-                  <button type="button" id="colorHeightUniform" class="seg seg-active">Gleichmäßig</button>
-                  <button type="button" id="colorHeightBrightness" class="seg">Helligkeit → Höhe</button>
-                </div>
-              </div>
-              <div class="field mode-color" hidden>
-                <div class="field-head"><label for="colorRelief">Relief-Höhe (mm)</label><span id="colorReliefVal" class="badge">3.0</span></div>
-                <input id="colorRelief" type="range" min="0" max="10" value="3" step="0.2" disabled>
-              </div>
-              <div class="field mode-color color-brightness" hidden>
-                <div class="field-head"><label for="colorMaxH">Max. Höhe (mm)</label><span id="colorMaxHVal" class="badge">6.0</span></div>
-                <input id="colorMaxH" type="range" min="0" max="12" value="6" step="0.2" disabled>
-              </div>
-              <div class="field mode-color color-brightness" hidden>
-                <label class="toggle"><input id="colorDarkTall" type="checkbox" checked disabled> Dunkle Farben höher</label>
-              </div>
-              <div class="field">
-                <div class="field-head"><label for="ringThick">Dicke Rand (mm)</label><span id="ringThickVal" class="badge">4.0</span></div>
-                <input id="ringThick" type="range" min="0" max="12" value="4" step="0.2" disabled>
-              </div>
-              <div class="field">
-                <div class="field-head"><label for="frameWidth">Randbreite (px)</label><span id="frameWidthVal" class="badge">0</span></div>
-                <input id="frameWidth" type="range" min="0" max="200" value="0" step="1" disabled>
-                <span class="hint">Rechteck-Rahmen · nur ohne Kreis-Zuschnitt</span>
-              </div>
-              <div class="field">
-                <div class="field-head"><label for="baseThick">Grundplatte (mm)</label><span id="baseThickVal" class="badge">0.0</span></div>
-                <input id="baseThick" type="range" min="0" max="8" value="0" step="0.2" disabled>
-              </div>
-              <div class="field">
-                <div class="field-head"><label for="bodyColor">Rahmen-/Grundfarbe</label></div>
-                <input id="bodyColor" type="color" value="#000000" disabled>
-              </div>
-              <div class="field">
-                <div class="field-head"><label for="modelRes">Auflösung (px)</label><span id="modelResVal" class="badge">256</span></div>
-                <input id="modelRes" type="range" min="32" max="512" value="256" step="16" disabled>
-              </div>
-              <div class="field">
-                <div class="field-head"><label for="modelSmooth">Glättung</label><span id="modelSmoothVal" class="badge">0.5</span></div>
-                <input id="modelSmooth" type="range" min="0" max="5" value="0.5" step="0.5" disabled>
-              </div>
-              <div class="field">
-                <p id="dims" class="status">—</p>
-              </div>
-            </div>
-          </div>
-        </details>
-      </div>
-
-      <div class="sidebar-footer">
-        <button id="openExport" class="btn btn-primary" disabled>Exportieren …</button>
-        <p id="status" class="status">Bereit. Lade ein Bild, um zu starten.</p>
-      </div>
-    </aside>
-
-    <section id="preview" class="preview">
-      <div class="view-toggle seg-group seg-sm" role="tablist" aria-label="Ansicht">
-        <button type="button" id="view2dBtn" class="seg seg-active">2D</button>
-        <button type="button" id="view3dBtn" class="seg">3D</button>
-      </div>
-      <canvas id="output"></canvas>
-      <canvas id="preview3dCanvas" hidden></canvas>
-    </section>
-  </div>
-
-  <!-- Export dialog (relief) -->
-  <div id="exportModal" class="modal-overlay" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
-      <div class="modal-head">
-        <h2 id="exportTitle">Exportieren</h2>
-        <button id="exportClose" class="modal-x" type="button" aria-label="Schließen">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="field">
-          <div class="field-head"><label for="exportName">Dateiname</label></div>
-          <input id="exportName" type="text" class="text-input" value="ukibori">
-        </div>
-        <div class="field">
-          <div class="field-head"><label>Format</label></div>
-          <div class="export-formats">
-            <button id="exportPng" class="btn" type="button">PNG <span class="hint">Bild</span></button>
-            <button id="exportSvg" class="btn" type="button">SVG <span class="hint">Vektor, je Farbe</span></button>
-            <button id="exportMf" class="btn btn-primary" type="button">.3mf <span class="hint">3D · S/W &amp; Farbe</span></button>
-            <button id="exportStl" class="btn" type="button">STL <span class="hint">3D · Geometrie</span></button>
-          </div>
-        </div>
-        <p id="exportStatus" class="status"></p>
-      </div>
-    </div>
-  </div>
-  </div><!-- /#reliefWorkspace -->
-
-  <div id="bmWorkspace" class="workspace" hidden>
-    <aside class="sidebar">
-      <div class="sidebar-head">
-        <div class="bm-actions">
-          <button type="button" id="bmAddImage" class="btn">+ Bild</button>
-          <button type="button" id="bmAddText" class="btn">+ Text</button>
-        </div>
-      </div>
-      <input id="bmFile" type="file" accept="image/*" hidden>
-      <input id="bmFontFile" type="file" accept=".ttf,.otf,font/*" hidden>
-      <input id="bmLoadFile" type="file" accept=".json,application/json" hidden>
-
-      <div class="toolbar">
-      <details class="acc" open>
-        <summary>Lesezeichen</summary>
-        <div class="acc-body"><div class="fields">
-          <div class="field"><div class="field-head"><label for="bmWidth">Breite (mm)</label><span id="bmWidthVal" class="badge">50</span></div>
-            <input id="bmWidth" type="range" min="20" max="120" value="50" step="1"></div>
-          <div class="field"><div class="field-head"><label for="bmHeight">Höhe (mm)</label><span id="bmHeightVal" class="badge">150</span></div>
-            <input id="bmHeight" type="range" min="40" max="250" value="150" step="1"></div>
-          <div class="field"><div class="field-head"><label for="bmCorner">Eckradius (mm)</label><span id="bmCornerVal" class="badge">4</span></div>
-            <input id="bmCorner" type="range" min="0" max="25" value="4" step="0.5"></div>
-          <div class="field"><div class="field-head"><label for="bmThickness">Dicke (mm)</label><span id="bmThicknessVal" class="badge">3.0</span></div>
-            <input id="bmThickness" type="range" min="0.6" max="8" value="3" step="0.2"></div>
-          <div class="field"><div class="field-head"><label for="bmLayerHeight">Schichthöhe (mm)</label><span id="bmLayerHeightVal" class="badge">0.20</span></div>
-            <input id="bmLayerHeight" type="range" min="0.05" max="0.4" value="0.2" step="0.01"></div>
-          <div class="field"><div class="field-head"><label for="bmColorStep">Farbschritt (Schichten)</label><span id="bmColorStepVal" class="badge">2</span></div>
-            <input id="bmColorStep" type="range" min="1" max="10" value="2" step="1">
-            <span class="hint">Jede Farbe liegt auf eigener Höhe: Tiefe = Reihenfolge (Ebenen) × Schritt.</span></div>
-          <div class="field"><div class="field-head"><label for="bmHoleD">Loch ⌀ (mm)</label><span id="bmHoleDVal" class="badge">5</span></div>
-            <input id="bmHoleD" type="range" min="0" max="15" value="5" step="0.5"></div>
-          <div class="field"><div class="field-head"><label for="bmHoleMargin">Loch Abstand oben (mm)</label><span id="bmHoleMarginVal" class="badge">8</span></div>
-            <input id="bmHoleMargin" type="range" min="2" max="30" value="8" step="0.5"></div>
-          <div class="field"><div class="field-head"><label for="bmBaseColor">Grundfarbe</label></div>
-            <input id="bmBaseColor" type="color" value="#000000"></div>
-          <div class="field"><div class="field-head"><label for="bmResolution">Auflösung (px)</label><span id="bmResolutionVal" class="badge">1024</span></div>
-            <input id="bmResolution" type="range" min="128" max="2048" value="1024" step="64">
-            <span class="hint">Höher = feinere Kanten/Text. Gilt nur für den .3mf-Export.</span></div>
-        </div></div>
-      </details>
-
-      <details class="acc" open>
-        <summary>Ebenen</summary>
-        <div class="acc-body"><ul id="bmLayers" class="bm-layers"></ul></div>
-      </details>
-
-      <details class="acc" open>
-        <summary>Element</summary>
-        <div class="acc-body"><div id="bmProps" class="fields"><p class="hint">Kein Element ausgewählt.</p></div></div>
-      </details>
-      </div>
-
-      <div class="sidebar-footer">
-        <button id="bmExport" class="btn btn-primary">3D-Modell (.3mf)</button>
-        <div class="bm-actions">
-          <button id="bmSave" class="btn">Projekt speichern</button>
-          <button id="bmLoad" class="btn">Projekt laden</button>
-        </div>
-        <p id="bmStatus" class="status">Lesezeichen-Modus.</p>
-      </div>
-    </aside>
-
-    <section id="bmPreview" class="preview">
-      <canvas id="bmCanvas"></canvas>
-    </section>
-  </div>
 </main>
+
+<!-- Export dialog (kept for Task 3 rework) -->
+<div id="exportModal" class="modal-overlay" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
+    <div class="modal-head">
+      <h2 id="exportTitle">Exportieren</h2>
+      <button id="exportClose" class="modal-x" type="button" aria-label="Schließen">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <div class="field-head"><label for="exportName">Dateiname</label></div>
+        <input id="exportName" type="text" class="text-input" value="ukibori">
+      </div>
+      <div class="field">
+        <div class="field-head"><label>Format</label></div>
+        <div class="export-formats">
+          <button id="exportPng" class="btn" type="button">PNG <span class="hint">Bild</span></button>
+          <button id="exportSvg" class="btn" type="button">SVG <span class="hint">Vektor, je Farbe</span></button>
+          <button id="exportMf" class="btn btn-primary" type="button">.3mf <span class="hint">3D · S/W &amp; Farbe</span></button>
+          <button id="exportStl" class="btn" type="button">STL <span class="hint">3D · Geometrie</span></button>
+        </div>
+      </div>
+      <p id="exportStatus" class="status"></p>
+    </div>
+  </div>
+</div>
 
 <script src="vendor/qrcode.js"></script>
 <script src="js/vendor/potrace.js"></script>
@@ -402,9 +71,8 @@
 <script src="js/bookmark-model.js"></script>
 <script src="js/bookmark-export.js"></script>
 <script src="js/build-parts.js"></script>
-<script src="js/bookmark-editor.js"></script>
-<script src="js/app.js"></script>
-<script src="js/presets.js"></script>
 <script src="js/preview3d.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/coachmarks.js"></script>
 </body>
 </html>
