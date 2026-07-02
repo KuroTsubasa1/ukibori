@@ -1828,8 +1828,8 @@
   setView((function () { try { return localStorage.getItem(VIEW_KEY) || "simple"; } catch (e) { return "simple"; } })());
 
   // Initial render: fit scale first (B3: fitScale not in render2D anymore).
-  // Restore persisted preview mode (default '2d' so first-run is unchanged).
-  setPreviewMode((function () { try { return localStorage.getItem(PREVIEW_MODE_KEY) || "2d"; } catch (e) { return "2d"; } })());
+  // Restore persisted preview mode; default 'split' (2D + 3D side by side) per user request.
+  setPreviewMode((function () { try { return localStorage.getItem(PREVIEW_MODE_KEY) || "split"; } catch (e) { return "split"; } })());
   renderLayers();
 
   // Public interface. Expose state so tests can inspect/mutate selection.
