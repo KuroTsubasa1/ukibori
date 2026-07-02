@@ -562,7 +562,7 @@ window.shapeFootprintField = shapeFootprintField;
 // rejected ("no mesh").
 function build3MF(parts) {
   const enc = new TextEncoder();
-  let bases = '', objects = '', items = '';
+  let bases = '', objects = '';
   const partHex6 = [];                 // #RRGGBB per part
   const colorList = [], extruderOf = new Map(); // distinct color -> 1-based extruder
   parts.forEach((part, i) => {
@@ -580,8 +580,14 @@ function build3MF(parts) {
     const id = i + 2;
     // Object references the basematerials group (pid=1) at index i -> its color.
     objects += `  <object id="${id}" name="${safeName}" type="model" pid="1" pindex="${i}">\n   <mesh>\n    <vertices>\n${vs}    </vertices>\n    <triangles>\n${ts}    </triangles>\n   </mesh>\n  </object>\n`;
-    items += `  <item objectid="${id}" />\n`;
   });
+  // Single composite parent object: all mesh objects are components so their
+  // absolute coordinates are preserved unchanged — z-stacking (color layers) is
+  // maintained exactly because no transform is applied (identity = keep coords).
+  const parentId = parts.length + 2;
+  let components = '';
+  parts.forEach((_, i) => { components += `   <component objectid="${i + 2}" />\n`; });
+  objects += `  <object id="${parentId}" name="ukibori" type="model">\n   <components>\n${components}  </components>\n  </object>\n`;
   const model = `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
  <resources>
@@ -589,17 +595,21 @@ function build3MF(parts) {
 ${bases}  </basematerials>
 ${objects} </resources>
  <build>
-${items} </build>
+  <item objectid="${parentId}" />
+ </build>
 </model>
 `;
   // OrcaSlicer / Bambu Studio multicolor: they color/print by per-object filament
   // (extruder), stored in their own config files — they do NOT apply a generic
   // 3MF's basematerials colors. Group parts by color -> one filament each, assign
-  // each object its extruder, and write the filament colors so the design's
-  // colors come through on import.
-  let objCfg = '';
-  parts.forEach((part, i) => { objCfg += `  <object id="${i + 2}">\n   <metadata key="extruder" value="${extruderOf.get(partHex6[i])}"/>\n  </object>\n`; });
-  const modelSettings = `<?xml version="1.0" encoding="UTF-8"?>\n<config>\n${objCfg}</config>\n`;
+  // each part its extruder under the parent object entry, so the slicer sees a
+  // single composite object with per-part filament assignments.
+  let partsCfg = '';
+  parts.forEach((part, i) => {
+    const safeName = String(part.name || ('part-' + i)).replace(/[<>&"]/g, '');
+    partsCfg += `   <part id="${i + 2}" subtype="normal_part">\n    <metadata key="name" value="${safeName}"/>\n    <metadata key="extruder" value="${extruderOf.get(partHex6[i])}"/>\n   </part>\n`;
+  });
+  const modelSettings = `<?xml version="1.0" encoding="UTF-8"?>\n<config>\n  <object id="${parentId}">\n   <metadata key="name" value="ukibori"/>\n${partsCfg}  </object>\n</config>\n`;
   const projectSettings = JSON.stringify({
     filament_colour: colorList.slice(),
     filament_type: colorList.map(() => "PLA"),
