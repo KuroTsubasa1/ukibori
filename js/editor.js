@@ -902,7 +902,7 @@
 
   // Build a small thumbnail node for a layer row.
   function buildLayerThumb(el) {
-    if (el.type === "image" || (el.type === "image" && el.qrData)) {
+    if (el.type === "image" && !el.qrData) {
       var disp = processImageForDisplay(el);
       if (disp) {
         // Scale the processed display canvas into a 28×28 thumb canvas.
