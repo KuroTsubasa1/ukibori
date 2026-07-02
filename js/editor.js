@@ -339,7 +339,7 @@
     var isColorLayers = el && el.type === 'image' && el._img &&
       ((el.depth && el.depth.mode) || 'solid') === 'colorLayers';
     field.hidden = !isColorLayers;
-    // Bündig toggle shares the palette's visibility group (colorLayers only).
+    // Farbschichten (AMS) toggle shares the palette's visibility group (colorLayers only).
     var flushField = document.getElementById('advFlushField');
     if (flushField) flushField.hidden = !isColorLayers;
     if (!isColorLayers) { cont.innerHTML = ''; return; }
@@ -1821,7 +1821,7 @@
     var badge = document.getElementById("advMinIslandVal"); if (badge) badge.textContent = Math.round(v);
   }, { invalidate: true });
 
-  // Bündig (flush): all colorLayers colors at the same height. No {invalidate} —
+  // Farbschichten (AMS): stacked height bands, one per color. No {invalidate} —
   // 2D colors are unchanged; withSelected already triggers the 3D rebuild.
   bindElementField("advFlush", "change", function (el, node) {
     el.depth.flush = node.checked;

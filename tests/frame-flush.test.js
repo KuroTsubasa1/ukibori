@@ -178,15 +178,18 @@
     assertClose(tops[1], 3.8, 1e-6, "rank-1 color at T + 2*step");
   });
 
-  test("flush: on — both colorLayers prisms span exactly [T, T+step]", async () => {
+  test("flush: on — two colorLayers colors yield two stacked height bands (dark bottom, light top)", async () => {
+    // T13: flush now means height-band decomposition. Two colors -> two bands stacked.
     const parts = buildParts(await flushDoc(true));
-    const pr = parts.filter(p => p.name.indexOf("erhaben") === 0);
-    assertEqual(pr.length, 2, "two raised color prisms");
-    for (const p of pr) {
-      const zb = zbounds(p.facets);
-      assertClose(zb.mn, 3, 1e-6, "prism bottom at T");
-      assertClose(zb.mx, 3.4, 1e-6, "prism top at T + step (flush)");
-    }
+    const pr = parts.filter(p => p.name.indexOf("farbschicht") === 0);
+    assertEqual(pr.length, 2, "two farbschicht band parts");
+    const zbs = pr.map(p => zbounds(p.facets)).sort((a, b) => a.mn - b.mn);
+    // Band 1 (dark, bottom): [T, T+step] = [3, 3.4]
+    assertClose(zbs[0].mn, 3, 1e-6, "band 1 bottom at T");
+    assertClose(zbs[0].mx, 3.4, 1e-6, "band 1 top at T + step");
+    // Band 2 (light, top): [T+step, T+2*step] = [3.4, 3.8]
+    assertClose(zbs[1].mn, 3.4, 1e-6, "band 2 bottom at T + step");
+    assertClose(zbs[1].mx, 3.8, 1e-6, "band 2 top at T + 2*step");
   });
 
   test("flush: parity — flush absent deep-equals flush:false", async () => {

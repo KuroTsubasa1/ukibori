@@ -497,10 +497,11 @@
 
   // Raised element prisms: for depth.direction==='raised' elements, extrude their
   // colored regions UP from the base top face. Base plate is built separately.
-  // Height: depth.heightMm for solid/text; (rank+1)*step per color for colorLayers —
-  // unless depth.flush (Bündig): then every color gets step (one flat surface).
-  // Uses the shared composeDesignV2 rasterizer; a raised "colored stamp" that should
-  // keep bright pixels uses a high depth.threshold (256 => alpha-only).
+  // Height: depth.heightMm for solid/text; (rank+1)*step per color for colorLayers.
+  // depth.flush===true (Farbschichten/AMS): stacked height bands instead of side-by-side
+  // prisms — each reduced color occupies its own z-range [T+(k-1)*step, T+k*step], ordered
+  // dark->light bottom->top. Top face of every pixel = its own color. Enables >4 colors
+  // with AMS (one filament swap per band boundary). Non-flush + solid/text: UNCHANGED.
   // band: optional Rand-Rahmen mask; band cells are skipped (ring wins).
   function buildRaisedParts(doc, footprintArg, compArg, gridArg, band) {
     const grid = gridArg || gridForBody(doc.body, doc.resolution);
@@ -524,6 +525,9 @@
       return Math.max((el.depth && el.depth.heightMm) || 0, layerH);
     };
 
+    // Luminance of a #RRGGBB hex string (0-255 scale, BT.601).
+    const hexLum = (hex) => { const c = window.hexToRgb(hex); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
+
     const groups = new Map(); // "ei|hex" -> {ei, hex, set}
     for (let i = 0; i < cols * rows; i++) {
       const ei = comp.owner[i];
@@ -535,12 +539,55 @@
       let g = groups.get(key); if (!g) groups.set(key, g = { ei, hex, set: new Uint8Array(cols * rows) });
       g.set[i] = 1;
     }
+
     const parts = []; let pn = 0;
+
+    // Partition groups by element index.
+    const byElem = new Map(); // ei -> [{hex, set}]
     for (const g of groups.values()) {
-      const h = heightForElemColor(doc.elements[g.ei], g.hex);
-      const facets = tracedFacets((c, r) => g.set[idx(c, r)] === 1, h, T);
-      if (facets.length) parts.push({ name: "erhaben-" + (++pn), color: window.hexToRgb(g.hex), facets });
+      let arr = byElem.get(g.ei); if (!arr) byElem.set(g.ei, arr = []);
+      arr.push({ hex: g.hex, set: g.set });
     }
+
+    for (const [ei, colorGroups] of byElem) {
+      const el = doc.elements[ei];
+      const isFlushColorLayers = el.depth && el.depth.mode === "colorLayers" && el.depth.flush === true;
+
+      if (isFlushColorLayers) {
+        // Height-band path (T13 Farbschichten/AMS): sort colors dark->light, emit N stacked slabs.
+        // Band k (1-indexed, 0-based loop): footprint = union of sets for ranks k+1..N,
+        // z0 = T + k*step, thickness = step. Nested footprints shrink upward.
+        // Top face of each pixel shows its own color (highest band it belongs to).
+        const sorted = colorGroups.slice().sort((a, b) => hexLum(a.hex) - hexLum(b.hex)); // rank 1=darkest
+        const N = sorted.length;
+        const n = cols * rows;
+        // Precompute cumulative union masks from top (rank N) down to rank 1.
+        // unionFromRank[k] = pixels belonging to colors at ranks k+1..N (0-indexed: k=0 is rank 1).
+        const unionFromRank = new Array(N);
+        unionFromRank[N - 1] = sorted[N - 1].set; // rank N: only the lightest color's set
+        for (let k = N - 2; k >= 0; k--) {
+          const u = new Uint8Array(n);
+          const src = unionFromRank[k + 1];
+          const own = sorted[k].set;
+          for (let i = 0; i < n; i++) u[i] = own[i] | src[i];
+          unionFromRank[k] = u;
+        }
+        for (let k = 0; k < N; k++) {
+          const bandSet = unionFromRank[k];
+          const z0 = T + k * step;
+          const facets = tracedFacets((c, r) => bandSet[idx(c, r)] === 1, step, z0);
+          if (facets.length) parts.push({ name: "farbschicht-" + (ei + 1) + "-" + (k + 1), color: window.hexToRgb(sorted[k].hex), facets });
+        }
+      } else {
+        // Path 2 — existing per-color prism logic (non-flush or non-colorLayers). UNCHANGED.
+        for (const g of colorGroups) {
+          const h = heightForElemColor(el, g.hex);
+          const facets = tracedFacets((c, r) => g.set[idx(c, r)] === 1, h, T);
+          if (facets.length) parts.push({ name: "erhaben-" + (++pn), color: window.hexToRgb(g.hex), facets });
+        }
+      }
+    }
+
     return parts;
   }
 
