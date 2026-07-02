@@ -82,9 +82,11 @@
   // grid: optional {x0,y0,pitch} for expanded-domain mapping; default = body-box.
   function __drawElement(el, doc, cols, rows, grid) {
     // Map element mm coordinates to canvas pixels.
-    // Default: sx=cols/W (body-box origin). With grid: origin is shifted by x0/y0.
-    const pitch = grid ? grid.pitch : doc.body.widthMm / cols;
-    const sx = 1 / pitch, sy = 1 / pitch;
+    // Default (no grid): per-axis body-box mapping — byte-identical to the
+    // pre-domain code (sx=cols/W, sy=rows/H). With grid (expanded domain):
+    // uniform square-pitch mapping, origin shifted by x0/y0.
+    const sx = grid ? 1 / grid.pitch : cols / doc.body.widthMm;
+    const sy = grid ? 1 / grid.pitch : rows / doc.body.heightMm;
     const ox = grid ? -grid.x0 * sx : 0;
     const oy = grid ? -grid.y0 * sy : 0;
     const cv = document.createElement("canvas"); cv.width = cols; cv.height = rows;
