@@ -334,3 +334,24 @@ body:not(.bookmark-mode) #bmWorkspace { display: none; }
 #editor #preview{flex:1;position:relative}
 #editor #preview .view-toggle{position:absolute;top:6px;right:6px;z-index:1}
 #canvas2d,#preview3dCanvas{max-width:100%;height:auto;background:#fafafa;border:1px solid #ddd}
+
+/* === Advanced panel (Task 4b) === */
+#sidebarAdvanced { overflow: hidden; }
+.adv-scroll { overflow-y: auto; flex: 1; min-height: 0; padding: 0 14px 12px; }
+.adv-section { padding: 0 0 4px; }
+.adv-field { display: flex; flex-direction: column; gap: 4px; }
+.adv-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+.adv-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.adv-num-full { width: 100%; }
+.adv-seg-full { width: 100%; }
+.adv-layers-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.adv-layers-list li { display: flex; align-items: center; gap: 5px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; font-size: 12.5px; }
+.adv-layers-list li.adv-sel { border-color: var(--accent); background: var(--accent-weak); }
+.adv-layers-list li.adv-hidden { opacity: 0.45; }
+.adv-layers-list .adv-lname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adv-layers-list .adv-lbtn { background: none; border: none; color: inherit; cursor: pointer; opacity: .65; padding: 0 3px; font-size: 12px; line-height: 1; }
+.adv-layers-list .adv-lbtn:hover { opacity: 1; }
+.acc { border-top: 1px solid var(--line); }
+.acc:first-child { border-top: 0; }
+.acc > summary { padding: 11px 0; }
+.acc-body { gap: 10px; }

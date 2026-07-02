@@ -77,7 +77,118 @@
       </div>
     </div>
   </aside>
-  <aside id="sidebarAdvanced" class="sidebar" hidden><!-- Advanced controls (Task 4) --></aside>
+  <aside id="sidebarAdvanced" class="sidebar" hidden>
+    <!-- Advanced controls (Task 4b) -->
+    <div class="adv-scroll">
+
+      <!-- 1. Umwandlung (Convert — image threshold/invert/numColors) -->
+      <details class="acc" id="accUmwandlung" open>
+        <summary>Umwandlung</summary>
+        <div class="acc-body adv-section">
+          <div class="adv-field">
+            <label for="advThreshold" class="adv-label">Schwellwert (0–255)</label>
+            <input type="range" id="advThreshold" min="0" max="255" step="1" value="128">
+            <span class="badge" id="advThresholdVal">128</span>
+          </div>
+          <div class="adv-field">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="advInvert"> Invertieren
+            </label>
+          </div>
+          <div class="adv-field">
+            <label for="advNumColors" class="adv-label">Anzahl Farben</label>
+            <input type="number" id="advNumColors" class="sp-num" min="2" max="16" step="1" value="8">
+          </div>
+        </div>
+      </details>
+
+      <!-- 2. Tiefenmodus (Depth mode — per element) -->
+      <details class="acc" id="accTiefenmodus" open>
+        <summary>Tiefenmodus</summary>
+        <div class="acc-body adv-section">
+          <div id="modeSeg" class="seg-group seg-sm adv-seg-full">
+            <button type="button" id="modeSolid" class="seg seg-active" style="flex:1">Voll</button>
+            <button type="button" id="modeColorLayers" class="seg" style="flex:1">Farbebenen</button>
+            <button type="button" id="modeHeightmap" class="seg" style="flex:1">Höhenrelief</button>
+          </div>
+        </div>
+      </details>
+
+      <!-- 3. Ebenen (Layers list) -->
+      <details class="acc" id="accEbenen" open>
+        <summary>Ebenen</summary>
+        <div class="acc-body adv-section">
+          <ul id="advLayers" class="adv-layers-list"></ul>
+          <p id="advLayersEmpty" class="hint">Keine Elemente vorhanden.</p>
+        </div>
+      </details>
+
+      <!-- 4. Element (Selected-element position/size/color/cutout) -->
+      <details class="acc" id="accElement" open>
+        <summary>Element</summary>
+        <div class="acc-body adv-section">
+          <div class="adv-field">
+            <label for="advColor" class="adv-label">Farbe</label>
+            <input type="color" id="advColor" value="#ffffff">
+          </div>
+          <div class="adv-two-col">
+            <div class="adv-field">
+              <label for="advCx" class="adv-label">X (mm)</label>
+              <input type="number" id="advCx" class="sp-num adv-num-full" step="0.5" value="25">
+            </div>
+            <div class="adv-field">
+              <label for="advCy" class="adv-label">Y (mm)</label>
+              <input type="number" id="advCy" class="sp-num adv-num-full" step="0.5" value="75">
+            </div>
+          </div>
+          <div class="adv-two-col">
+            <div class="adv-field">
+              <label for="advW" class="adv-label">Breite (mm)</label>
+              <input type="number" id="advW" class="sp-num adv-num-full" step="0.5" min="0.5" value="30">
+            </div>
+            <div class="adv-field">
+              <label for="advH" class="adv-label">Höhe (mm)</label>
+              <input type="number" id="advH" class="sp-num adv-num-full" step="0.5" min="0.5" value="30">
+            </div>
+          </div>
+          <div class="adv-field">
+            <label for="advRot" class="adv-label">Drehung (°)</label>
+            <input type="range" id="advRot" min="-180" max="180" step="1" value="0">
+            <span class="badge" id="advRotVal">0°</span>
+          </div>
+          <div class="adv-field">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="advCutout"> Als Loch ausschneiden
+            </label>
+          </div>
+        </div>
+      </details>
+
+      <!-- 5. 3D / Export (doc-level detail params) -->
+      <details class="acc" id="acc3d" open>
+        <summary>3D / Export</summary>
+        <div class="acc-body adv-section">
+          <div class="adv-field">
+            <label for="advThickness" class="adv-label">Dicke (mm)</label>
+            <input type="number" id="advThickness" class="sp-num adv-num-full" step="0.5" min="0.5" value="3">
+          </div>
+          <div class="adv-field">
+            <label for="advLayerHeight" class="adv-label">Schichthöhe (mm)</label>
+            <input type="number" id="advLayerHeight" class="sp-num adv-num-full" step="0.01" min="0.01" value="0.2">
+          </div>
+          <div class="adv-field">
+            <label for="advResolution" class="adv-label">Auflösung</label>
+            <input type="number" id="advResolution" class="sp-num adv-num-full" step="64" min="64" value="1024">
+          </div>
+          <div class="adv-field">
+            <label for="advColorStep" class="adv-label">Farbschichten</label>
+            <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="2">
+          </div>
+        </div>
+      </details>
+
+    </div><!-- /adv-scroll -->
+  </aside>
   <section id="preview">
     <div class="view-toggle"><button id="view2dBtn" class="seg seg-active">2D</button><button id="view3dBtn" class="seg">3D</button></div>
     <canvas id="canvas2d" width="800" height="1000"></canvas>

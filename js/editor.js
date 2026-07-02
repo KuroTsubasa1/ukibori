@@ -116,7 +116,7 @@
       ctx.fillStyle = body.baseColor || "#000000"; ctx.fill();
       // Clip elements inside the body outline.
       ctx.save(); bodyPath(ctx, s); ctx.clip();
-      for (const el of doc.elements) drawElement(ctx, el, s);
+      for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
       ctx.restore();
       // Outline.
       bodyPath(ctx, s); ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
@@ -129,14 +129,14 @@
       // Clip to circle.
       ctx.save();
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
-      for (const el of doc.elements) drawElement(ctx, el, s);
+      for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
       ctx.restore();
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
     } else {
       // free shape: draw elements only (no plate frame in 2D).
       // NOTE: true free-shape plate outline only shown in 3D/export (2D simplification).
-      for (const el of doc.elements) drawElement(ctx, el, s);
+      for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
     }
 
     // Mount guide: dashed circle if mount is not 'none'.
@@ -190,7 +190,7 @@
     const scaleC = cv.width / rect.width;
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
     const hit = hitTest(px, py);
-    if (!hit) { state.selectedId = null; render2D(); return; }
+    if (!hit) { state.selectedId = null; refreshAdvancedForSelection(); renderAdvancedLayers(); render2D(); return; }
     state.selectedId = hit.id;
     const el = doc.elements.find(el => el.id === hit.id);
     drag = {
@@ -198,6 +198,8 @@
       start: { cx: el.cxMm, cy: el.cyMm, w: el.wMm, h: el.hMm, rot: el.rotationDeg || 0 },
     };
     cv.setPointerCapture(e.pointerId);
+    refreshAdvancedForSelection();
+    renderAdvancedLayers();
     render2D();
   });
 
@@ -226,6 +228,7 @@
   function endDrag() {
     if (!drag) return;
     drag = null;
+    refreshAdvancedForSelection();
     scheduleRebuild3D();
     render2D();
   }
@@ -249,6 +252,8 @@
       el.depth.direction = defaultDirection;
       doc.elements.push(el);
       state.selectedId = el.id;
+      refreshAdvancedForSelection();
+      renderAdvancedLayers();
       scheduleRebuild3D();
       render2D();
     };
@@ -473,6 +478,8 @@
     el.depth.direction = defaultDirection;
     doc.elements.push(el);
     state.selectedId = el.id;
+    refreshAdvancedForSelection();
+    renderAdvancedLayers();
     render2D();
     scheduleRebuild3D();
   });
@@ -514,6 +521,8 @@
       el.depth.threshold = 256;
       doc.elements.push(el);
       state.selectedId = el.id;
+      refreshAdvancedForSelection();
+      renderAdvancedLayers();
       render2D();
       scheduleRebuild3D();
     };
@@ -535,16 +544,314 @@
     setSegActive("depthSeg", defaultDirection === "raised" ? "depthRaised" : "depthEngraved");
   }());
 
+  // ---- Advanced panel (Task 4b) ----
+
+  // -- Layers list --
+  function renderAdvancedLayers() {
+    var list = document.getElementById("advLayers");
+    var empty = document.getElementById("advLayersEmpty");
+    if (!list) return;
+    list.innerHTML = "";
+    var els = doc.elements;
+    if (!els || els.length === 0) {
+      if (empty) empty.hidden = false;
+      return;
+    }
+    if (empty) empty.hidden = true;
+    // Render back-to-front (last index = topmost layer)
+    for (var idx = els.length - 1; idx >= 0; idx--) {
+      (function (i) {
+        var el = els[i];
+        var li = document.createElement("li");
+        if (el.id === state.selectedId) li.classList.add("adv-sel");
+        if (el._hidden) li.classList.add("adv-hidden");
+
+        var nameSpan = document.createElement("span");
+        nameSpan.className = "adv-lname";
+        var typeLabel = el.type === "text" ? "Text" : el.type === "image" ? "Bild" : el.type === "qr" ? "QR" : el.type;
+        nameSpan.textContent = typeLabel + " " + (i + 1);
+        if (el.type === "text" && el.text) nameSpan.textContent = "„" + el.text + "“";
+
+        var vis = document.createElement("button");
+        vis.className = "adv-lbtn";
+        vis.textContent = el._hidden ? "🙈" : "👁";
+        vis.title = el._hidden ? "Einblenden" : "Ausblenden";
+
+        var up = document.createElement("button");
+        up.className = "adv-lbtn";
+        up.textContent = "▲";
+        up.title = "Nach oben";
+
+        var dn = document.createElement("button");
+        dn.className = "adv-lbtn";
+        dn.textContent = "▼";
+        dn.title = "Nach unten";
+
+        var del = document.createElement("button");
+        del.className = "adv-lbtn";
+        del.textContent = "🗑";
+        del.title = "Löschen";
+
+        li.append(nameSpan, vis, up, dn, del);
+
+        li.addEventListener("click", function (e) {
+          if (e.target.classList.contains("adv-lbtn")) return;
+          state.selectedId = el.id;
+          refreshAdvancedForSelection();
+          renderAdvancedLayers();
+          render2D();
+        });
+
+        vis.addEventListener("click", function (e) {
+          e.stopPropagation();
+          el._hidden = !el._hidden;
+          renderAdvancedLayers();
+          render2D();
+          scheduleRebuild3D();
+        });
+
+        up.addEventListener("click", function (e) {
+          e.stopPropagation();
+          var elsCopy = doc.elements;
+          if (i < elsCopy.length - 1) {
+            var tmp = elsCopy[i]; elsCopy[i] = elsCopy[i + 1]; elsCopy[i + 1] = tmp;
+            renderAdvancedLayers();
+            render2D();
+            scheduleRebuild3D();
+          }
+        });
+
+        dn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          if (i > 0) {
+            var tmp = doc.elements[i]; doc.elements[i] = doc.elements[i - 1]; doc.elements[i - 1] = tmp;
+            renderAdvancedLayers();
+            render2D();
+            scheduleRebuild3D();
+          }
+        });
+
+        del.addEventListener("click", function (e) {
+          e.stopPropagation();
+          doc.elements.splice(i, 1);
+          if (state.selectedId === el.id) state.selectedId = null;
+          refreshAdvancedForSelection();
+          renderAdvancedLayers();
+          render2D();
+          scheduleRebuild3D();
+        });
+
+        list.appendChild(li);
+      }(idx));
+    }
+  }
+
+  // -- Selection refresh hook --
+  function refreshAdvancedForSelection() {
+    var adv = document.getElementById("sidebarAdvanced");
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; }) || null;
+    var disabled = !el;
+
+    var threshold = document.getElementById("advThreshold");
+    var thresholdVal = document.getElementById("advThresholdVal");
+    var invert = document.getElementById("advInvert");
+    var numColors = document.getElementById("advNumColors");
+    if (threshold) { threshold.disabled = disabled; threshold.value = el ? (el.depth.threshold != null ? el.depth.threshold : 128) : 128; }
+    if (thresholdVal) thresholdVal.textContent = el ? (el.depth.threshold != null ? el.depth.threshold : 128) : 128;
+    if (invert) { invert.disabled = disabled; invert.checked = el ? !!el.depth.invert : false; }
+    if (numColors) { numColors.disabled = disabled; numColors.value = el ? (el.depth.reduce && el.depth.reduce.numColors != null ? el.depth.reduce.numColors : 8) : 8; }
+
+    var modeSolid = document.getElementById("modeSolid");
+    var modeColorLayers = document.getElementById("modeColorLayers");
+    var modeHeightmap = document.getElementById("modeHeightmap");
+    if (modeSolid) modeSolid.disabled = disabled;
+    if (modeColorLayers) modeColorLayers.disabled = disabled;
+    if (modeHeightmap) modeHeightmap.disabled = disabled;
+    if (el) {
+      var m = el.depth.mode || "solid";
+      if (modeSolid) modeSolid.classList.toggle("seg-active", m === "solid");
+      if (modeColorLayers) modeColorLayers.classList.toggle("seg-active", m === "colorLayers");
+      if (modeHeightmap) modeHeightmap.classList.toggle("seg-active", m === "heightmap");
+    } else {
+      if (modeSolid) modeSolid.classList.add("seg-active");
+      if (modeColorLayers) modeColorLayers.classList.remove("seg-active");
+      if (modeHeightmap) modeHeightmap.classList.remove("seg-active");
+    }
+
+    var advColor = document.getElementById("advColor");
+    var advCx = document.getElementById("advCx");
+    var advCy = document.getElementById("advCy");
+    var advW = document.getElementById("advW");
+    var advH = document.getElementById("advH");
+    var advRot = document.getElementById("advRot");
+    var advRotVal = document.getElementById("advRotVal");
+    var advCutout = document.getElementById("advCutout");
+    [advColor, advCx, advCy, advW, advH, advRot, advCutout].forEach(function (inp) { if (inp) inp.disabled = disabled; });
+    if (el) {
+      if (advColor) advColor.value = el.color || "#ffffff";
+      if (advCx) advCx.value = (el.cxMm != null ? el.cxMm : 25).toFixed(1);
+      if (advCy) advCy.value = (el.cyMm != null ? el.cyMm : 75).toFixed(1);
+      if (advW) advW.value = (el.wMm != null ? el.wMm : 30).toFixed(1);
+      if (advH) advH.value = (el.hMm != null ? el.hMm : 30).toFixed(1);
+      if (advRot) advRot.value = Math.round(el.rotationDeg || 0);
+      if (advRotVal) advRotVal.textContent = Math.round(el.rotationDeg || 0) + "°";
+      if (advCutout) advCutout.checked = !!el.cutout;
+    }
+  }
+
+  // -- Depth mode buttons --
+  function applyDepthMode(mode) {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    el.depth.mode = mode;
+    var modeSolid = document.getElementById("modeSolid");
+    var modeColorLayers = document.getElementById("modeColorLayers");
+    var modeHeightmap = document.getElementById("modeHeightmap");
+    if (modeSolid) modeSolid.classList.toggle("seg-active", mode === "solid");
+    if (modeColorLayers) modeColorLayers.classList.toggle("seg-active", mode === "colorLayers");
+    if (modeHeightmap) modeHeightmap.classList.toggle("seg-active", mode === "heightmap");
+    render2D();
+    scheduleRebuild3D();
+  }
+  document.getElementById("modeSolid").addEventListener("click", function () { applyDepthMode("solid"); });
+  document.getElementById("modeColorLayers").addEventListener("click", function () { applyDepthMode("colorLayers"); });
+  document.getElementById("modeHeightmap").addEventListener("click", function () { applyDepthMode("heightmap"); });
+
+  // -- Umwandlung inputs --
+  document.getElementById("advThreshold").addEventListener("input", function () {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    var v = Number(this.value);
+    el.depth.threshold = v;
+    var badge = document.getElementById("advThresholdVal");
+    if (badge) badge.textContent = v;
+    render2D();
+    scheduleRebuild3D();
+  });
+
+  document.getElementById("advInvert").addEventListener("change", function () {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    el.depth.invert = this.checked;
+    render2D();
+    scheduleRebuild3D();
+  });
+
+  document.getElementById("advNumColors").addEventListener("input", function () {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    var v = Number(this.value);
+    if (!isNaN(v) && v >= 2) {
+      el.depth.reduce.numColors = v;
+      scheduleRebuild3D();
+    }
+  });
+
+  // -- Element inputs --
+  document.getElementById("advColor").addEventListener("input", function () {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    el.color = this.value;
+    render2D();
+    scheduleRebuild3D();
+  });
+
+  document.getElementById("advCx").addEventListener("input", function () {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    var v = parseFloat(this.value);
+    if (!isNaN(v)) { el.cxMm = v; render2D(); scheduleRebuild3D(); }
+  });
+
+  document.getElementById("advCy").addEventListener("input", function () {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    var v = parseFloat(this.value);
+    if (!isNaN(v)) { el.cyMm = v; render2D(); scheduleRebuild3D(); }
+  });
+
+  document.getElementById("advW").addEventListener("input", function () {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    var v = parseFloat(this.value);
+    if (!isNaN(v) && v >= 0.5) { el.wMm = v; render2D(); scheduleRebuild3D(); }
+  });
+
+  document.getElementById("advH").addEventListener("input", function () {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    var v = parseFloat(this.value);
+    if (!isNaN(v) && v >= 0.5) { el.hMm = v; render2D(); scheduleRebuild3D(); }
+  });
+
+  document.getElementById("advRot").addEventListener("input", function () {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    var v = Number(this.value);
+    el.rotationDeg = v;
+    var badge = document.getElementById("advRotVal");
+    if (badge) badge.textContent = v + "°";
+    render2D();
+    scheduleRebuild3D();
+  });
+
+  document.getElementById("advCutout").addEventListener("change", function () {
+    var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
+    if (!el) return;
+    el.cutout = this.checked;
+    render2D();
+    scheduleRebuild3D();
+  });
+
+  // -- 3D / Export doc-level inputs --
+  document.getElementById("advThickness").addEventListener("input", function () {
+    var v = parseFloat(this.value);
+    if (!isNaN(v) && v >= 0.5) { doc.body.thicknessMm = v; scheduleRebuild3D(); }
+  });
+
+  document.getElementById("advLayerHeight").addEventListener("input", function () {
+    var v = parseFloat(this.value);
+    if (!isNaN(v) && v >= 0.01) { doc.body.layerHeightMm = v; scheduleRebuild3D(); }
+  });
+
+  document.getElementById("advResolution").addEventListener("input", function () {
+    var v = Number(this.value);
+    if (!isNaN(v) && v >= 64) { doc.resolution = v; scheduleRebuild3D(); }
+  });
+
+  document.getElementById("advColorStep").addEventListener("input", function () {
+    var v = Number(this.value);
+    if (!isNaN(v) && v >= 1) { doc.colorStepLayers = v; scheduleRebuild3D(); }
+  });
+
+  // -- Init Advanced panel doc-level values --
+  (function initAdvancedUI() {
+    var t = document.getElementById("advThickness");
+    if (t) t.value = doc.body.thicknessMm != null ? doc.body.thicknessMm : 3;
+    var lh = document.getElementById("advLayerHeight");
+    if (lh) lh.value = doc.body.layerHeightMm != null ? doc.body.layerHeightMm : 0.2;
+    var res = document.getElementById("advResolution");
+    if (res) res.value = doc.resolution != null ? doc.resolution : 1024;
+    var cs = document.getElementById("advColorStep");
+    if (cs) cs.value = doc.colorStepLayers != null ? doc.colorStepLayers : 2;
+    refreshAdvancedForSelection();
+    renderAdvancedLayers();
+  }());
+
   // ---- View toggle wiring (Task 1, preserved) ----
   document.getElementById("viewSimple").addEventListener("click", function () { setView("simple"); });
-  document.getElementById("viewAdvanced").addEventListener("click", function () { setView("advanced"); });
+  document.getElementById("viewAdvanced").addEventListener("click", function () {
+    setView("advanced");
+    refreshAdvancedForSelection();
+    renderAdvancedLayers();
+  });
   setView((function () { try { return localStorage.getItem(VIEW_KEY) || "simple"; } catch (e) { return "simple"; } })());
 
   // Initial render.
   render2D();
 
   // Public interface. Expose state so tests can inspect/mutate selection.
-  window.editor = { doc, setView, getView, render2D };
+  window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers };
   // Expose for Playwright smoke tests.
   window.__editorState = state;
   window.__editorHitTest = hitTest;
