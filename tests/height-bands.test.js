@@ -55,7 +55,7 @@
     const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
     el.depth.direction = "raised"; el.depth.mode = "colorLayers";
     el.depth.reduce = { method: "palette", numColors: numColors, levels: 4, remap: {}, order: [] };
-    el.depth.flush = true;
+    el.depth.colorLayerStyle = "bands"; // T14: bands mode (was depth.flush = true)
     el._img = img;
     return el;
   }
@@ -150,12 +150,12 @@
     }
   });
 
-  // ---- (e) parity: flush=false still produces stepped erhaben parts (unchanged) ----
-  test("height-bands (e): flush=false produces 'erhaben' prisms at stepped heights (parity)", async () => {
+  // ---- (e) parity: stepped style still produces stepped erhaben parts (unchanged) ----
+  test("height-bands (e): stepped style produces 'erhaben' prisms at stepped heights (parity)", async () => {
     const img = await twoColorImg(16, 16);
     const d = sqDoc();
     const el = makeFlushEl(img, 2);
-    el.depth.flush = false;
+    el.depth.colorLayerStyle = "stepped";
     d.elements = [el];
     const parts = buildParts(d);
     const pr = parts.filter(p => p.name.indexOf("erhaben") === 0);

@@ -237,6 +237,14 @@
     return ("#" + [r, g, b].map(x => x.toString(16).padStart(2, "0")).join("")).toUpperCase();
   }
 
+  // Resolve a colorLayers element's stacking style once, honoring the new
+  // depth.colorLayerStyle field and falling back to the legacy depth.flush
+  // (post-T13: flush=true meant bands). 'stepped' | 'flush' | 'bands'.
+  function colorStyleOf(el) {
+    const d = (el && el.depth) || {};
+    return d.colorLayerStyle || (d.flush ? "bands" : "stepped");
+  }
+
   // v2 analogue of bookmark-export __orderedNaturalHexes: a reduce-image element's
   // natural palette in the user's preferred order (el.depth.reduce.order first, then
   // any new colors). Reads el.depth.reduce (v1 read el.reduce).
@@ -275,9 +283,23 @@
     const baseUnder = (d) => T - recessOf(d) - floor;
 
     const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
+
+    // T14 dispatch: colorLayers elements with style 'flush' or 'bands' are handled by
+    // dedicated per-element passes below. Their pixels are EXCLUDED from the global
+    // stepped machinery so the stepped/solid/text path stays byte-identical (parity).
+    // (When no element is flush/bands, `special` is empty → nothing changes.)
+    const special = new Set(); // ei of colorLayers elements needing flush/bands treatment
+    doc.elements.forEach((el, ei) => {
+      if (el.type === "image" && el.depth && el.depth.mode === "colorLayers") {
+        const s = colorStyleOf(el);
+        if (s === "flush" || s === "bands") special.add(ei);
+      }
+    });
+    const isSpecial = (i) => special.has(comp.owner[i]);
+
     const ownerEff = new Map();
     for (let i = 0; i < cols * rows; i++) {
-      if (comp.isBase[i] || comp.cutout[i] || comp.owner[i] < 0 || inBand(i)) continue;
+      if (comp.isBase[i] || comp.cutout[i] || comp.owner[i] < 0 || inBand(i) || isSpecial(i)) continue;
       const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
       let s = ownerEff.get(comp.owner[i]); if (!s) ownerEff.set(comp.owner[i], s = new Set());
       s.add(hex);
@@ -301,19 +323,88 @@
     orderedColors.forEach((hex, rank) => depthByHex.set(hex, (rank + 1) * step));
     const depthFor = (hex) => depthByHex.get(hex) || step;
 
+    let cn = 0;
+    const addFloor = (member, hex, depthMm) => {
+      const facets = tracedFacets(member, floor, baseUnder(depthMm));
+      if (facets.length) colorParts.push({ name: "farbe-" + (++cn), color: window.hexToRgb(hex), facets });
+    };
+
+    // --- Stepped/solid/text color floors (global rank; region = exact-color pixels). ---
+    // Byte-identical to the pre-T14 path: same iteration order, same z0, same names.
     const groups = new Map();
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const i = idx(c, r);
-      if (comp.isBase[i] || comp.cutout[i] || inBand(i)) continue;
+      if (comp.isBase[i] || comp.cutout[i] || inBand(i) || isSpecial(i)) continue;
       const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
       let grp = groups.get(hex); if (!grp) groups.set(hex, grp = { hex, set: new Uint8Array(cols * rows) });
       grp.set[i] = 1;
     }
-    let cn = 0;
     for (const grp of groups.values()) {
-      const z0 = baseUnder(depthFor(grp.hex));
-      const facets = tracedFacets((c, r) => grp.set[idx(c, r)] === 1, floor, z0);
-      if (facets.length) colorParts.push({ name: "farbe-" + (++cn), color: window.hexToRgb(grp.hex), facets });
+      addFloor((c, r) => grp.set[idx(c, r)] === 1, grp.hex, depthFor(grp.hex));
+    }
+
+    // --- flush / bands color floors (per-element). ---
+    // effDepth[i] = the DEEPEST floor recess depth at pixel i (used for base-fill-behind).
+    // For special pixels it is set here; for stepped pixels it stays depthFor(hex) below.
+    const effDepth = new Float32Array(cols * rows);
+    for (const ei of special) {
+      const el = doc.elements[ei];
+      const style = colorStyleOf(el);
+      // Element's per-color ordered hexes (natural palette order, remap applied).
+      const remap = (el.depth.reduce && el.depth.reduce.remap) || {};
+      const elemHexes = __orderedNaturalHexesV2(el).map(nat => { const c = window.hexToRgb(remap[nat] || nat); return __hex(c[0], c[1], c[2]); });
+      // Restrict to hexes actually present in this element's pixels, preserving order.
+      const presentSets = new Map(); // hex -> Uint8Array
+      for (let i = 0; i < cols * rows; i++) {
+        if (comp.owner[i] !== ei || comp.isBase[i] || comp.cutout[i] || inBand(i)) continue;
+        const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
+        let set = presentSets.get(hex); if (!set) presentSets.set(hex, set = new Uint8Array(cols * rows));
+        set[i] = 1;
+      }
+      const orderedPresent = elemHexes.filter(h => presentSets.has(h));
+      for (const h of presentSets.keys()) if (orderedPresent.indexOf(h) === -1) orderedPresent.push(h);
+
+      if (style === "flush") {
+        // Every color of the element recessed to ONE depth (step) → one flat inlay level.
+        for (const hex of orderedPresent) {
+          const set = presentSets.get(hex);
+          addFloor((c, r) => set[idx(c, r)] === 1, hex, step);
+        }
+        for (let i = 0; i < cols * rows; i++) if (comp.owner[i] === ei && !comp.isBase[i] && !comp.cutout[i] && !inBand(i)) effDepth[i] = step;
+      } else {
+        // bands (AMS), engraved = downward mirror of raised bands. Sort colors by
+        // luminance ASCENDING (rank 1 = darkest). region(rank k) = union of ranks <= k,
+        // depth = k*step. So each pixel's OWN color is the SHALLOWEST floor covering it
+        // (visible from the top); deeper floors are the lighter colors nested beneath.
+        // Emit DEEPEST first (largest region) so shallower nested floors sit inside.
+        const lum = (hex) => { const c = window.hexToRgb(hex); return 0.299*c[0] + 0.587*c[1] + 0.114*c[2]; };
+        const sorted = orderedPresent.slice().sort((a, b) => lum(a) - lum(b)); // rank1=darkest
+        const N = sorted.length;
+        const n = cols * rows;
+        // cumUpTo[k] = union of pixels of ranks 1..k+1 (0-indexed k). cumUpTo[N-1] = all.
+        const cumUpTo = new Array(N);
+        cumUpTo[0] = presentSets.get(sorted[0]);
+        for (let k = 1; k < N; k++) {
+          const u = new Uint8Array(n), prev = cumUpTo[k - 1], own = presentSets.get(sorted[k]);
+          for (let i = 0; i < n; i++) u[i] = prev[i] | own[i];
+          cumUpTo[k] = u;
+        }
+        // Deepest first: rank N (k=N-1) has depth N*step and the largest region (all).
+        for (let k = N - 1; k >= 0; k--) {
+          const region = cumUpTo[k];
+          addFloor((c, r) => region[idx(c, r)] === 1, sorted[k], (k + 1) * step);
+        }
+        // Per-pixel deepest recess = its own rank's depth: pixel of rank j is covered by
+        // floors k>=j (region ranks<=k), deepest = k=N-1... but the SLAB at depth (k+1)*step
+        // only extends over region cumUpTo[k]; the base beneath a pixel must reach the
+        // deepest floor covering it. A rank-j pixel (0-indexed jr) is in cumUpTo[k] for all
+        // k>=jr, so the deepest floor over it is k=N-1 → depth N*step. Fill base to there.
+        const rankOf = new Map(); sorted.forEach((h, jr) => rankOf.set(h, jr));
+        for (let i = 0; i < cols * rows; i++) {
+          if (comp.owner[i] !== ei || comp.isBase[i] || comp.cutout[i] || inBand(i)) continue;
+          effDepth[i] = N * step; // deepest floor (rank N) covers all element pixels
+        }
+      }
     }
 
     const baseAdd = (member, thickness, z0) => {
@@ -327,7 +418,10 @@
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const i = idx(c, r);
       if (comp.cutout[i] || comp.isBase[i] || inBand(i)) continue;
-      const h = baseUnder(depthFor(__hex(comp.r[i], comp.g[i], comp.b[i])));
+      // Fill the base beneath the DEEPEST floor at this pixel down to minBase.
+      // Stepped/solid/text: depthFor(hex). flush/bands: effDepth[i] set above.
+      const d = isSpecial(i) ? effDepth[i] : depthFor(__hex(comp.r[i], comp.g[i], comp.b[i]));
+      const h = baseUnder(d);
       if (h - minBase <= 1e-6) continue;
       const key = h.toFixed(4);
       let set = behind.get(key); if (!set) behind.set(key, set = { h, m: new Uint8Array(cols * rows) });
@@ -516,7 +610,9 @@
 
     const heightForElemColor = (el, hex) => {
       if (el.depth && el.depth.mode === "colorLayers") {
-        if (el.depth.flush) return step; // Bündig: all colors span [T, T+step]
+        // flush (Eine Fläche): every color spans [T, T+step] → one flat surface.
+        if (colorStyleOf(el) === "flush") return step;
+        // stepped: rank-height relief, height (rank+1)*step.
         const remap = (el.depth.reduce && el.depth.reduce.remap) || {};
         const seq = __orderedNaturalHexesV2(el).map(nat => { const c = window.hexToRgb(remap[nat] || nat); return __hex(c[0], c[1], c[2]); });
         const rank = seq.indexOf(hex);
@@ -551,10 +647,10 @@
 
     for (const [ei, colorGroups] of byElem) {
       const el = doc.elements[ei];
-      const isFlushColorLayers = el.depth && el.depth.mode === "colorLayers" && el.depth.flush === true;
+      const isBandsColorLayers = el.depth && el.depth.mode === "colorLayers" && colorStyleOf(el) === "bands";
 
-      if (isFlushColorLayers) {
-        // Height-band path (T13 Farbschichten/AMS): sort colors dark->light, emit N stacked slabs.
+      if (isBandsColorLayers) {
+        // Height-band path (AMS): sort colors dark->light, emit N stacked slabs.
         // Band k (1-indexed, 0-based loop): footprint = union of sets for ranks k+1..N,
         // z0 = T + k*step, thickness = step. Nested footprints shrink upward.
         // Top face of each pixel shows its own color (highest band it belongs to).

@@ -77,6 +77,13 @@
 
   // ---- Element-field helpers (DRY refactor) ----
 
+  // Resolve a colorLayers element's stacking style (mirror of the engine's colorStyleOf):
+  // new depth.colorLayerStyle wins; legacy depth.flush is the fallback (flush=true → bands).
+  function colorStyleOf(el) {
+    var d = (el && el.depth) || {};
+    return d.colorLayerStyle || (d.flush ? "bands" : "stepped");
+  }
+
   // Returns the currently selected element, or null.
   function selectedEl() {
     return doc.elements.find(function (e) { return e.id === state.selectedId; }) || null;
@@ -339,9 +346,9 @@
     var isColorLayers = el && el.type === 'image' && el._img &&
       ((el.depth && el.depth.mode) || 'solid') === 'colorLayers';
     field.hidden = !isColorLayers;
-    // Farbschichten (AMS) toggle shares the palette's visibility group (colorLayers only).
-    var flushField = document.getElementById('advFlushField');
-    if (flushField) flushField.hidden = !isColorLayers;
+    // Farb-Stapelung selector shares the palette's visibility group (colorLayers only).
+    var colorStyleField = document.getElementById('colorStyleField');
+    if (colorStyleField) colorStyleField.hidden = !isColorLayers;
     if (!isColorLayers) { cont.innerHTML = ''; return; }
     // Use the v1 shim to call __orderedNaturalHexes.
     var shim = __makeV1Shim(el);
@@ -1716,8 +1723,10 @@
       minIsland.value = el ? (el.depth.minIsland != null ? el.depth.minIsland : 0) : 0;
     }
     if (minIslandVal) minIslandVal.textContent = el ? (el.depth.minIsland != null ? el.depth.minIsland : 0) : 0;
-    var advFlush = document.getElementById("advFlush");
-    if (advFlush) { advFlush.disabled = disabled; advFlush.checked = el ? !!(el.depth && el.depth.flush) : false; }
+    // Farb-Stapelung: reflect the element's resolved style (new field, legacy flush fallback).
+    var colorStyle = el ? colorStyleOf(el) : "stepped";
+    setSegActive("colorStyleSeg", colorStyle === "flush" ? "colorFlush" : colorStyle === "bands" ? "colorBands" : "colorStepped");
+    ["colorStepped", "colorFlush", "colorBands"].forEach(function (id) { var b = document.getElementById(id); if (b) b.disabled = disabled; });
 
     var modeSolid = document.getElementById("modeSolid");
     var modeColorLayers = document.getElementById("modeColorLayers");
@@ -1821,11 +1830,26 @@
     var badge = document.getElementById("advMinIslandVal"); if (badge) badge.textContent = Math.round(v);
   }, { invalidate: true });
 
-  // Farbschichten (AMS): stacked height bands, one per color. No {invalidate} —
-  // 2D colors are unchanged; withSelected already triggers the 3D rebuild.
-  bindElementField("advFlush", "change", function (el, node) {
-    el.depth.flush = node.checked;
-  });
+  // Farb-Stapelung (color-layer stacking style): Gestuft / Eine Fläche / AMS.
+  // Mirrors the engine's colorStyleOf: new depth.colorLayerStyle wins, legacy flush is
+  // the fallback. Setting a style clears the legacy flush flag to keep the model clean.
+  // No {invalidate} — 2D colors are unchanged; withSelected triggers the 3D rebuild.
+  function setColorLayerStyle(style) {
+    withSelected(function (el) {
+      el.depth.colorLayerStyle = style;
+      delete el.depth.flush;
+    });
+    setSegActive("colorStyleSeg", style === "flush" ? "colorFlush" : style === "bands" ? "colorBands" : "colorStepped");
+    refreshAdvancedForSelection();
+  }
+  (function () {
+    var stepped = document.getElementById("colorStepped");
+    var flush = document.getElementById("colorFlush");
+    var bands = document.getElementById("colorBands");
+    if (stepped) stepped.addEventListener("click", function () { setColorLayerStyle("stepped"); });
+    if (flush) flush.addEventListener("click", function () { setColorLayerStyle("flush"); });
+    if (bands) bands.addEventListener("click", function () { setColorLayerStyle("bands"); });
+  })();
 
   // -- Element inputs --
   bindElementField("advColor", "input", function (el, node) {

@@ -154,8 +154,9 @@
     assert(maxDist <= 30 + 2 * pitch, "rand stays within circle radius (maxDist=" + maxDist.toFixed(3) + ")");
   });
 
-  // ---- (e) flush (Bündig) for raised colorLayers ----
-  async function flushDoc(flush) {
+  // ---- (e) colorLayerStyle for raised colorLayers (T14) ----
+  // style: "stepped" | "flush" | "bands" | "absent" (no style, no flush).
+  async function flushDoc(style) {
     const img = await twoColorImg(16, 16);
     const d = sqDoc();
     d.body.layerHeightMm = 0.2; d.colorStepLayers = 2; // step = 0.4
@@ -163,14 +164,15 @@
     el.depth.direction = "raised"; el.depth.mode = "colorLayers";
     el.depth.reduce = { method: "palette", numColors: 2, levels: 4, remap: {}, order: [] };
     el._img = img;
-    if (flush === "absent") delete el.depth.flush;
-    else el.depth.flush = flush;
+    delete el.depth.flush;
+    if (style === "absent") delete el.depth.colorLayerStyle;
+    else el.depth.colorLayerStyle = style;
     d.elements = [el];
     return d;
   }
 
-  test("flush: off — two colorLayers prisms get DIFFERENT stacked heights", async () => {
-    const parts = buildParts(await flushDoc(false));
+  test("style stepped — two colorLayers prisms get DIFFERENT stacked heights", async () => {
+    const parts = buildParts(await flushDoc("stepped"));
     const pr = parts.filter(p => p.name.indexOf("erhaben") === 0);
     assertEqual(pr.length, 2, "two raised color prisms");
     const tops = pr.map(p => zbounds(p.facets).mx).sort((x, y) => x - y);
@@ -178,59 +180,70 @@
     assertClose(tops[1], 3.8, 1e-6, "rank-1 color at T + 2*step");
   });
 
-  test("flush: on — two colorLayers colors yield two stacked height bands (dark bottom, light top)", async () => {
-    // T13: flush now means height-band decomposition. Two colors -> two bands stacked.
-    const parts = buildParts(await flushDoc(true));
+  test("style flush (Eine Fläche) — both colors span [T, T+step] (one flat surface, RESTORED)", async () => {
+    // T14: flush is now the RESTORED same-height mode (all colors one height), NOT bands.
+    const parts = buildParts(await flushDoc("flush"));
+    const pr = parts.filter(p => p.name.indexOf("erhaben") === 0);
+    assertEqual(pr.length, 2, "two erhaben prisms (side by side)");
+    for (const p of pr) {
+      const zb = zbounds(p.facets);
+      assertClose(zb.mn, 3, 1e-6, "flush prism bottom at T");
+      assertClose(zb.mx, 3.4, 1e-6, "flush prism top at T + step (same height)");
+    }
+    assert(!parts.some(p => p.name.indexOf("farbschicht") === 0), "flush emits no farbschicht bands");
+  });
+
+  test("style bands (AMS) — two colors yield two stacked height bands (dark bottom, light top)", async () => {
+    const parts = buildParts(await flushDoc("bands"));
     const pr = parts.filter(p => p.name.indexOf("farbschicht") === 0);
     assertEqual(pr.length, 2, "two farbschicht band parts");
     const zbs = pr.map(p => zbounds(p.facets)).sort((a, b) => a.mn - b.mn);
-    // Band 1 (dark, bottom): [T, T+step] = [3, 3.4]
     assertClose(zbs[0].mn, 3, 1e-6, "band 1 bottom at T");
     assertClose(zbs[0].mx, 3.4, 1e-6, "band 1 top at T + step");
-    // Band 2 (light, top): [T+step, T+2*step] = [3.4, 3.8]
     assertClose(zbs[1].mn, 3.4, 1e-6, "band 2 bottom at T + step");
     assertClose(zbs[1].mx, 3.8, 1e-6, "band 2 top at T + 2*step");
   });
 
-  test("flush: parity — flush absent deep-equals flush:false", async () => {
-    const a = buildParts(await flushDoc(false));
+  test("style parity — style absent deep-equals colorLayerStyle:'stepped'", async () => {
+    const a = buildParts(await flushDoc("stepped"));
     const b = buildParts(await flushDoc("absent"));
     assertEqual(partsJson(a), partsJson(b), "byte-identical parts");
   });
 
   // ---- (f) model: defaults, migrate fill, serialization round-trip ----
-  test("model: defaultDoc has frame default; defaultDepth has flush:false", () => {
+  test("model: defaultDoc has frame default; defaultDepth has colorLayerStyle:'stepped' (flush kept false)", () => {
     const d = defaultDoc();
     assertEqual(JSON.stringify(d.body.frame), JSON.stringify({ widthMm: 0, heightMm: 2, color: "#000000" }), "body.frame default");
-    assertEqual(defaultDepth("image").flush, false, "defaultDepth().flush is false");
+    assertEqual(defaultDepth("image").colorLayerStyle, "stepped", "defaultDepth().colorLayerStyle is 'stepped'");
+    assertEqual(defaultDepth("image").flush, false, "defaultDepth().flush kept for back-compat (false)");
   });
 
-  test("model: migrateProject fills frame + flush for v1 and for v2 docs missing them", () => {
+  test("model: migrateProject fills frame + colorLayerStyle for v1 and for v2 docs missing them", () => {
     // v1 -> v2
     const v1 = defaultBookmark();
     v1.elements = [makeImageElement({ src: "a" })];
     const m1 = migrateProject(v1);
     assertEqual(JSON.stringify(m1.body.frame), JSON.stringify({ widthMm: 0, heightMm: 2, color: "#000000" }), "v1 migration fills body.frame");
-    assertEqual(m1.elements[0].depth.flush, false, "v1 migration fills depth.flush");
+    assertEqual(m1.elements[0].depth.colorLayerStyle, "stepped", "v1 migration fills depth.colorLayerStyle (stepped)");
     // v2 without the new fields
     const v2 = defaultDoc();
     delete v2.body.frame;
     const el = makeElementV2("text");
-    delete el.depth.flush;
+    delete el.depth.flush; delete el.depth.colorLayerStyle;
     v2.elements = [el];
     const m2 = migrateProject(v2);
     assertEqual(JSON.stringify(m2.body.frame), JSON.stringify({ widthMm: 0, heightMm: 2, color: "#000000" }), "v2 fill of body.frame");
-    assertEqual(m2.elements[0].depth.flush, false, "v2 fill of depth.flush");
+    assertEqual(m2.elements[0].depth.colorLayerStyle, "stepped", "v2 fill of depth.colorLayerStyle (stepped)");
   });
 
-  test("model: frame + flush survive serialize/deserialize round-trip", () => {
+  test("model: frame + colorLayerStyle survive serialize/deserialize round-trip", () => {
     const d = defaultDoc();
     d.body.frame = { widthMm: 3.5, heightMm: 1.6, color: "#123456" };
     const el = makeElementV2("text");
-    el.depth.flush = true;
+    el.depth.colorLayerStyle = "bands";
     d.elements = [el];
     const rt = deserializeProject(serializeProject(d));
     assertEqual(JSON.stringify(rt.body.frame), JSON.stringify({ widthMm: 3.5, heightMm: 1.6, color: "#123456" }), "frame round-trips");
-    assertEqual(rt.elements[0].depth.flush, true, "flush round-trips");
+    assertEqual(rt.elements[0].depth.colorLayerStyle, "bands", "colorLayerStyle round-trips");
   });
 })();

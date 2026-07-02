@@ -145,11 +145,14 @@
             <label class="adv-label">Palette (Farbe ändern / Reihenfolge ziehen)</label>
             <div id="advPaletteSwatch" class="adv-swatches"></div>
           </div>
-          <!-- Farbschichten (AMS): stacked height bands; visible only in colorLayers mode -->
-          <div class="adv-field" id="advFlushField" hidden>
-            <label class="adv-label toggle">
-              <input type="checkbox" id="advFlush" title="Jede Farbe als eigene Höhenschicht — eine Farbe pro Druckschicht (für AMS, &gt;4 Farben)"> Farbschichten (AMS)
-            </label>
+          <!-- Farb-Stapelung (color-layer stacking style); visible only in colorLayers mode -->
+          <div class="adv-field" id="colorStyleField" hidden>
+            <label class="adv-label">Farb-Stapelung</label>
+            <div id="colorStyleSeg" class="seg-group seg-sm" style="width:100%">
+              <button type="button" id="colorStepped" class="seg seg-active" style="flex:1" title="Gestuftes Relief (jede Farbe eigene Höhe)">Gestuft</button>
+              <button type="button" id="colorFlush" class="seg" style="flex:1" title="Alle Farben auf gleicher Höhe — eine ebene Fläche">Eine Fläche</button>
+              <button type="button" id="colorBands" class="seg" style="flex:1" title="Farbschichten: eine Farbe pro Druckschicht (AMS, &gt;4 Farben)">AMS</button>
+            </div>
           </div>
         </div>
       </details>

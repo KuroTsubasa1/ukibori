@@ -76,7 +76,8 @@ function defaultDepth(type) {
     smooth: 0.5,
     baseFloorMm: 0,
     minIsland: 0,                  // pixels; 0 = off (Inseln entfernen disabled by default)
-    flush: false,                  // colorLayers: all colors at the same height (Bündig); false = stacked (parity)
+    flush: false,                  // legacy back-compat read: superseded by colorLayerStyle (kept for saved docs)
+    colorLayerStyle: "stepped",    // colorLayers stacking: 'stepped' (rank heights) | 'flush' (one flat surface) | 'bands' (AMS)
   };
 }
 
@@ -122,6 +123,7 @@ function migrateElement(el, doc, layerHmm) {
     baseFloorMm: 0,
     minIsland: 0,                  // v1 had no island removal → fill with 0
     flush: false,                  // v1 had no flush surface → fill with false
+    colorLayerStyle: "stepped",    // v1 colorLayers were always stepped
   };
   const out = {
     id: el.id, type: el.type,
@@ -141,6 +143,11 @@ function migrateProject(doc) {
     if (doc.body && doc.body.frame == null) doc.body.frame = defaultFrame();
     for (const el of doc.elements || []) {
       if (el.depth && el.depth.flush == null) el.depth.flush = false;
+      // colorLayerStyle added in T14: derive from legacy flush when absent
+      // (post-T13 flush=true meant bands / AMS).
+      if (el.depth && el.depth.colorLayerStyle == null) {
+        el.depth.colorLayerStyle = el.depth.flush ? "bands" : "stepped";
+      }
     }
     return doc;
   }
