@@ -111,12 +111,34 @@
   // cols×rows grid. mask[i]=1 where opaque; r/g/b per pixel. Reads el.depth.* for
   // mode/threshold/invert/reduce (v1 read el.colorMode/threshold/invert/reduce).
   // grid: optional shared grid for expanded-domain drawing.
+  //
+  // Island removal (depth.minIsland > 0, image elements only, not heightmap):
+  //   The engine raster resolution differs from the source image resolution, so the
+  //   pixel threshold is scaled: the number of grid cells corresponding to one source
+  //   image pixel squared is:
+  //     cellsPerImagePixel = (el.wMm / pitch) / el._img.width
+  //     minSizeCells = Math.round(depth.minIsland * cellsPerImagePixel^2)
+  //   where pitch = doc.body.widthMm / cols. This preserves the user's intuition that
+  //   "5 pixels" means 5 pixels in the source image regardless of engine resolution.
+  //   Text elements (no source image) skip removal.
   function __renderElementV2(el, doc, cols, rows, grid) {
     const d = __drawElement(el, doc, cols, rows, grid);
     const n = cols * rows;
     const mask = new Uint8Array(n);
     const r = new Uint8ClampedArray(n), g = new Uint8ClampedArray(n), b = new Uint8ClampedArray(n);
     const depth = el.depth || {};
+
+    // Compute scaled minSizeCells for island removal (image elements only).
+    // Guard: skip for text/qr (no source image), skip for heightmap (continuous surface).
+    const islandPx = (depth.minIsland || 0);
+    const doIsland = islandPx > 0 && el.type === "image" && el._img && depth.mode !== "heightmap";
+    let minSizeCells = 0;
+    if (doIsland) {
+      // pitch: use grid.pitch when available (expanded domain), else derive from body width.
+      const pitch = (grid && grid.pitch) ? grid.pitch : (doc.body.widthMm / cols);
+      const cellsPerImagePixel = (el.wMm / pitch) / (el._img.naturalWidth || el._img.width || 1);
+      minSizeCells = Math.round(islandPx * cellsPerImagePixel * cellsPerImagePixel);
+    }
 
     if (el.type === "image" && depth.mode === "colorLayers" && el._img) {
       const red = depth.reduce || { method: "palette", numColors: 8, levels: 4, remap: {} };
@@ -130,6 +152,26 @@
         const m = remap[hx(cr, cg, cb)];
         if (m) { const c = window.hexToRgb(m); cr = c[0]; cg = c[1]; cb = c[2]; }
         mask[i] = 1; r[i] = cr; g[i] = cg; b[i] = cb;
+      }
+      if (doIsland && minSizeCells > 0) {
+        // colorLayers island removal: build a flat-color RGBA from r/g/b, white for
+        // mask-off pixels (old white-fill pattern), run removeSmallColorIslands, read
+        // back r/g/b. Mask itself is unchanged (alpha/mask stays as-is).
+        const islandData = new Uint8ClampedArray(n * 4);
+        for (let i = 0; i < n; i++) {
+          if (mask[i]) {
+            islandData[i * 4] = r[i]; islandData[i * 4 + 1] = g[i]; islandData[i * 4 + 2] = b[i]; islandData[i * 4 + 3] = 255;
+          } else {
+            islandData[i * 4] = 255; islandData[i * 4 + 1] = 255; islandData[i * 4 + 2] = 255; islandData[i * 4 + 3] = 255;
+          }
+        }
+        const islandImgData = { width: cols, height: rows, data: islandData };
+        window.removeSmallColorIslands(islandImgData, minSizeCells);
+        for (let i = 0; i < n; i++) {
+          if (mask[i]) {
+            r[i] = islandData[i * 4]; g[i] = islandData[i * 4 + 1]; b[i] = islandData[i * 4 + 2];
+          }
+        }
       }
       return { mask, r, g, b };
     }
@@ -146,6 +188,23 @@
         on = depth.invert ? lum >= thr : lum < thr;
       }
       if (on) { mask[i] = 1; r[i] = col[0]; g[i] = col[1]; b[i] = col[2]; }
+    }
+    if (doIsland && minSizeCells > 0) {
+      // solid island removal: build a binary RGBA (mask-on=black, mask-off=white),
+      // run removeSmallIslands, rebuild mask from result.
+      const islandData = new Uint8ClampedArray(n * 4);
+      for (let i = 0; i < n; i++) {
+        const v = mask[i] ? 0 : 255;
+        islandData[i * 4] = v; islandData[i * 4 + 1] = v; islandData[i * 4 + 2] = v; islandData[i * 4 + 3] = 255;
+      }
+      const islandImgData = { width: cols, height: rows, data: islandData };
+      window.removeSmallIslands(islandImgData, minSizeCells);
+      for (let i = 0; i < n; i++) {
+        const nowOn = islandData[i * 4] === 0;
+        mask[i] = nowOn ? 1 : 0;
+        if (nowOn) { r[i] = col[0]; g[i] = col[1]; b[i] = col[2]; }
+        else { r[i] = 0; g[i] = 0; b[i] = 0; }
+      }
     }
     return { mask, r, g, b };
   }
@@ -644,4 +703,7 @@
   window.buildHeightmapParts = buildHeightmapParts;
   window.buildParts = buildParts;
   window.freeFootprintField = freeFootprintField;
+  // Test-only: expose __renderElementV2 so island-removal.test.js can inspect mask/r/g/b
+  // directly without going through full buildParts. Not called by production code.
+  window.__renderElementV2ForTest = __renderElementV2;
 })();

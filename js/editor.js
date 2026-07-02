@@ -132,7 +132,8 @@
       !!(d && d.invert),
       r.method || 'palette', r.numColors || '', r.levels || '',
       JSON.stringify(r.remap || {}),
-      JSON.stringify(r.order || [])
+      JSON.stringify(r.order || []),
+      (d && d.minIsland != null ? d.minIsland : 0)
     ].join('|');
   }
 
@@ -209,6 +210,29 @@
           }
           o[j*4] = cr; o[j*4+1] = cg; o[j*4+2] = cb; o[j*4+3] = 255;
         }
+        // Island removal (Inseln entfernen) — colorLayers path.
+        // Fill transparent pixels with white, run removeSmallColorIslands, re-apply alpha.
+        var islandPx = (depth.minIsland || 0);
+        if (islandPx > 0 && window.removeSmallColorIslands) {
+          // Build a flat-color RGBA: mask-on pixels = palette-mapped color, mask-off = white.
+          var islandData = new Uint8ClampedArray(n * 4);
+          var alphaMask = new Uint8Array(n); // track which pixels were opaque
+          for (var ia = 0; ia < n; ia++) {
+            if (o[ia * 4 + 3] >= 128) {
+              alphaMask[ia] = 1;
+              islandData[ia*4] = o[ia*4]; islandData[ia*4+1] = o[ia*4+1]; islandData[ia*4+2] = o[ia*4+2]; islandData[ia*4+3] = 255;
+            } else {
+              islandData[ia*4] = 255; islandData[ia*4+1] = 255; islandData[ia*4+2] = 255; islandData[ia*4+3] = 255;
+            }
+          }
+          window.removeSmallColorIslands({ width: w, height: h, data: islandData }, islandPx);
+          // Copy back the merged colors; restore alpha from original opaque mask.
+          for (var ib = 0; ib < n; ib++) {
+            if (alphaMask[ib]) {
+              o[ib*4] = islandData[ib*4]; o[ib*4+1] = islandData[ib*4+1]; o[ib*4+2] = islandData[ib*4+2]; o[ib*4+3] = 255;
+            }
+          }
+        }
       } catch (e) {
         // Fallback: draw raw image (palette helper unavailable).
         for (var k = 0; k < n; k++) {
@@ -227,6 +251,25 @@
         var lp = 0.299 * d[p*4] + 0.587 * d[p*4+1] + 0.114 * d[p*4+2];
         var on = depth.invert ? (lp >= threshold) : (lp < threshold);
         if (on) { o[p*4] = colR; o[p*4+1] = colG; o[p*4+2] = colB; o[p*4+3] = 255; }
+      }
+      // Island removal (Inseln entfernen) — solid path.
+      // After threshold, run removeSmallIslands on a binary (0/255) representation.
+      var solidIslandPx = (depth.minIsland || 0);
+      if (solidIslandPx > 0 && window.removeSmallIslands) {
+        var binData = new Uint8ClampedArray(n * 4);
+        for (var bi = 0; bi < n; bi++) {
+          var v = (o[bi*4+3] >= 128) ? 0 : 255; // mask-on pixels are BLACK; others are white
+          binData[bi*4] = v; binData[bi*4+1] = v; binData[bi*4+2] = v; binData[bi*4+3] = 255;
+        }
+        window.removeSmallIslands({ width: w, height: h, data: binData }, solidIslandPx);
+        // Rebuild output from cleaned binary
+        for (var bj = 0; bj < n; bj++) {
+          if (binData[bj*4] === 0) { // pixel survived as "on" (black = foreground)
+            o[bj*4] = colR; o[bj*4+1] = colG; o[bj*4+2] = colB; o[bj*4+3] = 255;
+          } else {
+            o[bj*4] = 0; o[bj*4+1] = 0; o[bj*4+2] = 0; o[bj*4+3] = 0;
+          }
+        }
       }
     }
 
@@ -1381,10 +1424,23 @@
     var thresholdVal = document.getElementById("advThresholdVal");
     var invert = document.getElementById("advInvert");
     var numColors = document.getElementById("advNumColors");
+    var minIsland = document.getElementById("advMinIsland");
+    var minIslandVal = document.getElementById("advMinIslandVal");
     if (threshold) { threshold.disabled = disabled; threshold.value = el ? (el.depth.threshold != null ? el.depth.threshold : 128) : 128; }
     if (thresholdVal) thresholdVal.textContent = el ? (el.depth.threshold != null ? el.depth.threshold : 128) : 128;
     if (invert) { invert.disabled = disabled; invert.checked = el ? !!el.depth.invert : false; }
     if (numColors) { numColors.disabled = disabled; numColors.value = el ? (el.depth.reduce && el.depth.reduce.numColors != null ? el.depth.reduce.numColors : 8) : 8; }
+    // minIsland: visible for image elements in solid or colorLayers mode; hidden for heightmap and non-image.
+    var minIslandField = document.getElementById("advMinIslandField");
+    if (minIslandField) {
+      var showIsland = el && el.type === "image" && ((el.depth && el.depth.mode) || "solid") !== "heightmap";
+      minIslandField.hidden = !showIsland;
+    }
+    if (minIsland) {
+      minIsland.disabled = disabled;
+      minIsland.value = el ? (el.depth.minIsland != null ? el.depth.minIsland : 0) : 0;
+    }
+    if (minIslandVal) minIslandVal.textContent = el ? (el.depth.minIsland != null ? el.depth.minIsland : 0) : 0;
 
     var modeSolid = document.getElementById("modeSolid");
     var modeColorLayers = document.getElementById("modeColorLayers");
@@ -1469,6 +1525,12 @@
   bindElementField("advNumColors", "input", function (el, node) {
     var v = Number(node.value); if (isNaN(v) || v < 2) return false;
     el.depth.reduce.numColors = v; renderPaletteSwatches(el);
+  }, { invalidate: true });
+
+  bindElementField("advMinIsland", "input", function (el, node) {
+    var v = Number(node.value); if (isNaN(v) || v < 0) return false;
+    el.depth.minIsland = Math.round(v);
+    var badge = document.getElementById("advMinIslandVal"); if (badge) badge.textContent = Math.round(v);
   }, { invalidate: true });
 
   // -- Element inputs --

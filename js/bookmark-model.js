@@ -75,6 +75,7 @@ function defaultDepth(type) {
     invert: false,
     smooth: 0.5,
     baseFloorMm: 0,
+    minIsland: 0,                  // pixels; 0 = off (Inseln entfernen disabled by default)
   };
 }
 
@@ -111,6 +112,7 @@ function migrateElement(el, doc, layerHmm) {
     invert: !!el.invert,
     smooth: doc.smooth != null ? doc.smooth : 0.5,
     baseFloorMm: 0,
+    minIsland: 0,                  // v1 had no island removal → fill with 0
   };
   const out = {
     id: el.id, type: el.type,

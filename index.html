@@ -110,6 +110,12 @@
             <label for="advNumColors" class="adv-label">Anzahl Farben</label>
             <input type="number" id="advNumColors" class="sp-num" min="2" max="16" step="1" value="8" title="Anzahl reduzierter Farben (2–16)">
           </div>
+          <!-- Inseln entfernen (island removal; hidden for heightmap and non-image) -->
+          <div class="adv-field" id="advMinIslandField" hidden>
+            <label for="advMinIsland" class="adv-label">Inseln entfernen</label>
+            <input type="range" id="advMinIsland" min="0" max="2000" step="1" value="0" title="Entfernt kleine Pixel-Inseln/Sprenkel unterhalb dieser Größe (0 = aus)">
+            <span class="badge" id="advMinIslandVal">0</span> px
+          </div>
           <!-- Palette swatches (visible only in colorLayers mode) -->
           <div class="adv-field" id="advPaletteField" hidden>
             <label class="adv-label">Palette (Farbe ändern / Reihenfolge ziehen)</label>
