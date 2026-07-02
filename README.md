@@ -55,6 +55,7 @@ Bild · Text · QR → Relief · Schwarz-Weiß & Farbe · KI-Freistellung · 3D-
   poster­artige Farbflächen.
 - **KI-Freistellung** — lokales Modell (u2netp via onnxruntime-web) entfernt den
   Hintergrund direkt im Browser; das Bild verlässt das Gerät nicht.
+  *(Erfordert HTTP-Serving — „Variante B" oben; per Doppelklick/`file://` ist die Funktion deaktiviert.)*
 - **Kreis-Zuschnitt** mit erhabenem Rand — der klassische runde Untersetzer.
 - **Befestigung** — **Loch** zum Aufhängen/Verschrauben oder **Öse** (verstärkter
   Ring), per ziehbarem Marker frei platziert.

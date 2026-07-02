@@ -3,6 +3,19 @@
 // Simple/Advanced view. Ported from bookmark-editor.js draw/hit/drag, adapted to
 // the v2 doc shape (body.shape, mount, makeElementV2). Phase 3 Tasks 2+.
 (function () {
+  // ---- file:// guard for features that require HTTP (WASM/ONNX) ----
+  var __isFile = (location.protocol === 'file:');
+  if (__isFile) {
+    window.addEventListener('DOMContentLoaded', function () {
+      var btn = document.getElementById('removeBgBtn');
+      var statusEl = document.getElementById('bgStatus');
+      if (btn) btn.disabled = true;
+      if (statusEl) statusEl.textContent =
+        'KI-Freistellung benötigt einen HTTP-Server (nicht per Doppelklick/file:// öffnen). ' +
+        'Starte z. B. ⁠`python3 -m http.server`⁠ und öffne http://localhost:8000.';
+    });
+  }
+
   const VIEW_KEY = "ukibori.view";
   const doc = window.defaultDoc();
   const cv = document.getElementById("canvas2d");
@@ -592,7 +605,14 @@
         img.src = url;
       }).catch(function (e) {
         btn.disabled = false;
-        statusEl.textContent = (e && e.message) || "Hintergrundentfernung fehlgeschlagen.";
+        var msg = (e && e.message) || '';
+        if (/backend|fetch|wasm/i.test(msg)) {
+          statusEl.textContent =
+            'KI-Freistellung benötigt einen HTTP-Server. ' +
+            'Starte z. B. `python3 -m http.server` und öffne http://localhost:8000.';
+        } else {
+          statusEl.textContent = msg || 'Hintergrundentfernung fehlgeschlagen.';
+        }
       });
     }());
   });
