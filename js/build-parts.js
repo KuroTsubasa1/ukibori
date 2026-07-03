@@ -141,22 +141,33 @@
     }
 
     if (el.type === "image" && depth.mode === "colorLayers" && el._img) {
-      const red = depth.reduce || { method: "palette", numColors: 8, levels: 4, remap: {} };
-      const pal = window.__imagePaletteFromImg(el._img, red.method, red.numColors, red.levels);
-      const remap = red.remap || {};
-      // Color merge: fold merged natural colors into their root, THEN apply the root's remap.
-      // Empty/absent merges → mergeRoots = {} → root === nat → byte-identical to pre-merge.
-      const mergeRoots = window.resolveMergeRoots ? window.resolveMergeRoots(red.merges) : {};
-      const hx = (R, G, B) => ("#" + [R, G, B].map(x => x.toString(16).padStart(2, "0")).join("")).toUpperCase();
-      for (let i = 0; i < n; i++) {
-        if (d[i * 4 + 3] < __ALPHA_CUTOFF) continue;
-        const near = window.__nearestColor(pal, d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
-        let cr = near[0], cg = near[1], cb = near[2];
-        const nat = hx(cr, cg, cb);
-        const root = mergeRoots[nat] || nat;
-        const m = remap[root] || (root !== nat ? root : null);
-        if (m) { const c = window.hexToRgb(m); cr = c[0]; cg = c[1]; cb = c[2]; }
-        mask[i] = 1; r[i] = cr; g[i] = cg; b[i] = cb;
+      // AMS shared palette active (bands style + non-empty doc.amsPalette): snap each pixel to
+      // the nearest shared filament color, bypassing the per-element palette/merges/remap.
+      const useGlobalAms = colorStyleOf(el) === "bands" && doc && Array.isArray(doc.amsPalette) && doc.amsPalette.length > 0;
+      if (useGlobalAms) {
+        for (let i = 0; i < n; i++) {
+          if (d[i * 4 + 3] < __ALPHA_CUTOFF) continue;
+          const c = window.hexToRgb(window.nearestAmsColor(doc.amsPalette, d[i * 4], d[i * 4 + 1], d[i * 4 + 2]));
+          mask[i] = 1; r[i] = c[0]; g[i] = c[1]; b[i] = c[2];
+        }
+      } else {
+        const red = depth.reduce || { method: "palette", numColors: 8, levels: 4, remap: {} };
+        const pal = window.__imagePaletteFromImg(el._img, red.method, red.numColors, red.levels);
+        const remap = red.remap || {};
+        // Color merge: fold merged natural colors into their root, THEN apply the root's remap.
+        // Empty/absent merges → mergeRoots = {} → root === nat → byte-identical to pre-merge.
+        const mergeRoots = window.resolveMergeRoots ? window.resolveMergeRoots(red.merges) : {};
+        const hx = (R, G, B) => ("#" + [R, G, B].map(x => x.toString(16).padStart(2, "0")).join("")).toUpperCase();
+        for (let i = 0; i < n; i++) {
+          if (d[i * 4 + 3] < __ALPHA_CUTOFF) continue;
+          const near = window.__nearestColor(pal, d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
+          let cr = near[0], cg = near[1], cb = near[2];
+          const nat = hx(cr, cg, cb);
+          const root = mergeRoots[nat] || nat;
+          const m = remap[root] || (root !== nat ? root : null);
+          if (m) { const c = window.hexToRgb(m); cr = c[0]; cg = c[1]; cb = c[2]; }
+          mask[i] = 1; r[i] = cr; g[i] = cg; b[i] = cb;
+        }
       }
       if (doIsland && minSizeCells > 0) {
         // colorLayers island removal: build a flat-color RGBA from r/g/b, white for
@@ -357,6 +368,10 @@
     const lumHex = (hex) => { const c = window.hexToRgb(hex); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
     const bandHexSet = new Set();
     let bandsElemCount = 0;
+    // AMS shared palette: when set, a color's layer index (and thus depth) is its position in the
+    // global palette, so the same color lands at the same depth across every element.
+    const ams = (doc.amsPalette && doc.amsPalette.length) ? doc.amsPalette : null;
+    const amsRank = ams ? ((hex) => { const i = ams.indexOf(hex); return i < 0 ? ams.length : i; }) : null;
     for (const ei of special) {
       const el = doc.elements[ei];
       const style = colorStyleOf(el);
@@ -387,12 +402,16 @@
         // depth = k*step. So each pixel's OWN color is the SHALLOWEST floor covering it
         // (visible from the top); deeper floors are the lighter colors nested beneath.
         // Emit DEEPEST first (largest region) so shallower nested floors sit inside.
-        const sorted = orderedPresent.slice().sort((a, b) => lumHex(a) - lumHex(b)); // rank1=darkest
+        // Order colors by LAYER INDEX: global amsPalette index when the shared palette is active
+        // (so a color sits at the same depth in every element), else per-element luminance.
+        const sorted = orderedPresent.slice().sort((a, b) => ams ? amsRank(a) - amsRank(b) : lumHex(a) - lumHex(b));
         sorted.forEach(h => bandHexSet.add(h)); // contribute to the AMS base-band palette
         bandsElemCount++;
         const N = sorted.length;
         const n = cols * rows;
-        // cumUpTo[k] = union of pixels of ranks 1..k+1 (0-indexed k). cumUpTo[N-1] = all.
+        // depth of the color at sorted position k: global (amsRank+1)*step, else per-element (k+1)*step.
+        const depthOfPos = (k) => (ams ? (amsRank(sorted[k]) + 1) : (k + 1)) * step;
+        // cumUpTo[k] = union of pixels of the colors at sorted positions 0..k (layer index <= this).
         const cumUpTo = new Array(N);
         cumUpTo[0] = presentSets.get(sorted[0]);
         for (let k = 1; k < N; k++) {
@@ -400,20 +419,16 @@
           for (let i = 0; i < n; i++) u[i] = prev[i] | own[i];
           cumUpTo[k] = u;
         }
-        // Deepest first: rank N (k=N-1) has depth N*step and the largest region (all).
+        // Deepest first: the highest-index present color has the largest region (all) + deepest floor.
         for (let k = N - 1; k >= 0; k--) {
           const region = cumUpTo[k];
-          addFloor((c, r) => region[idx(c, r)] === 1, sorted[k], (k + 1) * step);
+          addFloor((c, r) => region[idx(c, r)] === 1, sorted[k], depthOfPos(k));
         }
-        // Per-pixel deepest recess = its own rank's depth: pixel of rank j is covered by
-        // floors k>=j (region ranks<=k), deepest = k=N-1... but the SLAB at depth (k+1)*step
-        // only extends over region cumUpTo[k]; the base beneath a pixel must reach the
-        // deepest floor covering it. A rank-j pixel (0-indexed jr) is in cumUpTo[k] for all
-        // k>=jr, so the deepest floor over it is k=N-1 → depth N*step. Fill base to there.
-        const rankOf = new Map(); sorted.forEach((h, jr) => rankOf.set(h, jr));
+        // Base beneath a pixel reaches the deepest floor covering it = the deepest present color.
+        const deepest = depthOfPos(N - 1);
         for (let i = 0; i < cols * rows; i++) {
           if (comp.owner[i] !== ei || comp.isBase[i] || comp.cutout[i] || inBand(i)) continue;
-          effDepth[i] = N * step; // deepest floor (rank N) covers all element pixels
+          effDepth[i] = deepest;
         }
       }
     }
@@ -436,7 +451,9 @@
     // Split the plate only when EXACTLY ONE engraved element uses bands — its palette then maps
     // 1:1 onto its own inlay. Multiple bands elements with distinct palettes are ambiguous (a
     // global sort/count would carve deeper than any single inlay), so fall back to a plain base.
-    const bandHexes = (bandsElemCount === 1) ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []; // rank1 = darkest
+    // AMS shared palette → band the base with the FULL palette in layer order (multi-element safe).
+    // No shared palette → legacy: only band for a single bands element (else plain base).
+    const bandHexes = ams ? ams.slice() : ((bandsElemCount === 1) ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []);
     if (bandHexes.length > 0) {
       const N = bandHexes.length;
       const avail = Math.max(0, T - minBase);
@@ -664,6 +681,9 @@
 
     // Luminance of a #RRGGBB hex string (0-255 scale, BT.601).
     const hexLum = (hex) => { const c = window.hexToRgb(hex); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
+    // AMS shared palette: a color's height layer = its global palette index (shared across elements).
+    const ams = (doc.amsPalette && doc.amsPalette.length) ? doc.amsPalette : null;
+    const amsRankR = ams ? ((hex) => { const i = ams.indexOf(hex); return i < 0 ? ams.length - 1 : i; }) : null;
 
     const groups = new Map(); // "ei|hex" -> {ei, hex, set}
     for (let i = 0; i < cols * rows; i++) {
@@ -690,11 +710,24 @@
       const el = doc.elements[ei];
       const isBandsColorLayers = el.depth && el.depth.mode === "colorLayers" && colorStyleOf(el) === "bands";
 
-      if (isBandsColorLayers) {
-        // Height-band path (AMS): sort colors dark->light, emit N stacked slabs.
-        // Band k (1-indexed, 0-based loop): footprint = union of sets for ranks k+1..N,
-        // z0 = T + k*step, thickness = step. Nested footprints shrink upward.
-        // Top face of each pixel shows its own color (highest band it belongs to).
+      if (isBandsColorLayers && ams) {
+        // Global filament stack: each Z-level L (0..maxLayer) is one shared filament layer,
+        // color amsPalette[L], over every pixel that reaches layer >= L. A pixel of layer j is a
+        // solid stack of layers 0..j (own color on top) — gap-free even when the element skips
+        // palette layers, and a given color always sits at the same height across elements.
+        const nn = cols * rows;
+        let maxG = -1;
+        colorGroups.forEach((g) => { const rk = amsRankR(g.hex); if (rk > maxG) maxG = rk; });
+        for (let L = 0; L <= maxG; L++) {
+          const region = new Uint8Array(nn);
+          for (const g of colorGroups) if (amsRankR(g.hex) >= L) { const s = g.set; for (let i = 0; i < nn; i++) region[i] |= s[i]; }
+          const facets = tracedFacets((c, r) => region[idx(c, r)] === 1, step, T + L * step);
+          if (facets.length) parts.push({ name: "farbschicht-" + (ei + 1) + "-" + (L + 1), color: window.hexToRgb(ams[L]), facets });
+        }
+      } else if (isBandsColorLayers) {
+        // Height-band path (AMS, per-element luminance — no shared palette): sort dark->light,
+        // emit N stacked slabs. Band k: footprint = union of sets for ranks k+1..N, z0 = T + k*step,
+        // thickness = step. Nested footprints shrink upward; top face shows each pixel's own color.
         const sorted = colorGroups.slice().sort((a, b) => hexLum(a.hex) - hexLum(b.hex)); // rank 1=darkest
         const N = sorted.length;
         const n = cols * rows;
