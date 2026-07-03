@@ -161,9 +161,10 @@
     const pr = parts.filter(p => p.name.indexOf("erhaben") === 0);
     assertEqual(pr.length, 2, "two erhaben prisms for flush=false");
     const tops = pr.map(p => zbounds(p.facets).mx).sort((a, b) => a - b);
-    const T = 3, step = 0.4;
-    assertClose(tops[0], T + step,   1e-5, "rank-0 prism top at T + step");
-    assertClose(tops[1], T + 2*step, 1e-5, "rank-1 prism top at T + 2*step");
+    // Stepped splits the relief height (heightMm=1.0) across the 2 colors: T+h/2, then T+h.
+    const T = 3, h = 1.0;
+    assertClose(tops[0], T + h / 2, 1e-5, "rank-0 prism top at T + heightMm/2");
+    assertClose(tops[1], T + h,     1e-5, "rank-1 (top) prism top at T + heightMm");
     // No farbschicht parts
     assert(!parts.some(p => p.name.indexOf("farbschicht") === 0), "no farbschicht parts when flush=false");
   });

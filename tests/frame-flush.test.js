@@ -176,8 +176,10 @@
     const pr = parts.filter(p => p.name.indexOf("erhaben") === 0);
     assertEqual(pr.length, 2, "two raised color prisms");
     const tops = pr.map(p => zbounds(p.facets).mx).sort((x, y) => x - y);
-    assertClose(tops[0], 3.4, 1e-6, "rank-0 color at T + step");
-    assertClose(tops[1], 3.8, 1e-6, "rank-1 color at T + 2*step");
+    // Stepped now splits the relief height (heightMm=1.0 default) evenly across the 2 colors:
+    // rank-0 = T + heightMm/2, top color reaches T + heightMm.
+    assertClose(tops[0], 3.5, 1e-6, "rank-0 color at T + heightMm/2");
+    assertClose(tops[1], 4.0, 1e-6, "rank-1 (top) color at T + heightMm");
   });
 
   test("style flush (Eine Fläche) — both colors span [T, T+step] (one flat surface, RESTORED)", async () => {

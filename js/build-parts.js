@@ -293,7 +293,11 @@
       window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
 
     const floor = Math.min(2 * layerH, T);
-    const minBase = Math.min(Math.max(0.8, T * 0.34, 2 * layerH), Math.max(0, T - floor));
+    // Base-plate floor thickness under engraved detail: user override (body.baseThicknessMm > 0,
+    // clamped to leave room for a color floor) else auto-derived from the overall thickness.
+    const autoMinBase = Math.min(Math.max(0.8, T * 0.34, 2 * layerH), Math.max(0, T - floor));
+    const setBase = (doc.body.baseThicknessMm || 0);
+    const minBase = setBase > 0 ? Math.max(0, Math.min(setBase, T - floor)) : autoMinBase;
     const maxRecess = Math.max(0, T - floor - minBase);
     const recessOf = (d) => Math.max(0, Math.min(d, maxRecess));
     const baseUnder = (d) => T - recessOf(d) - floor;
@@ -313,31 +317,21 @@
     });
     const isSpecial = (i) => special.has(comp.owner[i]);
 
-    const ownerEff = new Map();
-    for (let i = 0; i < cols * rows; i++) {
-      if (comp.isBase[i] || comp.cutout[i] || comp.owner[i] < 0 || inBand(i) || isSpecial(i)) continue;
-      const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
-      let s = ownerEff.get(comp.owner[i]); if (!s) ownerEff.set(comp.owner[i], s = new Set());
-      s.add(hex);
-    }
-    const orderedColors = [];
-    const pushC = (h) => { if (orderedColors.indexOf(h) === -1) orderedColors.push(h); };
-    for (let ei = doc.elements.length - 1; ei >= 0; ei--) {
-      const present = ownerEff.get(ei); if (!present) continue;
-      const el = doc.elements[ei], mode = el.depth && el.depth.mode;
-      const seq = [];
-      if (el.type === "text" || (el.type === "image" && mode !== "colorLayers")) {
-        const c = window.hexToRgb(el.color); seq.push(__hex(c[0], c[1], c[2]));
-      } else if (el.type === "image" && mode === "colorLayers") {
+    // Per-element recess depth: solid/text recess by the element's relief height (depth.heightMm);
+    // stepped colorLayers split that height evenly across their colors (topmost color = full
+    // height). Depth is per element, so each element's relief height is independent of the others.
+    const depthForOwnerHex = (ei, hex) => {
+      const el = doc.elements[ei];
+      const h = Math.max((el && el.depth && el.depth.heightMm) || 0, layerH);
+      if (el && el.depth && el.depth.mode === "colorLayers") {
         const remap = (el.depth.reduce && el.depth.reduce.remap) || {};
-        for (const nat of __orderedNaturalHexesV2(el)) { const c = window.hexToRgb(remap[nat] || nat); seq.push(__hex(c[0], c[1], c[2])); }
+        const seq = __orderedNaturalHexesV2(el).map(nat => { const c = window.hexToRgb(remap[nat] || nat); return __hex(c[0], c[1], c[2]); });
+        const N = seq.length || 1;
+        const rank = seq.indexOf(hex); const r = rank < 0 ? 0 : rank;
+        return (r + 1) * h / N;
       }
-      for (const h of seq) if (present.has(h)) pushC(h);
-      for (const h of present) pushC(h);
-    }
-    const depthByHex = new Map();
-    orderedColors.forEach((hex, rank) => depthByHex.set(hex, (rank + 1) * step));
-    const depthFor = (hex) => depthByHex.get(hex) || step;
+      return h;
+    };
 
     let cn = 0;
     const addFloor = (member, hex, depthMm) => {
@@ -345,18 +339,20 @@
       if (facets.length) colorParts.push({ name: "farbe-" + (++cn), color: window.hexToRgb(hex), facets });
     };
 
-    // --- Stepped/solid/text color floors (global rank; region = exact-color pixels). ---
-    // Byte-identical to the pre-T14 path: same iteration order, same z0, same names.
-    const groups = new Map();
+    // --- Stepped/solid/text color floors. Grouped per (element, color) so each element recesses
+    // by its OWN relief height (depthForOwnerHex), independent of the others. ---
+    const groups = new Map(); // "ei|hex" -> {ei, hex, set}
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const i = idx(c, r);
       if (comp.isBase[i] || comp.cutout[i] || inBand(i) || isSpecial(i)) continue;
+      const ei = comp.owner[i];
       const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
-      let grp = groups.get(hex); if (!grp) groups.set(hex, grp = { hex, set: new Uint8Array(cols * rows) });
+      const key = ei + "|" + hex;
+      let grp = groups.get(key); if (!grp) groups.set(key, grp = { ei, hex, set: new Uint8Array(cols * rows) });
       grp.set[i] = 1;
     }
     for (const grp of groups.values()) {
-      addFloor((c, r) => grp.set[idx(c, r)] === 1, grp.hex, depthFor(grp.hex));
+      addFloor((c, r) => grp.set[idx(c, r)] === 1, grp.hex, depthForOwnerHex(grp.ei, grp.hex));
     }
 
     // --- flush / bands color floors (per-element). ---
@@ -458,9 +454,10 @@
     // No shared palette → legacy: only band for a single bands element (else plain base).
     // Band the base ONLY when an engraved bands element is actually present in this build — a
     // lingering (populated-but-unused) amsPalette must NOT stripe the plate of a non-AMS design.
-    const bandHexes = bandsElemCount > 0
-      ? (ams ? ams.slice() : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []))
-      : [];
+    // amsSolidBase keeps the surrounding plate one solid base color (only the inlay is multicolor).
+    const bandHexes = (doc.amsSolidBase || bandsElemCount === 0)
+      ? []
+      : (ams ? ams.slice() : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []));
     if (bandHexes.length > 0) {
       const N = bandHexes.length;
       const avail = Math.max(0, T - minBase);
@@ -484,8 +481,8 @@
       const i = idx(c, r);
       if (comp.cutout[i] || comp.isBase[i] || inBand(i)) continue;
       // Fill the base beneath the DEEPEST floor at this pixel down to minBase.
-      // Stepped/solid/text: depthFor(hex). flush/bands: effDepth[i] set above.
-      const d = isSpecial(i) ? effDepth[i] : depthFor(__hex(comp.r[i], comp.g[i], comp.b[i]));
+      // Stepped/solid/text: per-element depth. flush/bands: effDepth[i] set above.
+      const d = isSpecial(i) ? effDepth[i] : depthForOwnerHex(comp.owner[i], __hex(comp.r[i], comp.g[i], comp.b[i]));
       const h = baseUnder(d);
       if (h - minBase <= 1e-6) continue;
       const key = h.toFixed(4);
@@ -674,16 +671,18 @@
       window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
 
     const heightForElemColor = (el, hex) => {
+      const h = Math.max((el.depth && el.depth.heightMm) || 0, layerH);
       if (el.depth && el.depth.mode === "colorLayers") {
         // flush (Eine Fläche): every color spans [T, T+step] → one flat surface.
         if (colorStyleOf(el) === "flush") return step;
-        // stepped: rank-height relief, height (rank+1)*step.
+        // stepped: colors split the relief height evenly (topmost color reaches heightMm).
         const remap = (el.depth.reduce && el.depth.reduce.remap) || {};
         const seq = __orderedNaturalHexesV2(el).map(nat => { const c = window.hexToRgb(remap[nat] || nat); return __hex(c[0], c[1], c[2]); });
-        const rank = seq.indexOf(hex);
-        return ((rank < 0 ? 0 : rank) + 1) * step;
+        const N = seq.length || 1;
+        const rank = seq.indexOf(hex); const r = rank < 0 ? 0 : rank;
+        return (r + 1) * h / N;
       }
-      return Math.max((el.depth && el.depth.heightMm) || 0, layerH);
+      return h;
     };
 
     // Luminance of a #RRGGBB hex string (0-255 scale, BT.601).

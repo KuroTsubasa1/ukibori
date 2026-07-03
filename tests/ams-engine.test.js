@@ -134,6 +134,26 @@
     for (let i = 1; i < z0s.length; i++) assert(z0s[i] - z0s[i - 1] > 1e-3, "floors at distinct depths (no clamp-collapse): " + z0s.join(","));
   });
 
+  test("base floor: body.baseThicknessMm sets the solid backing thickness (engraved)", async () => {
+    const img = await imgFromBands(["#000000", "#ffffff"], 20, 20);
+    const d = sqDoc(); d.amsPalette = ["#000000", "#FFFFFF"]; d.body.baseThicknessMm = 2.0;
+    d.elements = [makeEl(img, "engraved")];
+    const floor = buildParts(d).filter(p => p.name === "grundplatte")
+      .map(p => zbounds(p.facets)).filter(z => Math.abs(z.mn) < 1e-6)[0];
+    assert(floor, "has a z=0 base floor slab");
+    assertClose(floor.mx, 2.0, 1e-4, "base floor top = baseThicknessMm (2.0)");
+  });
+
+  test("amsSolidBase: surrounding plate stays solid (no base bands); inlay still multicolor", async () => {
+    const img = await imgFromBands(["#000000", "#ffffff"], 20, 20);
+    const d = sqDoc(); d.amsPalette = ["#000000", "#FFFFFF"]; d.amsSolidBase = true;
+    d.elements = [makeEl(img, "engraved")];
+    const parts = buildParts(d);
+    assert(!parts.some(p => p.name.indexOf("grundplatte-band") === 0), "no base bands when amsSolidBase");
+    assert(parts.some(p => p.name === "grundplatte"), "solid base present");
+    assert(parts.filter(p => p.name.indexOf("farbe-") === 0).length >= 2, "inlay stays multicolor");
+  });
+
   test("parity: empty amsPalette leaves bands geometry byte-identical (engraved + raised)", async () => {
     const img = await imgFromBands(["#1a1a1a", "#888888", "#e0e0e0"], 24, 24);
     for (const dir of ["engraved", "raised"]) {

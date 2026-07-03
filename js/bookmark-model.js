@@ -94,6 +94,8 @@ function defaultDoc() {
       shape: "rect",
       widthMm: 50, heightMm: 150, cornerRadiusMm: 4,
       thicknessMm: 3, layerHeightMm: 0.2, baseColor: "#000000", borderMm: 2,
+      // Solid base-plate floor thickness under engraved detail (0 = auto-derive from thickness).
+      baseThicknessMm: 0,
       frame: defaultFrame(),
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
@@ -105,6 +107,9 @@ function defaultDoc() {
     // AMS shared filament palette: ordered UPPERCASE hex layers (index 0 = layer 1 = bottom,
     // darkest by default). Empty = not in use → legacy per-element bands behavior (parity).
     amsPalette: [],
+    // When true, keep the surrounding plate a single solid base color in AMS bands mode
+    // (don't split it into color bands); only the recessed inlay stays multicolor.
+    amsSolidBase: false,
     elements: [], fonts: {},
   };
 }
@@ -148,6 +153,8 @@ function migrateProject(doc) {
     // so a hand-edited or older save can't feed the engine a lowercase or malformed layer color.
     if (!Array.isArray(doc.amsPalette)) doc.amsPalette = [];
     else if (doc.amsPalette.length) setAmsPalette(doc, doc.amsPalette);
+    if (doc.amsSolidBase == null) doc.amsSolidBase = false;
+    if (doc.body && doc.body.baseThicknessMm == null) doc.body.baseThicknessMm = 0;
     for (const el of doc.elements || []) {
       if (el.depth && el.depth.flush == null) el.depth.flush = false;
       // colorLayerStyle added in T14: derive from legacy flush when absent
@@ -168,6 +175,7 @@ function migrateProject(doc) {
       cornerRadiusMm: doc.cornerRadiusMm != null ? doc.cornerRadiusMm : 0,
       thicknessMm: doc.thicknessMm, layerHeightMm: layerH,
       baseColor: doc.baseColor || "#000000", borderMm: 2,
+      baseThicknessMm: 0,
       frame: defaultFrame(),
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
@@ -180,7 +188,7 @@ function migrateProject(doc) {
       : { type: "none", xMm: (doc.widthMm || 0) / 2, yMm: 10.5, diameterMm: 5, ringThicknessMm: 0, ringHeightMm: 2, marginMm: 8 },
     resolution: doc.resolution != null ? doc.resolution : 1024,
     colorStepLayers: doc.colorStepLayers != null ? doc.colorStepLayers : 2,
-    amsPalette: [],
+    amsPalette: [], amsSolidBase: false,
     elements: (doc.elements || []).map(el => migrateElement(el, doc, layerH)),
     fonts: doc.fonts || {},
   };

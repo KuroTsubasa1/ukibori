@@ -57,9 +57,12 @@
     const pr = parts.filter(p => p.name.indexOf("erhaben") === 0);
     assertEqual(pr.length, 3, "3 erhaben prisms");
     const tops = pr.map(p => zbounds(p.facets).mx).sort((a, b) => a - b);
-    assertClose(tops[0], T + step,   1e-5, "rank-0 prism top at T+step");
-    assertClose(tops[1], T + 2*step, 1e-5, "rank-1 prism top at T+2step");
-    assertClose(tops[2], T + 3*step, 1e-5, "rank-2 prism top at T+3step");
+    // Stepped splits the element's relief height (heightMm=1.0 default) evenly across its 3
+    // colors: rank r → T + (r+1)*heightMm/3; the top color reaches T + heightMm.
+    const h = 1.0;
+    assertClose(tops[0], T + 1 * h / 3, 1e-5, "rank-0 prism top at T + h/3");
+    assertClose(tops[1], T + 2 * h / 3, 1e-5, "rank-1 prism top at T + 2h/3");
+    assertClose(tops[2], T + 3 * h / 3, 1e-5, "rank-2 (top) prism top at T + h");
     assert(!parts.some(p => p.name.indexOf("farbschicht") === 0), "no farbschicht parts in stepped");
   });
 
@@ -307,6 +310,39 @@
     const bands = buildParts(d).filter(p => p.name.indexOf("grundplatte-band") === 0);
     assertEqual(bands.length, 5, "all 5 base bands present (compressed, none dropped)");
     assert(Math.max(...bands.map(p => zbounds(p.facets).mx)) <= 2 + 1e-6, "bands stay within the plate top");
+  });
+
+  // ============ RELIEF HEIGHT (depth.heightMm) — Einfarbig + Gestuft ============
+  test("relief height: Einfarbig raised extrudes by depth.heightMm", async () => {
+    const img = await threeColorImg(24, 24);
+    const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
+    el.depth.direction = "raised"; el.depth.mode = "solid"; el.depth.heightMm = 1.7; el._img = img;
+    const d = sqDoc(); d.elements = [el];
+    const pr = buildParts(d).filter(p => p.name.indexOf("erhaben") === 0);
+    assert(pr.length >= 1, "raised solid prism present");
+    assertClose(Math.max(...pr.map(p => zbounds(p.facets).mx)), T + 1.7, 1e-5, "top at T + heightMm");
+  });
+
+  test("relief height: Einfarbig engraved recess scales with depth.heightMm", async () => {
+    const img = await threeColorImg(24, 24);
+    const mk = (hmm) => {
+      const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
+      el.depth.direction = "engraved"; el.depth.mode = "solid"; el.depth.heightMm = hmm; el._img = img;
+      const d = sqDoc(); d.elements = [el];
+      return buildParts(d).filter(p => p.name.indexOf("farbe-") === 0);
+    };
+    const z0 = (fs) => Math.min(...fs.map(p => zbounds(p.facets).mn));
+    const shallow = mk(0.6), deep = mk(1.2);
+    assert(shallow.length && deep.length, "engraved solid floors exist");
+    assert(z0(deep) < z0(shallow) - 1e-3, "larger heightMm recesses deeper (lower floor z0)");
+  });
+
+  test("relief height: Gestuft topmost color reaches T + heightMm (raised)", async () => {
+    const img = await threeColorImg(24, 24);
+    const d = sqDoc(); const el = makeEl(img, "raised", "stepped"); el.depth.heightMm = 2.4;
+    d.elements = [el];
+    const pr = buildParts(d).filter(p => p.name.indexOf("erhaben") === 0);
+    assertClose(Math.max(...pr.map(p => zbounds(p.facets).mx)), T + 2.4, 1e-5, "top color at T + heightMm");
   });
 
   test("frame + bands: the Rand-Rahmen ring is NOT color-banded (bands inset from plate edge)", async () => {

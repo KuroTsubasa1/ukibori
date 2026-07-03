@@ -443,6 +443,9 @@
         + '</span>';
     }).join('');
     html += '<button type="button" id="amsAdd" class="btn ams-add" title="Farb-Layer hinzufügen">+ Farbe</button>';
+    // Keep the surrounding plate one solid base color (don't split it into layer bands).
+    html += '<label class="ams-solid-toggle" title="Grundplatte einfarbig lassen — nur das vertiefte Motiv mehrfarbig">'
+      + '<input type="checkbox" id="amsSolidBase"' + (doc.amsSolidBase ? ' checked' : '') + '> Grundplatte einfarbig</label>';
     cont.innerHTML = html;
     wireAmsPalette();
   }
@@ -480,6 +483,9 @@
       var pick = cands.filter(function (c) { return (doc.amsPalette || []).indexOf(c) === -1; })[0] || '#808080';
       window.addAmsColor(doc, pick); refresh();
     });
+    // Grundplatte einfarbig toggle.
+    var solid = document.getElementById('amsSolidBase');
+    if (solid) solid.addEventListener('change', function (e) { doc.amsSolidBase = e.target.checked; render2D(); scheduleRebuild3D(); });
     // Drag to reorder = set which layer prints on which Z-band.
     var dragSrc = null;
     cont.querySelectorAll('.ams-entry').forEach(function (entry) {
@@ -2016,6 +2022,20 @@
       if (boldNode) boldNode.checked = (el.fontWeight === "bold" || el.fontWeight === 700 || el.fontWeight === "700");
     }
 
+    // Relief height (depth.heightMm): shown for Einfarbig (solid/text) and Farbebenen→Gestuft.
+    var reliefField = document.getElementById("advReliefHeightField");
+    if (reliefField) {
+      var em = el && el.depth && el.depth.mode;
+      var estyle = (el && el.depth && el.depth.colorLayerStyle) || ((el && el.depth && el.depth.flush) ? "bands" : "stepped");
+      var showRelief = el && (el.type === "text" || el.type === "image") &&
+        (em === "solid" || (em === "colorLayers" && estyle === "stepped"));
+      reliefField.hidden = !showRelief;
+      if (showRelief) {
+        var rh = document.getElementById("advReliefHeight");
+        if (rh) rh.value = (el.depth && el.depth.heightMm != null) ? el.depth.heightMm : 1;
+      }
+    }
+
     // Palette swatches: show only for image elements in colorLayers mode.
     renderPaletteSwatches(el);
   }
@@ -2145,6 +2165,14 @@
     el.fontWeight = node.checked ? "bold" : "normal";
   });
 
+  // -- Relief height (Einfarbig + Gestuft): how far the element rises / recesses --
+  bindElementField("advReliefHeight", "input", function (el, node) {
+    var v = parseFloat(node.value);
+    if (isNaN(v) || v < 0.05) return false;
+    if (!el.depth) return false;
+    el.depth.heightMm = v;
+  });
+
   // -- Custom font upload (.ttf/.otf/.woff) → FontFace + doc.fonts --
   (function () {
     var btn = document.getElementById("fontUploadBtn");
@@ -2176,6 +2204,11 @@
   document.getElementById("advThickness").addEventListener("input", function () {
     var v = parseFloat(this.value);
     if (!isNaN(v) && v >= 0.5) { doc.body.thicknessMm = v; scheduleRebuild3D(); }
+  });
+
+  document.getElementById("advBaseThickness").addEventListener("input", function () {
+    var v = parseFloat(this.value);
+    if (!isNaN(v) && v >= 0) { doc.body.baseThicknessMm = v; render2D(); scheduleRebuild3D(); } // 0 = auto
   });
 
   document.getElementById("advLayerHeight").addEventListener("input", function () {
@@ -2257,6 +2290,8 @@
   function initAdvancedUI() {
     var t = document.getElementById("advThickness");
     if (t) t.value = doc.body.thicknessMm != null ? doc.body.thicknessMm : 3;
+    var bt = document.getElementById("advBaseThickness");
+    if (bt) bt.value = doc.body.baseThicknessMm != null ? doc.body.baseThicknessMm : 0;
     var lh = document.getElementById("advLayerHeight");
     if (lh) lh.value = doc.body.layerHeightMm != null ? doc.body.layerHeightMm : 0.2;
     var res = document.getElementById("advResolution");
