@@ -183,6 +183,14 @@
         <summary>Element</summary>
         <div class="acc-body adv-section">
           <div class="adv-field" id="advTextField" hidden><label for="advText" class="adv-label">Text</label><input type="text" id="advText" class="text-input" value="" title="Textinhalt des Elements"></div>
+          <div class="adv-field" id="advFontField" hidden>
+            <label for="advFontFamily" class="adv-label">Schriftart</label>
+            <select id="advFontFamily" class="text-input" title="Schriftart des Textes"></select>
+            <div class="adv-font-row">
+              <label class="adv-label toggle"><input type="checkbox" id="advFontBold" title="Fett"> Fett</label>
+              <button type="button" id="fontUploadBtn" class="btn" title="Eigene Schrift laden (.ttf/.otf/.woff)">Schrift laden…</button>
+            </div>
+          </div>
           <div class="adv-field">
             <label for="advColor" class="adv-label">Farbe</label>
             <input type="color" id="advColor" value="#ffffff" title="Farbe des ausgewählten Elements">
@@ -323,6 +331,7 @@
 
 <!-- Hidden file inputs for add-image (button wired in Task 4) -->
 <input type="file" id="addImageInput" accept="image/*" hidden>
+<input type="file" id="fontUploadInput" accept=".ttf,.otf,.woff,.woff2" hidden>
 <!-- Hidden file input for Öffnen (Open project) -->
 <input type="file" id="openInput" accept="application/json,.json" hidden>
 

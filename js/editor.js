@@ -210,6 +210,67 @@
     };
   }
 
+  // ---- Fonts: curated offline system families + custom uploads (doc.fonts: {name: dataURL}) ----
+  // el.fontFamily holds a CSS family string (system) or a custom FontFace name. Both the 2D
+  // preview (drawElement) and the 3D geometry (build-parts rasterizes text) read it via canvas
+  // ctx.font, so a chosen font must be registered in document.fonts before those run.
+  var SYSTEM_FONTS = [
+    { css: 'system-ui', label: 'System' },
+    { css: 'sans-serif', label: 'Sans-Serif' },
+    { css: 'serif', label: 'Serif' },
+    { css: 'monospace', label: 'Monospace' },
+    { css: 'Arial, sans-serif', label: 'Arial' },
+    { css: '"Helvetica Neue", Helvetica, sans-serif', label: 'Helvetica' },
+    { css: 'Verdana, sans-serif', label: 'Verdana' },
+    { css: 'Tahoma, sans-serif', label: 'Tahoma' },
+    { css: 'Georgia, serif', label: 'Georgia' },
+    { css: '"Times New Roman", Times, serif', label: 'Times New Roman' },
+    { css: '"Courier New", monospace', label: 'Courier New' },
+    { css: 'Impact, sans-serif', label: 'Impact' }
+  ];
+  var _fontPromises = {}; // name -> Promise<boolean> (dedupe registration)
+  function registerFont(name, dataURL) {
+    if (!name || !dataURL || typeof FontFace === 'undefined') return Promise.resolve(false);
+    if (_fontPromises[name]) return _fontPromises[name];
+    var p = Promise.resolve().then(function () {
+      var ff = new FontFace(name, 'url(' + dataURL + ')');
+      return ff.load().then(function (loaded) { document.fonts.add(loaded); return true; });
+    }).catch(function (e) { if (window.__errs) window.__errs.push('font ' + name + ': ' + (e && e.message || e)); return false; });
+    _fontPromises[name] = p;
+    return p;
+  }
+  function registerDocFonts(d) {
+    var fonts = (d && d.fonts) || {};
+    return Promise.all(Object.keys(fonts).map(function (name) { return registerFont(name, fonts[name]); }));
+  }
+  // Fill a <select> with system families + custom (uploaded) fonts; keep `current` selectable.
+  function populateFontSelect(sel, current) {
+    if (!sel) return;
+    var opts = SYSTEM_FONTS.map(function (f) { return { v: f.css, t: f.label }; });
+    Object.keys((doc && doc.fonts) || {}).forEach(function (name) { opts.push({ v: name, t: name + ' (eigene)' }); });
+    if (current && !opts.some(function (o) { return o.v === current; })) opts.unshift({ v: current, t: current });
+    sel.innerHTML = opts.map(function (o) {
+      var v = String(o.v).replace(/"/g, '&quot;');
+      return '<option value="' + v + '"' + (o.v === current ? ' selected' : '') + '>' + o.t + '</option>';
+    }).join('');
+  }
+  function handleFontUpload(file) {
+    if (!file) return;
+    var base = (file.name || 'Schrift').replace(/\.[^.]+$/, '').replace(/[^\w \-]/g, '').trim() || 'Schrift';
+    var rd = new FileReader();
+    rd.onload = function () {
+      if (!doc.fonts) doc.fonts = {};
+      doc.fonts[base] = rd.result;
+      registerFont(base, rd.result).then(function () {
+        var el = selectedEl();
+        if (el && el.type === 'text') el.fontFamily = base;
+        refreshAdvancedForSelection();
+        render2D(); scheduleRebuild3D();
+      });
+    };
+    rd.readAsDataURL(file);
+  }
+
   // Returns a cached off-screen canvas showing the processed image for the given element:
   //   heightmap  → grayscale (brightness-inverted when el.depth.invert).
   //   colorLayers → each opaque pixel mapped to the nearest palette color + remap applied.
@@ -374,21 +435,32 @@
     var childCount = {};
     hexes.forEach(function (nat) { var rt = rootOf(nat); childCount[rt] = (childCount[rt] || 0) + 1; });
     var visible = hexes.filter(function (nat) { return rootOf(nat) === nat; });
+    // Slot / print-layer number per color so the palette reads as an ordered slot list:
+    // bands (AMS) = luminance rank (darkest = slot 1); stepped/flush = palette order.
+    var style = (el.depth && el.depth.colorLayerStyle) || ((el.depth && el.depth.flush) ? 'bands' : 'stepped');
+    var effOf = function (nat) { return (remap[nat] || nat).toUpperCase(); };
+    var lumOf = function (hex) { var c = window.hexToRgb(hex) || [0, 0, 0]; return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
+    var slotOrder = (style === 'bands')
+      ? visible.slice().sort(function (a, b) { return lumOf(effOf(a)) - lumOf(effOf(b)); })
+      : visible.slice();
+    var slotOf = {}; slotOrder.forEach(function (nat, i) { slotOf[nat] = i + 1; });
     var html = visible.map(function (nat) {
       var eff = remap[nat] || nat.toLowerCase();
       var count = childCount[nat] || 1;
-      // Merge menu: fold THIS color into another visible color, or split it back apart.
-      var opts = '<option value="">⤵</option>';
-      visible.forEach(function (other) {
+      var slot = slotOf[nat];
+      // Merge menu: fold THIS color into another slot (listed in slot order), or split apart.
+      var opts = '<option value="">⤵ zusammenführen…</option>';
+      slotOrder.forEach(function (other) {
         if (other === nat) return;
-        opts += '<option value="' + other + '">→ ' + (remap[other] || other.toLowerCase()) + '</option>';
+        opts += '<option value="' + other + '">→ Slot ' + slotOf[other] + ' · ' + (remap[other] || other.toLowerCase()) + '</option>';
       });
       if (count > 1) opts += '<option value="__unmerge">↩ auftrennen (' + count + ')</option>';
-      return '<span class="pal-entry" draggable="true" data-orig="' + nat + '">'
+      return '<span class="pal-entry" draggable="true" data-orig="' + nat + '" title="Slot ' + slot + '">'
+        + '<span class="pal-slot" aria-hidden="true">' + slot + '</span>'
         + '<span class="grip" aria-hidden="true">⠿</span>'
         + '<input type="color" class="sw-edit" data-orig="' + nat + '" value="' + eff + '" title="' + nat + ' → ' + eff + '">'
         + (count > 1 ? '<span class="pal-count" title="' + count + ' Farben zusammengeführt">' + count + '</span>' : '')
-        + '<select class="sw-merge" data-orig="' + nat + '" title="Farbe zusammenführen">' + opts + '</select>'
+        + '<select class="sw-merge" data-orig="' + nat + '" title="Mit anderem Slot zusammenführen">' + opts + '</select>'
         + '</span>';
     }).join('');
     cont.innerHTML = html || '<span class="hint">–</span>';
@@ -1832,6 +1904,15 @@
     if (advTextNode) advTextNode.value = isText ? (el.text || "") : "";
     if (simpleTextNode) simpleTextNode.value = isText ? (el.text || "") : "";
 
+    // Font controls (Schriftart + Fett + Upload): text elements only.
+    var advFontField = document.getElementById("advFontField");
+    if (advFontField) advFontField.hidden = !isText;
+    if (isText) {
+      populateFontSelect(document.getElementById("advFontFamily"), el.fontFamily || "system-ui");
+      var boldNode = document.getElementById("advFontBold");
+      if (boldNode) boldNode.checked = (el.fontWeight === "bold" || el.fontWeight === 700 || el.fontWeight === "700");
+    }
+
     // Palette swatches: show only for image elements in colorLayers mode.
     renderPaletteSwatches(el);
   }
@@ -1946,6 +2027,32 @@
     if (adv) adv.value = node.value;
     renderLayers();
   });
+
+  // -- Font family + weight (text elements) --
+  bindElementField("advFontFamily", "change", function (el, node) {
+    if (el.type !== "text") return false;
+    el.fontFamily = node.value;
+    renderLayers();
+  });
+
+  bindElementField("advFontBold", "change", function (el, node) {
+    if (el.type !== "text") return false;
+    el.fontWeight = node.checked ? "bold" : "normal";
+  });
+
+  // -- Custom font upload (.ttf/.otf/.woff) → FontFace + doc.fonts --
+  (function () {
+    var btn = document.getElementById("fontUploadBtn");
+    var inp = document.getElementById("fontUploadInput");
+    if (btn && inp) {
+      btn.addEventListener("click", function () { inp.click(); });
+      inp.addEventListener("change", function (e) {
+        var f = e.target.files && e.target.files[0];
+        if (f) handleFontUpload(f);
+        inp.value = "";
+      });
+    }
+  })();
 
   // -- Per-element direction (Erhaben / Vertieft) --
   bindElementField("advDirRaised", "click", function (el) {
@@ -2066,6 +2173,8 @@
     Object.assign(doc, newDoc);
     state.selectedId = null;
     defaultDirection = "raised";
+    // Register any embedded custom fonts before rendering, then repaint once ready.
+    registerDocFonts(doc).then(function () { render2D(); scheduleRebuild3D(); });
     // Re-decode images: deserializeProject sets _img=null; renderer skips images without _img.
     doc.elements.forEach(function (el) {
       if (el.type === "image" && el.src) {

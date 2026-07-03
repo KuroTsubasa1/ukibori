@@ -432,6 +432,12 @@
   input[type=color].sw-edit { width: 30px; height: 22px; border: none; border-radius: 5px; padding: 0; cursor: pointer; background: none; }
   input[type=color].sw-edit::-webkit-color-swatch-wrapper { padding: 0; }
   input[type=color].sw-edit::-webkit-color-swatch { border: 1px solid var(--line); border-radius: 5px; }
+  /* Slot / print-layer number badge (palette reads as an ordered slot list). */
+  .pal-slot {
+    min-width: 16px; height: 16px; padding: 0 2px; border-radius: 4px; font-size: 10px;
+    line-height: 16px; text-align: center; background: var(--line); color: var(--fg);
+    font-weight: 600; font-variant-numeric: tabular-nums;
+  }
   /* Merge count badge + fold-into menu (Farbe zusammenführen). */
   .pal-count {
     min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; font-size: 10px;
