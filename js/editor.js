@@ -190,7 +190,9 @@
       JSON.stringify(r.remap || {}),
       JSON.stringify(r.order || []),
       JSON.stringify(r.merges || {}),
-      (d && d.minIsland != null ? d.minIsland : 0)
+      (d && d.minIsland != null ? d.minIsland : 0),
+      // AMS bands elements render from the shared palette → cache must track it.
+      ((d && d.colorLayerStyle) === 'bands' ? JSON.stringify(doc.amsPalette || []) : '')
     ].join('|');
   }
 
@@ -310,14 +312,20 @@
         o[i*4] = v; o[i*4+1] = v; o[i*4+2] = v; o[i*4+3] = 255;
       }
     } else if (mode === 'colorLayers') {
-      // Reduced palette + remap: mirrors what the engine exports.
-      var shim = __makeV1Shim(el);
+      // Mirrors __renderElementV2: an AMS 'bands' element snaps to the shared doc.amsPalette;
+      // otherwise the per-element reduced palette + merges + remap. Keeps 2D == 3D/export.
       var r = depth.reduce || {};
+      var useGlobalAms = colorStyleOf(el) === 'bands' && Array.isArray(doc.amsPalette) && doc.amsPalette.length > 0;
       try {
+        if (useGlobalAms) {
+          for (var jg = 0; jg < n; jg++) {
+            if (d[jg * 4 + 3] < 128) continue;
+            var ac = window.hexToRgb(window.nearestAmsColor(doc.amsPalette, d[jg*4], d[jg*4+1], d[jg*4+2]));
+            o[jg*4] = ac[0]; o[jg*4+1] = ac[1]; o[jg*4+2] = ac[2]; o[jg*4+3] = 255;
+          }
+        } else {
         var pal = window.__imagePaletteFromImg(img, r.method || 'palette', r.numColors || 8, r.levels || 4);
         var remap = r.remap || {};
-        // Resolve color merges → root, then apply the root's remap — mirrors __renderElementV2
-        // so the 2D preview matches the 3D/export exactly. Empty merges ⇒ no-op.
         var mergeRoots = (window.resolveMergeRoots ? window.resolveMergeRoots(r.merges) : {});
         for (var j = 0; j < n; j++) {
           if (d[j * 4 + 3] < 128) continue;
@@ -331,6 +339,7 @@
             if (mc) { cr = mc[0]; cg = mc[1]; cb = mc[2]; }
           }
           o[j*4] = cr; o[j*4+1] = cg; o[j*4+2] = cb; o[j*4+3] = 255;
+        }
         }
         // Island removal (Inseln entfernen) — colorLayers path.
         // Fill transparent pixels with white, run removeSmallColorIslands, re-apply alpha.
@@ -430,7 +439,7 @@
         + '<span class="pal-slot" aria-hidden="true">' + (i + 1) + '</span>'
         + '<span class="grip" aria-hidden="true">⠿</span>'
         + '<input type="color" class="sw-edit ams-color" data-hex="' + hex + '" value="' + hex.toLowerCase() + '" title="Layer ' + (i + 1) + ': ' + hex + '">'
-        + '<button type="button" class="ams-del" data-hex="' + hex + '" title="Layer entfernen" aria-label="Layer entfernen">✕</button>'
+        + '<button type="button" class="ams-del" data-hex="' + hex + '" title="Layer entfernen" aria-label="Layer entfernen"' + (pal.length <= 1 ? ' disabled' : '') + '>✕</button>'
         + '</span>';
     }).join('');
     html += '<button type="button" id="amsAdd" class="btn ams-add" title="Farb-Layer hinzufügen">+ Farbe</button>';
@@ -442,18 +451,27 @@
     var cont = document.getElementById('advPaletteSwatch');
     if (!cont) return;
     var refresh = function () { renderAmsPalette(cont); render2D(); scheduleRebuild3D(); };
-    // Recolor a layer (replace its hex in place, preserving order).
+    // Recolor a layer in place (preserve order). Do NOT rebuild the swatch DOM — that would
+    // detach the live <input type=color> mid-drag; just repaint the preview + 3D.
     cont.querySelectorAll('.ams-color').forEach(function (inp) {
       inp.addEventListener('input', function (e) {
+        var v = String(e.target.value).toUpperCase();
         var arr = (doc.amsPalette || []).slice();
         var idx = arr.indexOf(e.target.dataset.hex);
-        if (idx >= 0) { arr[idx] = String(e.target.value).toUpperCase(); window.setAmsPalette(doc, arr); }
-        refresh();
+        if (idx < 0) return;
+        var dup = arr.indexOf(v);
+        if (dup !== -1 && dup !== idx) { e.target.value = String(e.target.dataset.hex).toLowerCase(); return; } // would merge two layers → ignore
+        arr[idx] = v; window.setAmsPalette(doc, arr);
+        e.target.dataset.hex = v; // keep the input anchored for repeated edits
+        render2D(); scheduleRebuild3D();
       });
     });
-    // Remove a layer.
+    // Remove a layer — but never empty the palette (that would hide the editor + "+ Farbe").
     cont.querySelectorAll('.ams-del').forEach(function (btn) {
-      btn.addEventListener('click', function (e) { window.removeAmsColor(doc, e.target.dataset.hex); refresh(); });
+      btn.addEventListener('click', function (e) {
+        if ((doc.amsPalette || []).length <= 1) return;
+        window.removeAmsColor(doc, e.target.dataset.hex); refresh();
+      });
     });
     // Add a layer (first default color not already present).
     var add = document.getElementById('amsAdd');

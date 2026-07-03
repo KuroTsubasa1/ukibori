@@ -108,6 +108,32 @@
     assert(bands.some(p => Math.abs(zbounds(p.facets).mn - T) < 1e-4), "a band starts at the plate top (level 0, no gap)");
   });
 
+  test("lingering palette, NO bands element → base plate is NOT striped (regression)", async () => {
+    const img = await imgFromBands(["#101010", "#f0f0f0"], 20, 20);
+    const d = sqDoc(); d.amsPalette = ["#101010", "#808080", "#F0F0F0"]; // populated but unused
+    const el = makeEl(img, "engraved"); el.depth.colorLayerStyle = "stepped"; // NOT bands
+    d.elements = [el];
+    const parts = buildParts(d);
+    assert(!parts.some(p => p.name.indexOf("grundplatte-band") === 0), "no base bands without a bands element");
+    assert(parts.some(p => p.name === "grundplatte"), "plain full base slab present");
+    // text-only doc with a lingering palette: also no stripes
+    const d2 = sqDoc(); d2.amsPalette = ["#101010", "#F0F0F0"];
+    const t = makeElementV2("text", { text: "Hi", cxMm: 30, cyMm: 30 });
+    d2.elements = [t];
+    assert(!buildParts(d2).some(p => p.name.indexOf("grundplatte-band") === 0), "text-only + lingering palette → no base bands");
+  });
+
+  test("deep AMS palette: engraved floors stay DISTINCT (compressed to the carve budget)", async () => {
+    const cols6 = ["#000000", "#333333", "#666666", "#999999", "#cccccc", "#ffffff"];
+    const img = await imgFromBands(cols6, 60, 12);
+    const d = sqDoc(); d.amsPalette = ["#000000", "#333333", "#666666", "#999999", "#CCCCCC", "#FFFFFF"];
+    const el = makeEl(img, "engraved"); el.depth.reduce.numColors = 6; d.elements = [el];
+    const floors = buildParts(d).filter(p => p.name.indexOf("farbe-") === 0);
+    assert(floors.length >= 4, "several deep layers present");
+    const z0s = floors.map(p => +zbounds(p.facets).mn.toFixed(4)).sort((a, b) => a - b);
+    for (let i = 1; i < z0s.length; i++) assert(z0s[i] - z0s[i - 1] > 1e-3, "floors at distinct depths (no clamp-collapse): " + z0s.join(","));
+  });
+
   test("parity: empty amsPalette leaves bands geometry byte-identical (engraved + raised)", async () => {
     const img = await imgFromBands(["#1a1a1a", "#888888", "#e0e0e0"], 24, 24);
     for (const dir of ["engraved", "raised"]) {

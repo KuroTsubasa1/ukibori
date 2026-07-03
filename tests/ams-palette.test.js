@@ -16,6 +16,15 @@
     assert(Array.isArray(m.amsPalette) && m.amsPalette.length === 0, "backfilled to []");
   });
 
+  test("migrateProject normalizes an existing amsPalette (lowercase → UPPERCASE, drops invalid)", () => {
+    const d = defaultDoc(); d.amsPalette = ["#abcdef", "bad", "#123456", "#ABCDEF"];
+    const m = migrateProject(d);
+    assertEqual(JSON.stringify(m.amsPalette), JSON.stringify(["#ABCDEF", "#123456"]), "uppercased, invalid dropped, deduped");
+    // a non-array amsPalette is coerced to []
+    const d2 = defaultDoc(); d2.amsPalette = "oops";
+    assertEqual(JSON.stringify(migrateProject(d2).amsPalette), "[]", "non-array → []");
+  });
+
   test("seedAmsPalette: dedups, normalizes to UPPERCASE, orders darkest→lightest", () => {
     const d = defaultDoc();
     window.seedAmsPalette(d, ["#e0e0e0", "1a1a1a", "#888888", "#E0E0E0"]);

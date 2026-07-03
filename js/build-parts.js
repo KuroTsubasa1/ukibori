@@ -370,8 +370,11 @@
     let bandsElemCount = 0;
     // AMS shared palette: when set, a color's layer index (and thus depth) is its position in the
     // global palette, so the same color lands at the same depth across every element.
-    const ams = (doc.amsPalette && doc.amsPalette.length) ? doc.amsPalette : null;
-    const amsRank = ams ? ((hex) => { const i = ams.indexOf(hex); return i < 0 ? ams.length : i; }) : null;
+    const ams = (Array.isArray(doc.amsPalette) && doc.amsPalette.length) ? doc.amsPalette : null;
+    const amsRank = ams ? ((hex) => { const i = ams.indexOf(hex); return i < 0 ? ams.length - 1 : i; }) : null;
+    // Compress the per-layer step so the whole palette fits the plate's carve budget — deep
+    // palettes then keep DISTINCT floors instead of clamping several layers onto one depth.
+    const amsStep = ams ? Math.min(step, maxRecess / ams.length) : step;
     for (const ei of special) {
       const el = doc.elements[ei];
       const style = colorStyleOf(el);
@@ -410,7 +413,7 @@
         const N = sorted.length;
         const n = cols * rows;
         // depth of the color at sorted position k: global (amsRank+1)*step, else per-element (k+1)*step.
-        const depthOfPos = (k) => (ams ? (amsRank(sorted[k]) + 1) : (k + 1)) * step;
+        const depthOfPos = (k) => ams ? (amsRank(sorted[k]) + 1) * amsStep : (k + 1) * step;
         // cumUpTo[k] = union of pixels of the colors at sorted positions 0..k (layer index <= this).
         const cumUpTo = new Array(N);
         cumUpTo[0] = presentSets.get(sorted[0]);
@@ -453,7 +456,11 @@
     // global sort/count would carve deeper than any single inlay), so fall back to a plain base.
     // AMS shared palette → band the base with the FULL palette in layer order (multi-element safe).
     // No shared palette → legacy: only band for a single bands element (else plain base).
-    const bandHexes = ams ? ams.slice() : ((bandsElemCount === 1) ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []);
+    // Band the base ONLY when an engraved bands element is actually present in this build — a
+    // lingering (populated-but-unused) amsPalette must NOT stripe the plate of a non-AMS design.
+    const bandHexes = bandsElemCount > 0
+      ? (ams ? ams.slice() : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []))
+      : [];
     if (bandHexes.length > 0) {
       const N = bandHexes.length;
       const avail = Math.max(0, T - minBase);
@@ -682,7 +689,7 @@
     // Luminance of a #RRGGBB hex string (0-255 scale, BT.601).
     const hexLum = (hex) => { const c = window.hexToRgb(hex); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
     // AMS shared palette: a color's height layer = its global palette index (shared across elements).
-    const ams = (doc.amsPalette && doc.amsPalette.length) ? doc.amsPalette : null;
+    const ams = (Array.isArray(doc.amsPalette) && doc.amsPalette.length) ? doc.amsPalette : null;
     const amsRankR = ams ? ((hex) => { const i = ams.indexOf(hex); return i < 0 ? ams.length - 1 : i; }) : null;
 
     const groups = new Map(); // "ei|hex" -> {ei, hex, set}

@@ -144,7 +144,10 @@ function migrateProject(doc) {
   if (doc.version === DOC_VERSION) {
     // Already v2: fill fields added after the v2 schema shipped (older saves lack them).
     if (doc.body && doc.body.frame == null) doc.body.frame = defaultFrame();
-    if (doc.amsPalette == null) doc.amsPalette = []; // AMS shared palette (added later)
+    // AMS shared palette: backfill if missing, else normalize (uppercase / dedup / drop invalid)
+    // so a hand-edited or older save can't feed the engine a lowercase or malformed layer color.
+    if (!Array.isArray(doc.amsPalette)) doc.amsPalette = [];
+    else if (doc.amsPalette.length) setAmsPalette(doc, doc.amsPalette);
     for (const el of doc.elements || []) {
       if (el.depth && el.depth.flush == null) el.depth.flush = false;
       // colorLayerStyle added in T14: derive from legacy flush when absent
