@@ -2052,7 +2052,7 @@
     if (modeSolid) modeSolid.classList.toggle("seg-active", mode === "solid");
     if (modeColorLayers) modeColorLayers.classList.toggle("seg-active", mode === "colorLayers");
     if (modeHeightmap) modeHeightmap.classList.toggle("seg-active", mode === "heightmap");
-    renderPaletteSwatches(el);
+    refreshAdvancedForSelection(); // recompute palette + relief-height field visibility for the new mode
     render2D();
     scheduleRebuild3D();
   }
@@ -2168,7 +2168,7 @@
   // -- Relief height (Einfarbig + Gestuft): how far the element rises / recesses --
   bindElementField("advReliefHeight", "input", function (el, node) {
     var v = parseFloat(node.value);
-    if (isNaN(v) || v < 0.05) return false;
+    if (isNaN(v) || v < 0) return false; // 0 allowed = no relief (off)
     if (!el.depth) return false;
     el.depth.heightMm = v;
   });

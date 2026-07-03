@@ -286,6 +286,9 @@
   /* ============================================================
      Simple sidebar — card sections
      ============================================================ */
+  /* Scroll the Simple sidebar when its sections exceed the viewport (.sidebar is
+     overflow:hidden; without this the lower controls are unreachable). */
+  #sidebarSimple { overflow-y: auto; }
   .sp-section {
     padding: var(--sp-2) var(--sp-3);
     border-bottom: 1px solid var(--line);

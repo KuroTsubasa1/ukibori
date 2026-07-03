@@ -345,6 +345,32 @@
     assertClose(Math.max(...pr.map(p => zbounds(p.facets).mx)), T + 2.4, 1e-5, "top color at T + heightMm");
   });
 
+  test("relief height: raised stepped clamps each rank to >= one layer (printability)", async () => {
+    const img = await threeColorImg(24, 24);
+    const d = sqDoc(); const el = makeEl(img, "raised", "stepped"); el.depth.heightMm = 0.3; // /3 = 0.1 < layerH
+    d.elements = [el];
+    const tops = buildParts(d).filter(p => p.name.indexOf("erhaben") === 0).map(p => zbounds(p.facets).mx).sort((a, b) => a - b);
+    assertClose(tops[0] - T, 0.2, 1e-5, "shallowest rank clamped up to layerH (0.2)");
+    for (let i = 1; i < tops.length; i++) assert(tops[i] - tops[i - 1] >= 0.2 - 1e-6, "consecutive ranks >= layerH apart");
+  });
+
+  test("relief height: engraved stepped compresses a huge height into the carve budget (distinct)", async () => {
+    const img = await threeColorImg(24, 24);
+    const d = sqDoc(); const el = makeEl(img, "engraved", "stepped"); el.depth.heightMm = 10; // ≫ plate carve budget
+    d.elements = [el];
+    const z0s = buildParts(d).filter(p => p.name.indexOf("farbe-") === 0).map(p => +zbounds(p.facets).mn.toFixed(4)).sort((a, b) => a - b);
+    assert(z0s.length >= 2, "floors present");
+    for (let i = 1; i < z0s.length; i++) assert(z0s[i] - z0s[i - 1] > 1e-3, "floors stay distinct (no clamp-collapse): " + z0s.join(","));
+  });
+
+  test("relief height: 0 = off (raised solid emits no prism)", async () => {
+    const img = await threeColorImg(24, 24);
+    const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
+    el.depth.direction = "raised"; el.depth.mode = "solid"; el.depth.heightMm = 0; el._img = img;
+    const d = sqDoc(); d.elements = [el];
+    assert(!buildParts(d).some(p => p.name.indexOf("erhaben") === 0), "heightMm 0 → no raised prism (element flush)");
+  });
+
   test("frame + bands: the Rand-Rahmen ring is NOT color-banded (bands inset from plate edge)", async () => {
     const img = await threeColorImg(24, 24);
     const d = sqDoc(); d.body.frame = { widthMm: 6, heightMm: 2, color: "#00aa00" };

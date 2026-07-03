@@ -144,6 +144,7 @@
     canvas.addEventListener('contextmenu', e => e.preventDefault()); // allow right-drag to pan
     canvas.addEventListener('pointerdown', e => {
       mode = (e.button === 2 || e.button === 1 || e.shiftKey) ? 'pan' : 'rotate';
+      if (mode === 'pan') e.preventDefault(); // suppress middle-button autoscroll / text selection
       lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId);
     });
     canvas.addEventListener('pointermove', e => {

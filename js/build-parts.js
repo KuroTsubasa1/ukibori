@@ -322,13 +322,19 @@
     // height). Depth is per element, so each element's relief height is independent of the others.
     const depthForOwnerHex = (ei, hex) => {
       const el = doc.elements[ei];
-      const h = Math.max((el && el.depth && el.depth.heightMm) || 0, layerH);
+      const hm = (el && el.depth && el.depth.heightMm != null) ? el.depth.heightMm : layerH;
+      const h = hm <= 0 ? 0 : Math.max(hm, layerH); // Relief-Höhe 0 = no recess (off)
+      if (h <= 0) return 0;
       if (el && el.depth && el.depth.mode === "colorLayers") {
         const remap = (el.depth.reduce && el.depth.reduce.remap) || {};
         const seq = __orderedNaturalHexesV2(el).map(nat => { const c = window.hexToRgb(remap[nat] || nat); return __hex(c[0], c[1], c[2]); });
         const N = seq.length || 1;
         const rank = seq.indexOf(hex); const r = rank < 0 ? 0 : rank;
-        return (r + 1) * h / N;
+        // Each rank is at least one printed layer (printable), but the whole stack is compressed
+        // into the plate's carve budget so deep palettes stay distinct instead of clamping onto
+        // one floor. maxRecess === 0 (base fills the plate) → 0 depth (graceful, no recess).
+        const perRank = Math.min(Math.max(layerH, h / N), maxRecess / N);
+        return (r + 1) * perRank;
       }
       return h;
     };
@@ -671,16 +677,21 @@
       window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
 
     const heightForElemColor = (el, hex) => {
-      const h = Math.max((el.depth && el.depth.heightMm) || 0, layerH);
+      const hm = (el.depth && el.depth.heightMm != null) ? el.depth.heightMm : layerH;
+      const h = hm <= 0 ? 0 : Math.max(hm, layerH); // Relief-Höhe 0 = no relief (off)
       if (el.depth && el.depth.mode === "colorLayers") {
         // flush (Eine Fläche): every color spans [T, T+step] → one flat surface.
         if (colorStyleOf(el) === "flush") return step;
+        if (h <= 0) return 0;
         // stepped: colors split the relief height evenly (topmost color reaches heightMm).
         const remap = (el.depth.reduce && el.depth.reduce.remap) || {};
         const seq = __orderedNaturalHexesV2(el).map(nat => { const c = window.hexToRgb(remap[nat] || nat); return __hex(c[0], c[1], c[2]); });
         const N = seq.length || 1;
         const rank = seq.indexOf(hex); const r = rank < 0 ? 0 : rank;
-        return (r + 1) * h / N;
+        // Each color layer is at least one printed layer thick (raised builds up freely, so no
+        // upper cap); topmost color reaches ~heightMm when heightMm/N ≥ layerH.
+        const perRank = Math.max(layerH, h / N);
+        return (r + 1) * perRank;
       }
       return h;
     };
@@ -758,6 +769,7 @@
         // Path 2 — existing per-color prism logic (non-flush or non-colorLayers). UNCHANGED.
         for (const g of colorGroups) {
           const h = heightForElemColor(el, g.hex);
+          if (h <= 0) continue; // Relief-Höhe 0 → no raised prism (element flush with the plate)
           const facets = tracedFacets((c, r) => g.set[idx(c, r)] === 1, h, T);
           if (facets.length) parts.push({ name: "erhaben-" + (++pn), color: window.hexToRgb(g.hex), facets });
         }
