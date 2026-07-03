@@ -102,6 +102,9 @@ function defaultDoc() {
     // ring stands proud above the base top face (mm). Both used only when type === 'loop'.
     mount: { type: "none", xMm: 25, yMm: 10.5, diameterMm: 5, ringThicknessMm: 0, ringHeightMm: 2, marginMm: 8 },
     resolution: 1024, colorStepLayers: 2,
+    // AMS shared filament palette: ordered UPPERCASE hex layers (index 0 = layer 1 = bottom,
+    // darkest by default). Empty = not in use → legacy per-element bands behavior (parity).
+    amsPalette: [],
     elements: [], fonts: {},
   };
 }
@@ -141,6 +144,7 @@ function migrateProject(doc) {
   if (doc.version === DOC_VERSION) {
     // Already v2: fill fields added after the v2 schema shipped (older saves lack them).
     if (doc.body && doc.body.frame == null) doc.body.frame = defaultFrame();
+    if (doc.amsPalette == null) doc.amsPalette = []; // AMS shared palette (added later)
     for (const el of doc.elements || []) {
       if (el.depth && el.depth.flush == null) el.depth.flush = false;
       // colorLayerStyle added in T14: derive from legacy flush when absent
@@ -173,6 +177,7 @@ function migrateProject(doc) {
       : { type: "none", xMm: (doc.widthMm || 0) / 2, yMm: 10.5, diameterMm: 5, ringThicknessMm: 0, ringHeightMm: 2, marginMm: 8 },
     resolution: doc.resolution != null ? doc.resolution : 1024,
     colorStepLayers: doc.colorStepLayers != null ? doc.colorStepLayers : 2,
+    amsPalette: [],
     elements: (doc.elements || []).map(el => migrateElement(el, doc, layerH)),
     fonts: doc.fonts || {},
   };
@@ -235,6 +240,63 @@ function pruneReduceMerges(reduce, paletteHexes) {
   return reduce;
 }
 
+// === AMS shared filament palette (doc.amsPalette) ==================================
+// An ordered list of UPPERCASE hex layers shared by the whole print. When non-empty, bands
+// (AMS) elements quantize to it and share layer heights, and the base plate bands follow it.
+function __amsNormHex(h) {
+  if (h == null) return null;
+  var s = String(h).trim();
+  if (s[0] !== '#') s = '#' + s;
+  if (!/^#[0-9a-fA-F]{6}$/.test(s)) return null;
+  return s.toUpperCase();
+}
+function __amsLum(hex) {
+  var r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  return 0.299 * r + 0.587 * g + 0.114 * b;
+}
+// Populate an empty amsPalette from `hexes` (dedup, normalize, default order darkest→lightest).
+// No-op if the palette is already seeded — user edits/order are preserved.
+function seedAmsPalette(doc, hexes) {
+  if (!doc) return doc;
+  if (Array.isArray(doc.amsPalette) && doc.amsPalette.length) return doc;
+  var seen = {}, out = [];
+  (hexes || []).forEach(function (h) { var H = __amsNormHex(h); if (H && !seen[H]) { seen[H] = 1; out.push(H); } });
+  out.sort(function (a, b) { return __amsLum(a) - __amsLum(b); });
+  doc.amsPalette = out;
+  return doc;
+}
+function addAmsColor(doc, hex) {
+  var H = __amsNormHex(hex); if (!doc || !H) return doc;
+  if (!Array.isArray(doc.amsPalette)) doc.amsPalette = [];
+  if (doc.amsPalette.indexOf(H) === -1) doc.amsPalette.push(H);
+  return doc;
+}
+function removeAmsColor(doc, hex) {
+  var H = __amsNormHex(hex); if (!doc || !H || !Array.isArray(doc.amsPalette)) return doc;
+  doc.amsPalette = doc.amsPalette.filter(function (h) { return h !== H; });
+  return doc;
+}
+// Replace the palette with a validated, deduped, normalized array (used by drag-reorder).
+function setAmsPalette(doc, arr) {
+  if (!doc) return doc;
+  var seen = {}, out = [];
+  (arr || []).forEach(function (h) { var H = __amsNormHex(h); if (H && !seen[H]) { seen[H] = 1; out.push(H); } });
+  doc.amsPalette = out;
+  return doc;
+}
+// Nearest palette hex to an [r,g,b] (Euclidean), or null if the palette is empty.
+function nearestAmsColor(amsPalette, r, g, b) {
+  if (!amsPalette || !amsPalette.length) return null;
+  var best = null, bestD = Infinity;
+  for (var i = 0; i < amsPalette.length; i++) {
+    var h = amsPalette[i];
+    var pr = parseInt(h.slice(1, 3), 16), pg = parseInt(h.slice(3, 5), 16), pb = parseInt(h.slice(5, 7), 16);
+    var d = (pr - r) * (pr - r) + (pg - g) * (pg - g) + (pb - b) * (pb - b);
+    if (d < bestD) { bestD = d; best = h; }
+  }
+  return best;
+}
+
 // Flatten reduce.merges to a { naturalHex: rootHex } map (chains resolved, cycles guarded).
 function resolveMergeRoots(merges) {
   const out = {};
@@ -259,3 +321,8 @@ window.mergeReduceColors = mergeReduceColors;
 window.unmergeReduceColor = unmergeReduceColor;
 window.resolveMergeRoots = resolveMergeRoots;
 window.pruneReduceMerges = pruneReduceMerges;
+window.seedAmsPalette = seedAmsPalette;
+window.addAmsColor = addAmsColor;
+window.removeAmsColor = removeAmsColor;
+window.setAmsPalette = setAmsPalette;
+window.nearestAmsColor = nearestAmsColor;
