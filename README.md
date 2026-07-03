@@ -6,7 +6,7 @@
 
 **Verwandle jedes Bild in ein erhabenes 3D-Relief — direkt im Browser.**
 
-Bild · Text · QR → Relief · Schwarz-Weiß & Farbe · KI-Freistellung · 3D-Vorschau · 100 % lokal.
+Bild · Text · QR → Relief · Schwarz-Weiß, Farbe & AMS-Mehrfarb · KI-Freistellung · 3D-Vorschau · 100 % lokal.
 
 ![lokal](https://img.shields.io/badge/100%25-lokal%20im%20Browser-4f46e5)
 ![Build](https://img.shields.io/badge/Build-keiner-16161a)
@@ -65,8 +65,18 @@ Bild · Text · QR → Relief · Schwarz-Weiß & Farbe · KI-Freistellung · 3D-
 - **3D-Export** — **`.3mf`** (jede Farbe als eigenes Objekt für Mehrfarb-/AMS-Druck),
   universelles **`.stl`** und vektorisiertes **`.svg`** (potrace) — über den
   Export-Dialog mit eigenem Dateinamen.
-- **Farb-3D** — wahlweise gleichmäßige Höhe oder **Helligkeit → Höhe** (gestuftes
-  Mehrfarb-Relief).
+- **Farb-Relief, drei Stapel-Stile** — **Gestuft** (Rang-Höhen), **Eine Fläche**
+  (alle Farben auf einer Ebene) oder **AMS-Farbschichten** (eine Farbe pro Druck­schicht,
+  gemacht für Filament-Wechsel). Funktioniert erhaben **und** vertieft.
+- **AMS-Filament-Palette** — eine gemeinsame, geordnete Farbschicht-Liste fürs ganze
+  Modell: Farben **hinzufügen**, per **Ziehen umsortieren** (welche Farbe auf welcher
+  Schicht druckt) und **zusammenführen** (zwei Farben teilen sich eine Schicht — glättet
+  verrauschte Bilder). Alle Elemente rasten auf dieselben Schichten ein, sodass gleiche
+  Farben eine Schicht teilen. Im vertieften AMS-Modus wird auch die **Grundplatte** passend
+  in Farbschichten geteilt, damit jede Druck­schicht einfarbig bleibt.
+- **Helligkeit → Höhe** — kontinuierliches Höhenrelief direkt aus der Bildhelligkeit.
+- **Schriftarten** — System-Schriften + **Fett**, oder eine eigene **`.ttf`/`.otf`/`.woff`**
+  laden (lokal eingebettet und im Projekt gespeichert).
 - **Live-3D-Vorschau** — dreh- & zoombare three.js-Ansicht des exakten Druck­modells
   (2D⇄3D-Umschalter).
 - **Vorlagen** — Einstellungen werden gespeichert; mitgelieferte Presets

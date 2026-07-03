@@ -19,6 +19,10 @@
       text: 'Wähle Form und Größe deines Objekts — Rechteck für Lesezeichen oder Untersetzer, Kreis für Untersetzer oder Schlüsselanhänger.'
     },
     {
+      id: 'viewAdvanced',
+      text: 'Erweitert schaltet mehr frei: Farb-Stapelung inkl. AMS-Farbschichten (eine Farbe pro Druckschicht) mit gemeinsamer Filament-Palette zum Umsortieren, Hinzufügen & Zusammenführen — plus Schriftarten mit eigenen Fonts.'
+    },
+    {
       id: 'exportBtn',
       text: 'Fertig? Exportiere als 3MF/STL für den 3D-Druck.'
     }
