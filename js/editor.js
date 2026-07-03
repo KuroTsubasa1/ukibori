@@ -403,6 +403,84 @@
     return cv2;
   }
 
+  // ---- AMS shared filament palette (doc-level) ----
+
+  // The element's current effective colors (natural → merge-root → remap), used to seed the
+  // shared palette the first time an element is switched to AMS.
+  function elementEffectiveHexes(el) {
+    var nats = [];
+    try { nats = window.__orderedNaturalHexes(__makeV1Shim(el)); } catch (e) {}
+    var reduce = (el.depth && el.depth.reduce) || {};
+    var remap = reduce.remap || {};
+    var roots = (window.resolveMergeRoots ? window.resolveMergeRoots(reduce.merges) : {});
+    var out = [], seen = {};
+    nats.forEach(function (nat) {
+      var root = roots[nat] || nat;
+      var eff = String(remap[root] || root).toUpperCase();
+      if (!seen[eff]) { seen[eff] = 1; out.push(eff); }
+    });
+    return out;
+  }
+
+  // Render the shared AMS palette as an ordered layer list: slot # · color chip · remove, + add.
+  function renderAmsPalette(cont) {
+    var pal = doc.amsPalette || [];
+    var html = pal.map(function (hex, i) {
+      return '<span class="pal-entry ams-entry" draggable="true" data-hex="' + hex + '" title="Layer ' + (i + 1) + '">'
+        + '<span class="pal-slot" aria-hidden="true">' + (i + 1) + '</span>'
+        + '<span class="grip" aria-hidden="true">⠿</span>'
+        + '<input type="color" class="sw-edit ams-color" data-hex="' + hex + '" value="' + hex.toLowerCase() + '" title="Layer ' + (i + 1) + ': ' + hex + '">'
+        + '<button type="button" class="ams-del" data-hex="' + hex + '" title="Layer entfernen" aria-label="Layer entfernen">✕</button>'
+        + '</span>';
+    }).join('');
+    html += '<button type="button" id="amsAdd" class="btn ams-add" title="Farb-Layer hinzufügen">+ Farbe</button>';
+    cont.innerHTML = html;
+    wireAmsPalette();
+  }
+
+  function wireAmsPalette() {
+    var cont = document.getElementById('advPaletteSwatch');
+    if (!cont) return;
+    var refresh = function () { renderAmsPalette(cont); render2D(); scheduleRebuild3D(); };
+    // Recolor a layer (replace its hex in place, preserving order).
+    cont.querySelectorAll('.ams-color').forEach(function (inp) {
+      inp.addEventListener('input', function (e) {
+        var arr = (doc.amsPalette || []).slice();
+        var idx = arr.indexOf(e.target.dataset.hex);
+        if (idx >= 0) { arr[idx] = String(e.target.value).toUpperCase(); window.setAmsPalette(doc, arr); }
+        refresh();
+      });
+    });
+    // Remove a layer.
+    cont.querySelectorAll('.ams-del').forEach(function (btn) {
+      btn.addEventListener('click', function (e) { window.removeAmsColor(doc, e.target.dataset.hex); refresh(); });
+    });
+    // Add a layer (first default color not already present).
+    var add = document.getElementById('amsAdd');
+    if (add) add.addEventListener('click', function () {
+      var cands = ['#808080', '#BBBBBB', '#555555', '#CC4444', '#4488CC', '#44AA66', '#DDCC44', '#000000', '#FFFFFF'];
+      var pick = cands.filter(function (c) { return (doc.amsPalette || []).indexOf(c) === -1; })[0] || '#808080';
+      window.addAmsColor(doc, pick); refresh();
+    });
+    // Drag to reorder = set which layer prints on which Z-band.
+    var dragSrc = null;
+    cont.querySelectorAll('.ams-entry').forEach(function (entry) {
+      entry.addEventListener('dragstart', function () { dragSrc = entry.dataset.hex; entry.classList.add('dragging'); });
+      entry.addEventListener('dragend', function () { dragSrc = null; entry.classList.remove('dragging'); cont.querySelectorAll('.ams-entry').forEach(function (x) { x.classList.remove('drag-over'); }); });
+      entry.addEventListener('dragover', function (e) { e.preventDefault(); entry.classList.add('drag-over'); });
+      entry.addEventListener('dragleave', function () { entry.classList.remove('drag-over'); });
+      entry.addEventListener('drop', function (e) {
+        e.preventDefault(); entry.classList.remove('drag-over');
+        var tgt = entry.dataset.hex; if (!dragSrc || dragSrc === tgt) return;
+        var arr = (doc.amsPalette || []).slice();
+        var from = arr.indexOf(dragSrc), to = arr.indexOf(tgt);
+        if (from < 0 || to < 0) return;
+        arr.splice(to, 0, arr.splice(from, 1)[0]);
+        window.setAmsPalette(doc, arr); refresh();
+      });
+    });
+  }
+
   // ---- Palette swatch UI (Advanced Umwandlung, colorLayers mode) ----
 
   function renderPaletteSwatches(el) {
@@ -416,6 +494,13 @@
     var colorStyleField = document.getElementById('colorStyleField');
     if (colorStyleField) colorStyleField.hidden = !isColorLayers;
     if (!isColorLayers) { cont.innerHTML = ''; return; }
+    // AMS shared palette active for a bands element → show the doc-level filament-layer editor
+    // (add / recolor / drag-reorder / remove) in place of the per-element swatches.
+    var styleNow = (el.depth && el.depth.colorLayerStyle) || ((el.depth && el.depth.flush) ? 'bands' : 'stepped');
+    if (styleNow === 'bands' && Array.isArray(doc.amsPalette) && doc.amsPalette.length) {
+      renderAmsPalette(cont);
+      return;
+    }
     // Use the v1 shim to call __orderedNaturalHexes.
     var shim = __makeV1Shim(el);
     var hexes = [];
@@ -1966,6 +2051,8 @@
     withSelected(function (el) {
       el.depth.colorLayerStyle = style;
       delete el.depth.flush;
+      // First switch to AMS seeds the shared filament palette from this element's colors.
+      if (style === "bands" && el.type === "image" && el._img) window.seedAmsPalette(doc, elementEffectiveHexes(el));
     });
     setSegActive("colorStyleSeg", style === "flush" ? "colorFlush" : style === "bands" ? "colorBands" : "colorStepped");
     refreshAdvancedForSelection();
