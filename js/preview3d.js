@@ -140,16 +140,33 @@
   api.isActive = function () { return active; };
 
   function attachOrbit(canvas) {
-    let dragging = false, lx = 0, ly = 0;
-    canvas.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId); });
+    let mode = null, lx = 0, ly = 0; // 'rotate' (left-drag) | 'pan' (right/middle/shift-drag)
+    canvas.addEventListener('contextmenu', e => e.preventDefault()); // allow right-drag to pan
+    canvas.addEventListener('pointerdown', e => {
+      mode = (e.button === 2 || e.button === 1 || e.shiftKey) ? 'pan' : 'rotate';
+      lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId);
+    });
     canvas.addEventListener('pointermove', e => {
-      if (!dragging || !orbit.center) return;
-      orbit.theta -= (e.clientX - lx) * 0.01; orbit.phi -= (e.clientY - ly) * 0.01;
-      orbit.phi = Math.max(0.05, Math.min(Math.PI - 0.05, orbit.phi));
+      if (!mode || !orbit.center) return;
+      const dx = e.clientX - lx, dy = e.clientY - ly;
       lx = e.clientX; ly = e.clientY;
+      if (mode === 'pan') {
+        // Slide the orbit center across the camera's screen plane — camera and target move
+        // together, so the model pans without rotating. Speed scales with zoom (radius).
+        const fwd = new THREE.Vector3(orbit.center.x - camera.position.x, orbit.center.y - camera.position.y, orbit.center.z - camera.position.z).normalize();
+        const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 0, 1)).normalize();
+        const up = new THREE.Vector3().crossVectors(right, fwd).normalize();
+        const k = orbit.radius * 0.0018;
+        orbit.center.x += (-dx * right.x + dy * up.x) * k;
+        orbit.center.y += (-dx * right.y + dy * up.y) * k;
+        orbit.center.z += (-dx * right.z + dy * up.z) * k;
+      } else {
+        orbit.theta -= dx * 0.01; orbit.phi -= dy * 0.01;
+        orbit.phi = Math.max(0.05, Math.min(Math.PI - 0.05, orbit.phi));
+      }
       api.orbitCamera(camera, orbit.center, orbit.radius, orbit.theta, orbit.phi); renderOnce();
     });
-    const end = () => { dragging = false; };
+    const end = () => { mode = null; };
     canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
     canvas.addEventListener('wheel', e => {
       e.preventDefault(); if (!orbit.center) return;
