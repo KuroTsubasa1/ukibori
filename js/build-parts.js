@@ -144,12 +144,17 @@
       const red = depth.reduce || { method: "palette", numColors: 8, levels: 4, remap: {} };
       const pal = window.__imagePaletteFromImg(el._img, red.method, red.numColors, red.levels);
       const remap = red.remap || {};
+      // Color merge: fold merged natural colors into their root, THEN apply the root's remap.
+      // Empty/absent merges → mergeRoots = {} → root === nat → byte-identical to pre-merge.
+      const mergeRoots = window.resolveMergeRoots ? window.resolveMergeRoots(red.merges) : {};
       const hx = (R, G, B) => ("#" + [R, G, B].map(x => x.toString(16).padStart(2, "0")).join("")).toUpperCase();
       for (let i = 0; i < n; i++) {
         if (d[i * 4 + 3] < __ALPHA_CUTOFF) continue;
         const near = window.__nearestColor(pal, d[i * 4], d[i * 4 + 1], d[i * 4 + 2]);
         let cr = near[0], cg = near[1], cb = near[2];
-        const m = remap[hx(cr, cg, cb)];
+        const nat = hx(cr, cg, cb);
+        const root = mergeRoots[nat] || nat;
+        const m = remap[root] || (root !== nat ? root : null);
         if (m) { const c = window.hexToRgb(m); cr = c[0]; cg = c[1]; cb = c[2]; }
         mask[i] = 1; r[i] = cr; g[i] = cg; b[i] = cb;
       }
@@ -347,6 +352,11 @@
     // effDepth[i] = the DEEPEST floor recess depth at pixel i (used for base-fill-behind).
     // For special pixels it is set here; for stepped pixels it stays depthFor(hex) below.
     const effDepth = new Float32Array(cols * rows);
+    // Global luminance helper + collector of the effective (remap-applied) band colors across
+    // all engraved 'bands' elements — used below to split the surrounding plate into AMS bands.
+    const lumHex = (hex) => { const c = window.hexToRgb(hex); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
+    const bandHexSet = new Set();
+    let bandsElemCount = 0;
     for (const ei of special) {
       const el = doc.elements[ei];
       const style = colorStyleOf(el);
@@ -377,8 +387,9 @@
         // depth = k*step. So each pixel's OWN color is the SHALLOWEST floor covering it
         // (visible from the top); deeper floors are the lighter colors nested beneath.
         // Emit DEEPEST first (largest region) so shallower nested floors sit inside.
-        const lum = (hex) => { const c = window.hexToRgb(hex); return 0.299*c[0] + 0.587*c[1] + 0.114*c[2]; };
-        const sorted = orderedPresent.slice().sort((a, b) => lum(a) - lum(b)); // rank1=darkest
+        const sorted = orderedPresent.slice().sort((a, b) => lumHex(a) - lumHex(b)); // rank1=darkest
+        sorted.forEach(h => bandHexSet.add(h)); // contribute to the AMS base-band palette
+        bandsElemCount++;
         const N = sorted.length;
         const n = cols * rows;
         // cumUpTo[k] = union of pixels of ranks 1..k+1 (0-indexed k). cumUpTo[N-1] = all.
@@ -412,8 +423,38 @@
       if (facets.length) baseParts.push({ name: "grundplatte", color: window.hexToRgb(baseHex), facets });
     };
     baseAdd((c, r) => comp.cutout[idx(c, r)] !== 1, minBase, 0);
-    // Band cells count as base at full height (ring wins; band never contains cutouts).
-    baseAdd((c, r) => comp.isBase[idx(c, r)] === 1 || inBand(idx(c, r)), T - minBase, minBase);
+    // Surrounding plate = base cells + Rand-Rahmen band cells (ring wins; band never has cutouts).
+    // AMS engraved-bands change request: when any engraved element uses the bands style, split
+    // this surrounding plate into horizontal color bands matching the inlay — one filament color
+    // per printed layer across the whole piece. Darkest on top (the carve reveals darkest
+    // shallowest), lightest at the bottom of the stack; below the deepest band the interior stays
+    // base color. No bands element → single full-height base slab (byte-identical parity).
+    const surroundMember = (c, r) => { const i = idx(c, r); return comp.isBase[i] === 1 || inBand(i); };
+    // Band ONLY genuine interior base cells; the Rand-Rahmen band cells (the outer perimeter,
+    // whose side walls are exposed under the single-color frame cap) stay one base-color slab.
+    const interiorMember = (c, r) => { const i = idx(c, r); return comp.isBase[i] === 1 && !inBand(i); };
+    // Split the plate only when EXACTLY ONE engraved element uses bands — its palette then maps
+    // 1:1 onto its own inlay. Multiple bands elements with distinct palettes are ambiguous (a
+    // global sort/count would carve deeper than any single inlay), so fall back to a plain base.
+    const bandHexes = (bandsElemCount === 1) ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []; // rank1 = darkest
+    if (bandHexes.length > 0) {
+      const N = bandHexes.length;
+      const avail = Math.max(0, T - minBase);
+      const bandThick = Math.min(step, avail / N); // compress to fit; never silently drop a color
+      const interiorTop = T - N * bandThick;
+      if (interiorTop - minBase > 1e-6) baseAdd(interiorMember, interiorTop - minBase, minBase); // base interior below the bands
+      // Rank k (1=darkest .. N=lightest) occupies [T-k*bandThick, T-(k-1)*bandThick].
+      for (let k = N; k >= 1; k--) {
+        const zBot = T - k * bandThick;
+        if (bandThick <= 1e-6) continue;
+        const facets = tracedFacets(interiorMember, bandThick, zBot);
+        if (facets.length) baseParts.push({ name: "grundplatte-band-" + k, color: window.hexToRgb(bandHexes[k - 1]), facets });
+      }
+      // Rand-Rahmen understructure: single base-color slab (frame cap sits on top; no stripes).
+      baseAdd((c, r) => inBand(idx(c, r)), T - minBase, minBase);
+    } else {
+      baseAdd(surroundMember, T - minBase, minBase);
+    }
     const behind = new Map();
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const i = idx(c, r);

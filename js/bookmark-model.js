@@ -193,6 +193,57 @@ function makeElementV2(type, props) {
   return e;
 }
 
+// === Color merge (Farbe zusammenführen) =====================================
+// Fold one natural palette color into another so both print at the SAME color/height
+// (flattens noisy images). Stored lazily as reduce.merges { fromNaturalHex: toNaturalHex },
+// hex keys/values UPPERCASE to match the engine's palette-hex formatting. The engine resolves
+// merges → root before applying remap, so merged pixels collapse into a single region/layer
+// and follow the target's later recolor. merges absent/empty ⇒ no-op (byte-identical parity).
+function mergeReduceColors(reduce, fromNat, toNat) {
+  if (!reduce || !fromNat || !toNat) return reduce;
+  fromNat = String(fromNat).toUpperCase();
+  toNat = String(toNat).toUpperCase();
+  if (fromNat === toNat) return reduce;
+  if (!reduce.merges) reduce.merges = {};
+  // Resolve the requested target to its own root (it may itself already be merged).
+  const rootOf = (h) => { const seen = {}; let t = String(h).toUpperCase(); while (reduce.merges[t] && !seen[t]) { seen[t] = 1; t = String(reduce.merges[t]).toUpperCase(); } return t; };
+  const tgt = rootOf(toNat);
+  if (tgt === fromNat) return reduce; // would create a cycle → ignore
+  // Redirect colors previously merged INTO fromNat so they follow to the new target.
+  for (const k in reduce.merges) if (String(reduce.merges[k]).toUpperCase() === fromNat) reduce.merges[k] = tgt;
+  reduce.merges[fromNat] = tgt;
+  // Keep fromNat in reduce.order: once merged it carries no pixels (emits no geometry), and
+  // preserving its position restores the original color rank if the user later un-merges it.
+  return reduce;
+}
+
+function unmergeReduceColor(reduce, fromNat) {
+  if (!reduce || !reduce.merges || !fromNat) return reduce;
+  delete reduce.merges[String(fromNat).toUpperCase()];
+  return reduce;
+}
+
+// Drop merge entries referencing a hex no longer in the current palette (e.g. after the color
+// count / method changed), so a merge can never leave a color hidden-but-unrecoverable in the UI.
+function pruneReduceMerges(reduce, paletteHexes) {
+  if (!reduce || !reduce.merges) return reduce;
+  const inPal = {};
+  (paletteHexes || []).forEach(h => { inPal[String(h).toUpperCase()] = 1; });
+  for (const k in reduce.merges) {
+    if (!inPal[String(k).toUpperCase()] || !inPal[String(reduce.merges[k]).toUpperCase()]) delete reduce.merges[k];
+  }
+  return reduce;
+}
+
+// Flatten reduce.merges to a { naturalHex: rootHex } map (chains resolved, cycles guarded).
+function resolveMergeRoots(merges) {
+  const out = {};
+  if (!merges) return out;
+  const root = (h) => { const seen = {}; let t = String(h).toUpperCase(); while (merges[t] && !seen[t]) { seen[t] = 1; t = String(merges[t]).toUpperCase(); } return t; };
+  for (const k in merges) out[String(k).toUpperCase()] = root(k);
+  return out;
+}
+
 window.defaultBookmark = defaultBookmark;
 window.makeImageElement = makeImageElement;
 window.makeTextElement = makeTextElement;
@@ -204,3 +255,7 @@ window.defaultFrame = defaultFrame;
 window.defaultDoc = defaultDoc;
 window.migrateProject = migrateProject;
 window.makeElementV2 = makeElementV2;
+window.mergeReduceColors = mergeReduceColors;
+window.unmergeReduceColor = unmergeReduceColor;
+window.resolveMergeRoots = resolveMergeRoots;
+window.pruneReduceMerges = pruneReduceMerges;

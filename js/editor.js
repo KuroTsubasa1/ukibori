@@ -189,6 +189,7 @@
       r.method || 'palette', r.numColors || '', r.levels || '',
       JSON.stringify(r.remap || {}),
       JSON.stringify(r.order || []),
+      JSON.stringify(r.merges || {}),
       (d && d.minIsland != null ? d.minIsland : 0)
     ].join('|');
   }
@@ -254,12 +255,16 @@
       try {
         var pal = window.__imagePaletteFromImg(img, r.method || 'palette', r.numColors || 8, r.levels || 4);
         var remap = r.remap || {};
+        // Resolve color merges → root, then apply the root's remap — mirrors __renderElementV2
+        // so the 2D preview matches the 3D/export exactly. Empty merges ⇒ no-op.
+        var mergeRoots = (window.resolveMergeRoots ? window.resolveMergeRoots(r.merges) : {});
         for (var j = 0; j < n; j++) {
           if (d[j * 4 + 3] < 128) continue;
           var near = window.__nearestColor(pal, d[j*4], d[j*4+1], d[j*4+2]);
           var cr = near[0], cg = near[1], cb = near[2];
           var natHex = __hexOfRGB(cr, cg, cb);
-          var mapped = remap[natHex];
+          var rootHex = mergeRoots[natHex] || natHex;
+          var mapped = remap[rootHex] || (rootHex !== natHex ? rootHex : null);
           if (mapped && window.hexToRgb) {
             var mc = window.hexToRgb(mapped);
             if (mc) { cr = mc[0]; cg = mc[1]; cb = mc[2]; }
@@ -358,12 +363,32 @@
       cont.innerHTML = '<span class="hint">Keine Farben gefunden</span>';
       return;
     }
-    var remap = (el.depth && el.depth.reduce && el.depth.reduce.remap) || {};
-    var html = hexes.map(function (nat) {
+    var reduce = (el.depth && el.depth.reduce) || {};
+    // Self-heal: drop merges that reference colors no longer in the palette (e.g. after the
+    // color count changed) so a merge can't leave a color hidden and unrecoverable.
+    if (window.pruneReduceMerges) window.pruneReduceMerges(reduce, hexes);
+    var remap = reduce.remap || {};
+    // Color merge: naturals folded into a root are hidden; the root shows a fold count.
+    var mergeRoots = (window.resolveMergeRoots ? window.resolveMergeRoots(reduce.merges) : {});
+    var rootOf = function (nat) { return mergeRoots[nat] || nat; };
+    var childCount = {};
+    hexes.forEach(function (nat) { var rt = rootOf(nat); childCount[rt] = (childCount[rt] || 0) + 1; });
+    var visible = hexes.filter(function (nat) { return rootOf(nat) === nat; });
+    var html = visible.map(function (nat) {
       var eff = remap[nat] || nat.toLowerCase();
+      var count = childCount[nat] || 1;
+      // Merge menu: fold THIS color into another visible color, or split it back apart.
+      var opts = '<option value="">⤵</option>';
+      visible.forEach(function (other) {
+        if (other === nat) return;
+        opts += '<option value="' + other + '">→ ' + (remap[other] || other.toLowerCase()) + '</option>';
+      });
+      if (count > 1) opts += '<option value="__unmerge">↩ auftrennen (' + count + ')</option>';
       return '<span class="pal-entry" draggable="true" data-orig="' + nat + '">'
         + '<span class="grip" aria-hidden="true">⠿</span>'
         + '<input type="color" class="sw-edit" data-orig="' + nat + '" value="' + eff + '" title="' + nat + ' → ' + eff + '">'
+        + (count > 1 ? '<span class="pal-count" title="' + count + ' Farben zusammengeführt">' + count + '</span>' : '')
+        + '<select class="sw-merge" data-orig="' + nat + '" title="Farbe zusammenführen">' + opts + '</select>'
         + '</span>';
     }).join('');
     cont.innerHTML = html || '<span class="hint">–</span>';
@@ -380,6 +405,28 @@
         el.depth.reduce.remap[e.target.dataset.orig] = e.target.value;
         e.target.title = e.target.dataset.orig + ' → ' + e.target.value;
         delete el._display; // invalidate cache
+        render2D();
+        scheduleRebuild3D();
+      });
+    });
+    // Merge menu: fold this color into another (or split it back apart). Merged colors print
+    // at one height (same color) — handy for flattening noisy images. Reuses reduce.merges.
+    cont.querySelectorAll('.sw-merge').forEach(function (sel) {
+      sel.addEventListener('change', function (e) {
+        var from = e.target.dataset.orig, val = e.target.value;
+        if (!el.depth.reduce) el.depth.reduce = {};
+        var reduce = el.depth.reduce;
+        if (val === '__unmerge') {
+          // Release every color currently folded into `from`.
+          var roots = (window.resolveMergeRoots ? window.resolveMergeRoots(reduce.merges) : {});
+          Object.keys(roots).forEach(function (nat) { if (roots[nat] === from) window.unmergeReduceColor(reduce, nat); });
+        } else if (val) {
+          window.mergeReduceColors(reduce, from, val);
+        } else {
+          return; // placeholder selected, nothing to do
+        }
+        delete el._display; // invalidate cache
+        renderPaletteSwatches(el);
         render2D();
         scheduleRebuild3D();
       });

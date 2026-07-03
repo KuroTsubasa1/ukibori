@@ -231,4 +231,92 @@
     assert(s !== b, "engraved stepped != bands");
     assert(f !== b, "engraved flush != bands");
   });
+
+  // ============ AMS ENGRAVED BASE BANDING (surrounding plate split) ============
+  // Change request: in engraved AMS (bands) mode the surrounding baseplate is split into
+  // horizontal color bands matching the inlay — one filament color per printed layer across
+  // the WHOLE piece. Darkest on top (the carve reveals darkest shallowest); below the deepest
+  // band the interior stays base color. Non-bands styles are byte-identical (no base bands).
+  test("engraved bands: surrounding plate split into N color bands (grundplatte-band-*)", async () => {
+    const img = await threeColorImg(24, 24);
+    const d = sqDoc(); d.elements = [makeEl(img, "engraved", "bands")];
+    const parts = buildParts(d);
+    const baseBands = parts.filter(p => p.name.indexOf("grundplatte-band") === 0);
+    assertEqual(baseBands.length, 3, "3 surrounding base color bands");
+    const sorted = baseBands.slice().sort((a, b) => zbounds(a.facets).mn - zbounds(b.facets).mn); // bottom→top
+    for (const p of sorted) assertClose(zbounds(p.facets).mx - zbounds(p.facets).mn, step, 1e-5, "base band is step tall");
+    assertClose(zbounds(sorted[2].facets).mx, T, 1e-5, "top base band reaches T");
+    assertClose(zbounds(sorted[0].facets).mn, T - 3 * step, 1e-5, "bottom base band starts at T-3step");
+    // Darkest on top, lightest on bottom (matches the carve depth mapping).
+    const lum = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+    const lums = sorted.map(p => lum(p.color)); // bottom→top
+    assert(lums[0] >= lums[1] && lums[1] >= lums[2], "bottom band lightest, top band darkest");
+    // One filament color per printed layer: mid of the top band is spanned by exactly one base band.
+    assertEqual(baseBands.filter(p => spansZ(p.facets, T - step / 2)).length, 1, "one base band per z-layer");
+  });
+
+  test("engraved bands: base band colors match the inlay floor colors + base interior remains", async () => {
+    const img = await threeColorImg(24, 24);
+    const d = sqDoc(); d.elements = [makeEl(img, "engraved", "bands")];
+    const parts = buildParts(d);
+    const baseBands = parts.filter(p => p.name.indexOf("grundplatte-band") === 0);
+    const floorHexes = new Set(parts.filter(p => p.name.indexOf("farbe-") === 0).map(p => p.color.join(",")));
+    assert(baseBands.length > 0, "has base bands");
+    for (const p of baseBands) assert(floorHexes.has(p.color.join(",")), "base band color = an inlay floor color");
+    assert(parts.some(p => p.name === "grundplatte"), "base-color interior grundplatte still present below the bands");
+  });
+
+  test("engraved bands: base band prisms are watertight", async () => {
+    const img = await threeColorImg(24, 24);
+    const d = sqDoc(); d.elements = [makeEl(img, "engraved", "bands")];
+    const bb = buildParts(d).filter(p => p.name.indexOf("grundplatte-band") === 0);
+    assert(bb.length === 3, "3 base bands to check");
+    for (const p of bb) assert(signedVol(p.facets) > 0, "base band " + p.name + " watertight (vol=" + signedVol(p.facets).toFixed(6) + ")");
+  });
+
+  test("parity: non-bands engraved styles emit NO surrounding base bands", async () => {
+    const img = await threeColorImg(24, 24);
+    for (const style of ["stepped", "flush"]) {
+      const d = sqDoc(); d.elements = [makeEl(img, "engraved", style)];
+      assert(!buildParts(d).some(p => p.name.indexOf("grundplatte-band") === 0), style + " engraved has no base bands");
+    }
+    const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
+    el.depth.direction = "engraved"; el.depth.mode = "solid"; el._img = img;
+    const d2 = sqDoc(); d2.elements = [el];
+    assert(!buildParts(d2).some(p => p.name.indexOf("grundplatte-band") === 0), "solid engraved has no base bands");
+  });
+
+  test("multi-element bands: 2+ bands elements fall back to a single base slab (no base bands)", async () => {
+    const img = await threeColorImg(24, 24);
+    const d = sqDoc();
+    const e1 = makeEl(img, "engraved", "bands"); e1.cxMm = 18; e1.wMm = 20;
+    const e2 = makeEl(img, "engraved", "bands"); e2.cxMm = 42; e2.wMm = 20;
+    d.elements = [e1, e2];
+    const parts = buildParts(d);
+    assert(!parts.some(p => p.name.indexOf("grundplatte-band") === 0), "ambiguous multi-palette → no base bands");
+    assert(parts.some(p => p.name === "grundplatte"), "single base slab instead");
+  });
+
+  test("overflow: many colors on a thin plate keep ALL bands (proportional, none dropped)", async () => {
+    const cv = document.createElement("canvas"); cv.width = 50; cv.height = 10; const cx = cv.getContext("2d");
+    ["#101010", "#404040", "#808080", "#b0b0b0", "#f0f0f0"].forEach((c, i) => { cx.fillStyle = c; cx.fillRect(i * 10, 0, 10, 10); });
+    const img5 = new Image(); await new Promise((res, rej) => { img5.onload = res; img5.onerror = rej; img5.src = cv.toDataURL("image/png"); });
+    const d = sqDoc(); d.body.thicknessMm = 2; d.colorStepLayers = 4; // step=0.8, 5*0.8=4 ≫ available height
+    const el = makeEl(img5, "engraved", "bands"); el.depth.reduce.numColors = 5;
+    d.elements = [el];
+    const bands = buildParts(d).filter(p => p.name.indexOf("grundplatte-band") === 0);
+    assertEqual(bands.length, 5, "all 5 base bands present (compressed, none dropped)");
+    assert(Math.max(...bands.map(p => zbounds(p.facets).mx)) <= 2 + 1e-6, "bands stay within the plate top");
+  });
+
+  test("frame + bands: the Rand-Rahmen ring is NOT color-banded (bands inset from plate edge)", async () => {
+    const img = await threeColorImg(24, 24);
+    const d = sqDoc(); d.body.frame = { widthMm: 6, heightMm: 2, color: "#00aa00" };
+    d.elements = [makeEl(img, "engraved", "bands")];
+    const bands = buildParts(d).filter(p => p.name.indexOf("grundplatte-band") === 0);
+    assertEqual(bands.length, 3, "interior still banded");
+    let x0 = Infinity, x1 = -Infinity;
+    for (const p of bands) for (const t of p.facets) for (const pt of t) { if (pt[0] < x0) x0 = pt[0]; if (pt[0] > x1) x1 = pt[0]; }
+    assert(x0 >= 3 && x1 <= 57, "base bands inset from the 0..60 plate edge (frame ring excluded): x∈[" + x0.toFixed(1) + "," + x1.toFixed(1) + "]");
+  });
 })();
