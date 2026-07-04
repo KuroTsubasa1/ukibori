@@ -1478,39 +1478,63 @@
   document.getElementById("depthEngraved").addEventListener("click", function () { applyDepth("engraved"); });
 
   // Shape: Rechteck / Kreis / Frei
+  // Toggle [hidden] on an element by id, if present.
+  function setHidden(id, hidden) { var n = document.getElementById(id); if (n) n.hidden = hidden; }
+
   function applyShape(shape) {
     doc.body.shape = shape;
-    setSegActive("shapeSeg", shape === "rect" ? "shapeRect" : shape === "circle" ? "shapeCircle" : "shapeFree");
-    document.getElementById("borderField").hidden = (shape !== "free");
-    // Rand-Rahmen: only meaningful for rect/circle plates (engine ignores it for free).
-    document.getElementById("frameField").hidden = (shape === "free");
-    // Eckenradius: only meaningful for the rectangle plate.
-    var cf = document.getElementById("cornerField");
-    if (cf) cf.hidden = (shape !== "rect");
+    var seg = shape === "rect" ? "Rect" : shape === "circle" ? "Circle" : "Free";
+    setSegActive("shapeSeg", "shape" + seg);
+    setSegActive("advShapeSeg", "advShape" + seg);      // Advanced twin
+    // border: free only; frame: rect/circle only; corner: rect only — mirror in both sidebars.
+    setHidden("borderField", shape !== "free");   setHidden("advBorderField", shape !== "free");
+    setHidden("frameField", shape === "free");    setHidden("advFrameField", shape === "free");
+    setHidden("cornerField", shape !== "rect");   setHidden("advCornerField", shape !== "rect");
     render2D();
     scheduleRebuild3D();
   }
   document.getElementById("shapeRect").addEventListener("click", function () { applyShape("rect"); });
   document.getElementById("shapeCircle").addEventListener("click", function () { applyShape("circle"); });
   document.getElementById("shapeFree").addEventListener("click", function () { applyShape("free"); });
+  document.getElementById("advShapeRect").addEventListener("click", function () { applyShape("rect"); });
+  document.getElementById("advShapeCircle").addEventListener("click", function () { applyShape("circle"); });
+  document.getElementById("advShapeFree").addEventListener("click", function () { applyShape("free"); });
+
+  // Wire a Simple+Advanced number-input pair to one apply(v); each mirrors the other's value
+  // so the two sidebars stay in sync (only the twin is written, never self → no cursor jumps).
+  function bindTwinNum(idA, idB, min, apply) {
+    [[idA, idB], [idB, idA]].forEach(function (p) {
+      var node = document.getElementById(p[0]);
+      if (!node) return;
+      node.addEventListener("input", function () {
+        var v = parseFloat(node.value);
+        if (isNaN(v) || v < min) return;
+        apply(v);
+        var twin = document.getElementById(p[1]);
+        if (twin) twin.value = node.value;
+      });
+    });
+  }
+  function bindTwinColor(idA, idB, apply) {
+    [[idA, idB], [idB, idA]].forEach(function (p) {
+      var node = document.getElementById(p[0]);
+      if (!node) return;
+      node.addEventListener("input", function () {
+        apply(node.value);
+        var twin = document.getElementById(p[1]);
+        if (twin) twin.value = node.value;
+      });
+    });
+  }
 
   // Eckenradius (shown only for Rechteck)
-  document.getElementById("cornerMm").addEventListener("input", function () {
-    var v = parseFloat(this.value);
-    if (!isNaN(v) && v >= 0) {
-      doc.body.cornerRadiusMm = v;
-      render2D();
-      scheduleRebuild3D();
-    }
+  bindTwinNum("cornerMm", "advCornerMm", 0, function (v) {
+    doc.body.cornerRadiusMm = v; render2D(); scheduleRebuild3D();
   });
 
   // Border (shown only for Free)
-  document.getElementById("borderMm").addEventListener("input", function () {
-    var v = parseFloat(this.value);
-    if (!isNaN(v) && v >= 0) {
-      doc.body.borderMm = v;
-      scheduleRebuild3D();
-    }
+  bindTwinNum("borderMm", "advBorderMm", 0, function (v) {
+    doc.body.borderMm = v; scheduleRebuild3D();
   });
 
   // Rand-Rahmen (shown for Rechteck/Kreis; engine ignores it for Frei)
@@ -1518,18 +1542,11 @@
     if (!doc.body.frame) doc.body.frame = window.defaultFrame ? window.defaultFrame() : { widthMm: 0, heightMm: 2, color: "#000000" };
     return doc.body.frame;
   }
-  document.getElementById("frameMm").addEventListener("input", function () {
-    var v = parseFloat(this.value);
-    if (!isNaN(v) && v >= 0) {
-      ensureFrame().widthMm = v;
-      render2D();
-      scheduleRebuild3D();
-    }
+  bindTwinNum("frameMm", "advFrameMm", 0, function (v) {
+    ensureFrame().widthMm = v; render2D(); scheduleRebuild3D();
   });
-  document.getElementById("frameColor").addEventListener("input", function () {
-    ensureFrame().color = this.value;
-    render2D();
-    scheduleRebuild3D();
+  bindTwinColor("frameColor", "advFrameColor", function (val) {
+    ensureFrame().color = val; render2D(); scheduleRebuild3D();
   });
   // Höhe in the Simple row; kept in sync with the Advanced #advFrameHeight field
   // (both write body.frame.heightMm).
@@ -1579,7 +1596,9 @@
         }
       }
     }
-    setSegActive("mountSeg", type === "none" ? "mountNone" : type === "hole" ? "mountHole" : "mountLoop");
+    var seg = type === "none" ? "None" : type === "hole" ? "Hole" : "Loop";
+    setSegActive("mountSeg", "mount" + seg);
+    setSegActive("advMountSeg", "advMount" + seg);      // Advanced twin
     // Re-fit canvas: domain may have expanded/contracted.
     fitScale();
     render2D();
@@ -1588,25 +1607,16 @@
   document.getElementById("mountNone").addEventListener("click", function () { applyMount("none", { snap: true }); });
   document.getElementById("mountHole").addEventListener("click", function () { applyMount("hole", { snap: true }); });
   document.getElementById("mountLoop").addEventListener("click", function () { applyMount("loop", { snap: true }); });
+  document.getElementById("advMountNone").addEventListener("click", function () { applyMount("none", { snap: true }); });
+  document.getElementById("advMountHole").addEventListener("click", function () { applyMount("hole", { snap: true }); });
+  document.getElementById("advMountLoop").addEventListener("click", function () { applyMount("loop", { snap: true }); });
 
-  // Size W/H
-  document.getElementById("sizeW").addEventListener("input", function () {
-    var v = parseFloat(this.value);
-    if (!isNaN(v) && v >= 5) {
-      doc.body.widthMm = v;
-      fitScale(); // B3: re-fit when plate dimensions change.
-      render2D();
-      scheduleRebuild3D();
-    }
+  // Size W/H (Simple sizeW/sizeH ↔ Advanced advSizeW/advSizeH)
+  bindTwinNum("sizeW", "advSizeW", 5, function (v) {
+    doc.body.widthMm = v; fitScale(); render2D(); scheduleRebuild3D(); // B3: re-fit on dim change
   });
-  document.getElementById("sizeH").addEventListener("input", function () {
-    var v = parseFloat(this.value);
-    if (!isNaN(v) && v >= 5) {
-      doc.body.heightMm = v;
-      fitScale(); // B3: re-fit when plate dimensions change.
-      render2D();
-      scheduleRebuild3D();
-    }
+  bindTwinNum("sizeH", "advSizeH", 5, function (v) {
+    doc.body.heightMm = v; fitScale(); render2D(); scheduleRebuild3D();
   });
 
   // ---- Named add-action functions (bound to both Simple and Advanced buttons) ----
@@ -1686,9 +1696,13 @@
   }());
 
   // ---- Remove Background (KI) ----
+  // Advanced twin forwards to the Simple handler (which updates both sidebars via the proxies).
+  document.getElementById("removeBgBtnAdv").addEventListener("click", function () { document.getElementById("removeBgBtn").click(); });
   document.getElementById("removeBgBtn").addEventListener("click", function () {
-    var btn = document.getElementById("removeBgBtn");
-    var statusEl = document.getElementById("bgStatus");
+    // Proxies so btn.disabled / statusEl.textContent update BOTH sidebars' controls,
+    // keeping the (special-char) body below untouched.
+    var btn = { set disabled(v) { ["removeBgBtn", "removeBgBtnAdv"].forEach(function (id) { var n = document.getElementById(id); if (n) n.disabled = v; }); } };
+    var statusEl = { set textContent(v) { ["bgStatus", "bgStatusAdv"].forEach(function (id) { var n = document.getElementById(id); if (n) n.textContent = v; }); } };
 
     var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
     if (!el || el.type !== "image" || !el._img) {
@@ -2302,6 +2316,16 @@
     if (fh) fh.value = (doc.body.frame && doc.body.frame.heightMm != null) ? doc.body.frame.heightMm : 2;
     var bc = document.getElementById("advBaseColor");
     if (bc) bc.value = doc.body.baseColor || "#000000";
+    // Objekt section (twins of the Simple plate controls). Seg-active states + field
+    // visibility are set by applyShape/applyMount (called from initSimpleUI).
+    var fr = doc.body.frame || {};
+    var setVal = function (id, v) { var n = document.getElementById(id); if (n) n.value = v; };
+    setVal("advSizeW", doc.body.widthMm);
+    setVal("advSizeH", doc.body.heightMm);
+    setVal("advCornerMm", doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 4);
+    setVal("advBorderMm", doc.body.borderMm != null ? doc.body.borderMm : 2);
+    setVal("advFrameMm", fr.widthMm != null ? fr.widthMm : 0);
+    setVal("advFrameColor", fr.color || "#000000");
     refreshAdvancedForSelection();
     renderAdvancedLayers();
   }
