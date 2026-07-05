@@ -765,8 +765,8 @@
         }
       }
     } else {
-      // free shape: draw elements only (no plate frame in 2D).
-      // NOTE: true free-shape plate outline only shown in 3D/export (2D simplification).
+      // free / image shape: draw elements only (no plate frame in 2D).
+      // NOTE: true free-shape/image-object outline only shown in 3D/export (2D simplification).
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
     }
 
@@ -1485,22 +1485,27 @@
 
   function applyShape(shape) {
     doc.body.shape = shape;
-    var seg = shape === "rect" ? "Rect" : shape === "circle" ? "Circle" : "Free";
+    var seg = shape === "rect" ? "Rect" : shape === "circle" ? "Circle" : shape === "free" ? "Free" : "Image";
     setSegActive("shapeSeg", "shape" + seg);
     setSegActive("advShapeSeg", "advShape" + seg);      // Advanced twin
-    // border: free only; frame: rect/circle only; corner: rect only — mirror in both sidebars.
+    var isImage = shape === "image";
+    // Plate-free "Bild": the image IS the object → hide all plate chrome (border/frame/corner
+    // + plate size). border: free only; frame: rect/circle only; corner: rect only.
     setHidden("borderField", shape !== "free");   setHidden("advBorderField", shape !== "free");
-    setHidden("frameField", shape === "free");    setHidden("advFrameField", shape === "free");
+    setHidden("frameField", shape === "free" || isImage);  setHidden("advFrameField", shape === "free" || isImage);
     setHidden("cornerField", shape !== "rect");   setHidden("advCornerField", shape !== "rect");
+    setHidden("simpleSizeSection", isImage);      setHidden("advSizeRow", isImage);
     render2D();
     scheduleRebuild3D();
   }
   document.getElementById("shapeRect").addEventListener("click", function () { applyShape("rect"); });
   document.getElementById("shapeCircle").addEventListener("click", function () { applyShape("circle"); });
   document.getElementById("shapeFree").addEventListener("click", function () { applyShape("free"); });
+  document.getElementById("shapeImage").addEventListener("click", function () { applyShape("image"); });
   document.getElementById("advShapeRect").addEventListener("click", function () { applyShape("rect"); });
   document.getElementById("advShapeCircle").addEventListener("click", function () { applyShape("circle"); });
   document.getElementById("advShapeFree").addEventListener("click", function () { applyShape("free"); });
+  document.getElementById("advShapeImage").addEventListener("click", function () { applyShape("image"); });
 
   // Wire a Simple+Advanced number-input pair to one apply(v); each mirrors the other's value
   // so the two sidebars stay in sync (only the twin is written, never self → no cursor jumps).
