@@ -19,6 +19,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Cache-bust asset URLs in index.html
+        env:
+          V: ${{ github.sha }}
+        run: |
+          # Append ?v=<short-sha> to every local .css/.js referenced from index.html so a new
+          # deploy invalidates browsers' immutable-cached assets (bare filenames otherwise leave
+          # returning users on stale CSS/JS). Runs on the ephemeral checkout only. SHA is read
+          # from $ENV{V} inside perl (no shell interpolation into the program).
+          export V="${V:0:8}"
+          perl -i -pe 's/(src|href)="([^"]+\.(css|js))"/$1="$2?v=$ENV{V}"/g' index.html
+          echo "Stamped assets with ?v=${V}:"
+          grep -oE '(src|href)="[^"]+\?v=[0-9a-f]+"' index.html || true
+
       - name: Configure SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
