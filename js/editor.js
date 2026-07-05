@@ -1369,44 +1369,47 @@
     }
   });
 
-  // Render the DESIGN (plate + elements, processed colors) to an off-screen canvas at
-  // "image DPI": the primary image element is drawn at (near-)native resolution, so the PNG
-  // matches the input image's resolution instead of the viewport-sized preview snapshot.
-  // No margin, no checkerboard, no editor chrome (handles/mount marker/guides).
+  // Render the DESIGN to an off-screen PNG canvas. MIRRORS buildDesignSVG (base plate color
+  // filled, elements on top, then everything outside the real footprint — rounded corners /
+  // circle / free silhouette / mount hole — blanked to transparent), so the PNG matches the
+  // SVG/print. Only difference from the SVG raster: we raster at "image DPI" (primary image
+  // pixel-perfect) instead of the doc's grid resolution. No viewport margin, no checkerboard,
+  // no editor chrome.
   function exportDesignCanvas() {
-    var domain = (window.docDomain ? window.docDomain(doc)
-      : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm });
-    // Pixels-per-mm: make the primary visible image pixel-perfect; else fall back to the doc's
-    // print resolution across the long edge.
-    var imgEl = doc.elements.find(function (e) { return !e._hidden && e.type === "image" && e._img; });
+    var d = visibleDoc();
+    var domain = (window.docDomain ? window.docDomain(d)
+      : { x0: 0, y0: 0, wMm: d.body.widthMm, hMm: d.body.heightMm });
+    // Target long-edge px: make the primary image pixel-perfect; else the doc's print resolution.
+    var imgEl = d.elements.find(function (e) { return e.type === "image" && e._img; });
     var pxPerMm = imgEl ? ((imgEl._img.naturalWidth || 1) / Math.max(0.01, imgEl.wMm))
-      : ((doc.resolution || 1024) / Math.max(0.01, domain.wMm, domain.hMm));
+      : ((d.resolution || 1024) / Math.max(0.01, domain.wMm, domain.hMm));
     if (!(pxPerMm > 0)) pxPerMm = 10;
     var MAX = 4096; // clamp so huge plates/images can't blow up memory
-    var W = Math.round(domain.wMm * pxPerMm), H = Math.round(domain.hMm * pxPerMm);
-    var longest = Math.max(W, H);
-    if (longest > MAX) { pxPerMm *= MAX / longest; W = Math.round(domain.wMm * pxPerMm); H = Math.round(domain.hMm * pxPerMm); }
-    W = Math.max(1, W); H = Math.max(1, H);
-    var oc = document.createElement("canvas"); oc.width = W; oc.height = H;
-    var octx = oc.getContext("2d");
-    var cap = Math.max(1024, W, H); // process images at >= export size → (near-)native quality
-    var shape = doc.body.shape || "rect";
-    octx.save();
-    // Clip elements to the plate outline for rect/circle (matches the on-screen preview);
-    // free/image objects draw unclipped (the engine footprint is the silhouette/rectangle).
-    if (shape === "rect") {
-      var rr = Math.min((doc.body.cornerRadiusMm || 0) * pxPerMm, W / 2, H / 2);
-      octx.beginPath();
-      octx.moveTo(rr, 0); octx.arcTo(W, 0, W, H, rr); octx.arcTo(W, H, 0, H, rr);
-      octx.arcTo(0, H, 0, 0, rr); octx.arcTo(0, 0, W, 0, rr); octx.closePath(); octx.clip();
-    } else if (shape === "circle") {
-      octx.beginPath(); octx.arc(W / 2, H / 2, Math.min(W, H) / 2, 0, Math.PI * 2); octx.clip();
+    var longEdge = Math.round(Math.max(domain.wMm, domain.hMm) * pxPerMm);
+    longEdge = Math.max(64, Math.min(MAX, longEdge));
+
+    // Same grid + footprint the engine/SVG use, but at the higher export resolution.
+    var dd = Object.assign({}, d, { resolution: longEdge });
+    var gf = window.docGridAndFootprint(dd);
+    var cols = gf.grid.cols, rows = gf.grid.rows, pitch = gf.grid.pitch, gx0 = gf.grid.x0, gy0 = gf.grid.y0;
+    var s = 1 / pitch; // px per mm on this grid
+
+    var oc = document.createElement("canvas"); oc.width = cols; oc.height = rows;
+    var octx = oc.getContext("2d", { willReadFrequently: true });
+    octx.fillStyle = d.body.baseColor;
+    octx.fillRect(0, 0, cols, rows);
+    // Elements on top (capOverride = longEdge → near-native image quality, cache bypassed).
+    for (var i = 0; i < d.elements.length; i++) {
+      drawElement(octx, d.elements[i], s, gx0, gy0, 0, 0, longEdge);
     }
-    for (var i = 0; i < doc.elements.length; i++) {
-      var el = doc.elements[i];
-      if (!el._hidden) drawElement(octx, el, pxPerMm, domain.x0, domain.y0, 0, 0, cap);
+    // Blank everything outside the real footprint (plate outline + mount hole), like the SVG.
+    var im = octx.getImageData(0, 0, cols, rows), px = im.data;
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        if (gf.footprint(c, r) <= 0) { var i4 = (r * cols + c) * 4; px[i4] = 0; px[i4 + 1] = 0; px[i4 + 2] = 0; px[i4 + 3] = 0; }
+      }
     }
-    octx.restore();
+    octx.putImageData(im, 0, 0);
     return oc;
   }
 
