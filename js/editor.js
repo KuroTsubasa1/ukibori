@@ -135,7 +135,10 @@
     var uw = availW - 2 * MARGIN_PX;
     var uh = availH - 2 * MARGIN_PX;
     // Fit BOTH dimensions (drop the max(1,…) floor so tall plates can shrink; keep 0.2 floor).
-    const s = Math.max(0.2, Math.min(uw / domain.wMm, uh / domain.hMm));
+    // Floor the divisors so a degenerate/zero-size domain (e.g. a 0-size Bild element) can't
+    // produce Infinity → NaN canvas dimensions.
+    const dw = Math.max(1e-3, domain.wMm), dh = Math.max(1e-3, domain.hMm);
+    const s = Math.max(0.2, Math.min(uw / dw, uh / dh));
     state.scale = s;
     cv.width = Math.round(domain.wMm * s + 2 * MARGIN_PX);
     cv.height = Math.round(domain.hMm * s + 2 * MARGIN_PX);
@@ -768,6 +771,27 @@
       // free / image shape: draw elements only (no plate frame in 2D).
       // NOTE: true free-shape/image-object outline only shown in 3D/export (2D simplification).
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
+      // Bild: outline the defining element's rectangle (the printed object edge) with a dashed
+      // stroke, so the object bounds are visible even for images with transparent edges.
+      if (shape === "image") {
+        var visEls = doc.elements.filter(function (e) { return !e._hidden; });
+        var oid = doc.body.freeOutlineFromElementId;
+        var bel = (oid && visEls.find(function (e) { return e.id === oid; }))
+          || visEls.find(function (e) { return e.type === "image"; }) || visEls[0];
+        if (bel) {
+          var a = (bel.rotationDeg || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+          var hw = (bel.wMm || 0) / 2, hh = (bel.hMm || 0) / 2;
+          ctx.save();
+          ctx.strokeStyle = "#8a8f9c"; ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+          ctx.beginPath();
+          [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].forEach(function (c, i) {
+            var px = mmX(bel.cxMm + c[0] * ca - c[1] * sa), py = mmY(bel.cyMm + c[0] * sa + c[1] * ca);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          });
+          ctx.closePath(); ctx.stroke();
+          ctx.restore();
+        }
+      }
     }
 
     // Mount marker: visible draggable circle + crosshair.
@@ -1495,6 +1519,15 @@
     setHidden("frameField", shape === "free" || isImage);  setHidden("advFrameField", shape === "free" || isImage);
     setHidden("cornerField", shape !== "rect");   setHidden("advCornerField", shape !== "rect");
     setHidden("simpleSizeSection", isImage);      setHidden("advSizeRow", isImage);
+    // A Bild object has no plate → mount (Befestigung) and plate-centered "Ausrichten" are
+    // meaningless. Force mount off (so 2D marker, hit-test, and 3D geometry all agree) and hide
+    // both control groups. Non-image shapes leave the mount untouched.
+    if (isImage && doc.mount && doc.mount.type !== "none") {
+      doc.mount.type = "none";
+      setSegActive("mountSeg", "mountNone"); setSegActive("advMountSeg", "advMountNone");
+    }
+    setHidden("simpleMountSection", isImage);     setHidden("advMountField", isImage);
+    setHidden("simpleCenterSection", isImage);    setHidden("advCenterField", isImage);
     render2D();
     scheduleRebuild3D();
   }

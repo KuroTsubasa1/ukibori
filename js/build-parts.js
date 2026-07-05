@@ -24,7 +24,9 @@
   // The element that defines a plate-free "Bild" object: body.freeOutlineFromElementId if set,
   // else the first image element, else the first element. null if the doc has no elements.
   function __bildElement(doc) {
-    const els = doc.elements || [];
+    // Skip hidden elements so the 2D view (raw doc) and 3D/export (visibleDoc, which strips
+    // _hidden) resolve the SAME defining element — otherwise hiding it silently resizes the object.
+    const els = (doc.elements || []).filter(e => !e._hidden);
     const id = doc.body && doc.body.freeOutlineFromElementId;
     let el = id ? els.find(e => e.id === id) : null;
     return el || els.find(e => e.type === "image") || els[0] || null;

@@ -26,6 +26,31 @@
     assert(box.w < 44 && box.h < 34, "border did not dilate the object (w=" + box.w.toFixed(1) + " h=" + box.h.toFixed(1) + ")");
   });
 
+  test("shape 'image' uses the first VISIBLE image element (hidden defining element is skipped)", async () => {
+    const img = await whiteImg(40, 30);
+    const elA = makeElementV2("image", { src:"a", cxMm:20, cyMm:15, wMm:40, hMm:30 }); elA._img=img; elA._hidden=true;
+    const elB = makeElementV2("image", { src:"b", cxMm:60, cyMm:60, wMm:16, hMm:12 }); elB._img=img; elB.depth.direction="raised"; elB.depth.mode="solid";
+    const d = defaultDoc(); d.body.shape="image"; d.body.thicknessMm=3; d.body.layerHeightMm=0.2; d.resolution=64;
+    d.mount={type:"none",xMm:0,yMm:0,diameterMm:5,ringThicknessMm:0,ringHeightMm:2,marginMm:8};
+    d.elements=[elA, elB];
+    const box = xyBox(buildParts(d).filter(p => p.name.indexOf("grundplatte") === 0).flatMap(p=>p.facets));
+    // Object must match the VISIBLE element elB (16×12), not the hidden elA (40×30).
+    assertClose(box.w, 16, 1.5, "base tracks the visible element width, not the hidden one");
+    assertClose(box.h, 12, 1.5, "base tracks the visible element height");
+  });
+
+  test("shape 'image' footprint ignores the mount (no hole cut into the object rectangle)", async () => {
+    const img = await whiteImg(40, 30);
+    const el = makeElementV2("image", { src:"a", cxMm:20, cyMm:15, wMm:40, hMm:30 });
+    el.depth.direction="raised"; el.depth.mode="solid"; el._img=img;
+    const d = bildDoc(el);
+    d.mount = { type:"hole", xMm:20, yMm:15, diameterMm:8, ringThicknessMm:0, ringHeightMm:2, marginMm:8 };
+    const base = buildParts(d).filter(p => p.name.indexOf("grundplatte") === 0);
+    const box = xyBox(base.flatMap(p=>p.facets));
+    assertClose(box.w, 40, 1.5, "still a full-width rectangle (mount ignored for Bild)");
+    assertClose(box.h, 30, 1.5, "still a full-height rectangle (mount ignored for Bild)");
+  });
+
   test("shape 'image' base is watertight and the relief builds on top", async () => {
     const img = await whiteImg(40, 30);
     const el = makeElementV2("image", { src:"a", cxMm:20, cyMm:15, wMm:40, hMm:30 });
