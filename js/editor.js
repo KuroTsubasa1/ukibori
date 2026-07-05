@@ -124,7 +124,10 @@
     const availW = rawW - pad;
     const availH = (preview ? preview.clientHeight : 700) - pad;
     // Use expanded domain (docDomain exported by T1; falls back to body box if unavailable).
-    var domain = (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm });
+    // Editor viewport uses the expanded domain (plate ∪ element bboxes + handle pad) so
+    // transform handles never clip. The engine/export keep using docDomain unchanged.
+    var domain = (window.viewportDomain ? window.viewportDomain(doc)
+      : (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm }));
     state.viewX0 = domain.x0;
     state.viewY0 = domain.y0;
     state.marginPx = MARGIN_PX;
@@ -1064,13 +1067,12 @@
 
   function endDrag() {
     if (!drag) return;
-    var wasMountDrag = (drag.handle === "mount");
     drag = null;
     state.snapGuides = []; // clear transient guide lines
-    if (wasMountDrag) {
-      // Re-fit the canvas now that the mount may have moved (expanded/contracted domain).
-      fitScale();
-    }
+    // Re-fit the canvas: a move/scale/rotate (or mount move) may have pushed the element past
+    // the old bounds. viewportDomain now includes element bboxes, so this keeps handles on-canvas.
+    // No-op view-wise while elements stay within the plate (domain unchanged → same fit).
+    fitScale();
     refreshAdvancedForSelection();
     renderAdvancedLayers();
     scheduleRebuild3D();
