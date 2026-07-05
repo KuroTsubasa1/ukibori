@@ -284,17 +284,20 @@
   //   colorLayers → each opaque pixel mapped to the nearest palette color + remap applied.
   //   solid       → luminance threshold → silhouette in el.color, rest transparent.
   // Cache lives on el._display / el._displayKey; invalidated by deleting el._display.
-  function processImageForDisplay(el) {
+  function processImageForDisplay(el, capOverride) {
     if (el.type !== 'image' || !el._img) return null;
     var key = elementDisplayKey(el);
-    if (el._display && el._displayKey === key) return el._display;
+    // capOverride (PNG export) renders at a higher resolution and MUST bypass the shared
+    // display cache — its bigger canvas would otherwise corrupt the on-screen preview.
+    if (!capOverride && el._display && el._displayKey === key) return el._display;
 
     var img = el._img;
     var iw = img.naturalWidth || img.width || 1;
     var ih = img.naturalHeight || img.height || 1;
     // Preview resolution cap (was 256 → visibly blocky). 1024 keeps the on-screen image crisp;
     // it's downscaled by CSS to the canvas and the display cache is param-keyed + debounced.
-    var scale = Math.min(1, 1024 / Math.max(iw, ih, 1));
+    // Export passes a higher capOverride so the processed image is (near-)native resolution.
+    var scale = Math.min(1, (capOverride || 1024) / Math.max(iw, ih, 1));
     var w = Math.max(1, Math.round(iw * scale));
     var h = Math.max(1, Math.round(ih * scale));
     var n = w * h;
@@ -415,8 +418,7 @@
     var cv2 = document.createElement('canvas');
     cv2.width = w; cv2.height = h;
     cv2.getContext('2d').putImageData(out, 0, 0);
-    el._display = cv2;
-    el._displayKey = key;
+    if (!capOverride) { el._display = cv2; el._displayKey = key; } // don't cache the export render
     return cv2;
   }
 
@@ -668,7 +670,7 @@
   // originPxX/originPxY: pixel offset added before the mm→px transform. Canvas paths use
   // state.marginPx (default) so elements are inset from the canvas edge by the bleed border.
   // SVG export passes 0,0 so the output is byte-identical to before (no margin baked in).
-  function drawElement(ctx, el, s, vx0, vy0, originPxX, originPxY) {
+  function drawElement(ctx, el, s, vx0, vy0, originPxX, originPxY, capOverride) {
     var ox = (vx0 !== undefined ? vx0 : state.viewX0);
     var oy = (vy0 !== undefined ? vy0 : state.viewY0);
     var ax = (originPxX !== undefined ? originPxX : state.marginPx);
@@ -685,7 +687,7 @@
     } else if (el.type === "image") {
       if (el._img) {
         // Use processed display canvas (threshold/invert/reduce applied) so 2D == print.
-        var disp = processImageForDisplay(el);
+        var disp = processImageForDisplay(el, capOverride);
         ctx.drawImage(disp || el._img, -w / 2, -h / 2, w, h);
       } else {
         // Placeholder when image hasn't loaded yet.
@@ -1367,11 +1369,52 @@
     }
   });
 
+  // Render the DESIGN (plate + elements, processed colors) to an off-screen canvas at
+  // "image DPI": the primary image element is drawn at (near-)native resolution, so the PNG
+  // matches the input image's resolution instead of the viewport-sized preview snapshot.
+  // No margin, no checkerboard, no editor chrome (handles/mount marker/guides).
+  function exportDesignCanvas() {
+    var domain = (window.docDomain ? window.docDomain(doc)
+      : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm });
+    // Pixels-per-mm: make the primary visible image pixel-perfect; else fall back to the doc's
+    // print resolution across the long edge.
+    var imgEl = doc.elements.find(function (e) { return !e._hidden && e.type === "image" && e._img; });
+    var pxPerMm = imgEl ? ((imgEl._img.naturalWidth || 1) / Math.max(0.01, imgEl.wMm))
+      : ((doc.resolution || 1024) / Math.max(0.01, domain.wMm, domain.hMm));
+    if (!(pxPerMm > 0)) pxPerMm = 10;
+    var MAX = 4096; // clamp so huge plates/images can't blow up memory
+    var W = Math.round(domain.wMm * pxPerMm), H = Math.round(domain.hMm * pxPerMm);
+    var longest = Math.max(W, H);
+    if (longest > MAX) { pxPerMm *= MAX / longest; W = Math.round(domain.wMm * pxPerMm); H = Math.round(domain.hMm * pxPerMm); }
+    W = Math.max(1, W); H = Math.max(1, H);
+    var oc = document.createElement("canvas"); oc.width = W; oc.height = H;
+    var octx = oc.getContext("2d");
+    var cap = Math.max(1024, W, H); // process images at >= export size → (near-)native quality
+    var shape = doc.body.shape || "rect";
+    octx.save();
+    // Clip elements to the plate outline for rect/circle (matches the on-screen preview);
+    // free/image objects draw unclipped (the engine footprint is the silhouette/rectangle).
+    if (shape === "rect") {
+      var rr = Math.min((doc.body.cornerRadiusMm || 0) * pxPerMm, W / 2, H / 2);
+      octx.beginPath();
+      octx.moveTo(rr, 0); octx.arcTo(W, 0, W, H, rr); octx.arcTo(W, H, 0, H, rr);
+      octx.arcTo(0, H, 0, 0, rr); octx.arcTo(0, 0, W, 0, rr); octx.closePath(); octx.clip();
+    } else if (shape === "circle") {
+      octx.beginPath(); octx.arc(W / 2, H / 2, Math.min(W, H) / 2, 0, Math.PI * 2); octx.clip();
+    }
+    for (var i = 0; i < doc.elements.length; i++) {
+      var el = doc.elements[i];
+      if (!el._hidden) drawElement(octx, el, pxPerMm, domain.x0, domain.y0, 0, 0, cap);
+    }
+    octx.restore();
+    return oc;
+  }
+
   document.getElementById("exportPng").addEventListener("click", function () {
     try {
       setExportStatus("Exportiere …");
       const name = exportFileName();
-      document.getElementById("canvas2d").toBlob(function (b) {
+      exportDesignCanvas().toBlob(function (b) {
         try {
           if (!b) { setExportStatus("Fehler: PNG konnte nicht erstellt werden."); return; }
           downloadBlob(b, name + ".png");
@@ -2455,7 +2498,7 @@
   renderLayers();
 
   // Public interface. Expose state so tests can inspect/mutate selection.
-  window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers, renderLayers, resetDocTo, buildDesignSVG };
+  window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers, renderLayers, resetDocTo, buildDesignSVG, exportDesignCanvas };
   // Expose for Playwright smoke tests.
   window.__editorState = state;
   window.__editorHitTest = hitTest;
