@@ -41,7 +41,8 @@
       <div class="sp-label">Text</div>
       <input type="text" id="simpleText" class="text-input" style="width:100%" placeholder="Text eingeben…" title="Textinhalt">
     </div>
-    <div class="sp-section">
+    <!-- KI-Freistellung — vorübergehend ausgeblendet (Button/Status bleiben verdrahtet). -->
+    <div class="sp-section" id="simpleBildSection" hidden>
       <div class="sp-label">Bild</div>
       <button type="button" id="removeBgBtn" class="btn" style="width:100%" title="Hintergrund per KI entfernen">Hintergrund entfernen (KI)</button>
       <div id="bgStatus" class="hint" aria-live="polite"></div>
@@ -170,7 +171,8 @@
       <details class="acc" id="accUmwandlung" open>
         <summary>Umwandlung</summary>
         <div class="acc-body adv-section">
-          <div class="adv-field">
+          <!-- KI-Freistellung — vorübergehend ausgeblendet (Button/Status bleiben verdrahtet). -->
+          <div class="adv-field" id="advBildField" hidden>
             <button type="button" id="removeBgBtnAdv" class="btn" style="width:100%" title="Hintergrund per KI entfernen">Hintergrund entfernen (KI)</button>
             <div id="bgStatusAdv" class="hint" aria-live="polite"></div>
           </div>
@@ -351,7 +353,7 @@
           </div>
           <div class="adv-field">
             <label for="advBaseColor" class="adv-label">Grundfarbe</label>
-            <input type="color" id="advBaseColor" value="#000000" title="Farbe der Grundplatte">
+            <input type="color" id="advBaseColor" value="#ffffff" title="Farbe der Grundplatte">
           </div>
         </div>
       </details>
