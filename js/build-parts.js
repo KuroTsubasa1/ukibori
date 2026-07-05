@@ -45,6 +45,28 @@
     return { x0: 0, y0: 0, wMm: W, hMm: H };
   }
 
+  // Editor-only: docDomain (the engine's plate/washer box) unioned with every visible
+  // element's rotated bounding box + handle padding, so the 2D canvas grows to contain
+  // transform handles. NOT used by the engine — docDomain stays the print source of truth.
+  function viewportDomain(doc) {
+    const base = docDomain(doc);
+    let x0 = base.x0, y0 = base.y0, x1 = base.x0 + base.wMm, y1 = base.y0 + base.hMm;
+    const PAD = 6; // mm — cushion so corner/rotate handles never sit on the canvas edge
+    for (const el of (doc.elements || [])) {
+      if (el._hidden) continue;
+      const cx = el.cxMm, cy = el.cyMm, hw = (el.wMm || 0) / 2, hh = (el.hMm || 0) / 2;
+      const a = (el.rotationDeg || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+      for (const [dx, dy] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]]) {
+        const px = cx + dx * ca - dy * sa, py = cy + dx * sa + dy * ca;
+        if (px - PAD < x0) x0 = px - PAD;
+        if (py - PAD < y0) y0 = py - PAD;
+        if (px + PAD > x1) x1 = px + PAD;
+        if (py + PAD > y1) y1 = py + PAD;
+      }
+    }
+    return { x0, y0, wMm: x1 - x0, hMm: y1 - y0 };
+  }
+
   // Raster grid for an arbitrary domain. Same longest-side=resolution rule as gridForBody,
   // delegating to it so the default body-box path is provably identical.
   // Returns {cols, rows, pitch, x0, y0}.
@@ -986,6 +1008,7 @@
 
   window.gridForBody = gridForBody;
   window.docDomain = docDomain;
+  window.viewportDomain = viewportDomain;
   window.gridForDomain = gridForDomain;
   window.docGridAndFootprint = docGridAndFootprint;
   window.buildBaseParts = buildBaseParts;
