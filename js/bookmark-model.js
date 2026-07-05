@@ -93,7 +93,7 @@ function defaultDoc() {
     body: {
       shape: "rect",
       widthMm: 50, heightMm: 150, cornerRadiusMm: 4,
-      thicknessMm: 3, layerHeightMm: 0.2, baseColor: "#000000", borderMm: 2,
+      thicknessMm: 3, layerHeightMm: 0.2, baseColor: "#ffffff", borderMm: 2,
       // Solid base-plate floor thickness under engraved detail (0 = auto-derive from thickness).
       baseThicknessMm: 0,
       frame: defaultFrame(),
@@ -201,7 +201,7 @@ function makeElementV2(type, props) {
   const e = Object.assign({
     id: __nextId(), type,
     cxMm: 25, cyMm: 75, wMm: 30, hMm: 30, rotationDeg: 0,
-    cutout: false, color: "#ffffff",
+    cutout: false, color: "#000000",
     depth: defaultDepth(type),
   }, props);
   if (type === "image") { if (e.src == null) e.src = ""; e._img = e._img || null; }

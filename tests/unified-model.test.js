@@ -9,7 +9,7 @@
     assertEqual(d.body.cornerRadiusMm, 4, "corner");
     assertEqual(d.body.thicknessMm, 3, "thickness");
     assertEqual(d.body.layerHeightMm, 0.2, "layerHeight");
-    assertEqual(d.body.baseColor, "#000000", "baseColor");
+    assertEqual(d.body.baseColor, "#ffffff", "baseColor (default white so a black relief is visible in 2D+3D)");
     assertEqual(d.body.autoSizeFromElementId, null, "autoSize null");
     assertEqual(d.body.freeOutlineFromElementId, null, "freeOutline null");
     assertEqual(d.mount.type, "none", "mount none by default");

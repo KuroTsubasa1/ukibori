@@ -286,7 +286,9 @@
     var img = el._img;
     var iw = img.naturalWidth || img.width || 1;
     var ih = img.naturalHeight || img.height || 1;
-    var scale = Math.min(1, 256 / Math.max(iw, ih, 1));
+    // Preview resolution cap (was 256 → visibly blocky). 1024 keeps the on-screen image crisp;
+    // it's downscaled by CSS to the canvas and the display cache is param-keyed + debounced.
+    var scale = Math.min(1, 1024 / Math.max(iw, ih, 1));
     var w = Math.max(1, Math.round(iw * scale));
     var h = Math.max(1, Math.round(ih * scale));
     var n = w * h;
