@@ -21,10 +21,35 @@
   // When mount.type==='loop' and the washer overhangs beyond the body box (per-side),
   // expand to the union bbox (washer + plate) with ~1mm pad on overhanging sides only.
   // Degenerate loop (ringThicknessMm<=0 or diameterMm<=0) falls back to body box.
+  // The element that defines a plate-free "Bild" object: body.freeOutlineFromElementId if set,
+  // else the first image element, else the first element. null if the doc has no elements.
+  function __bildElement(doc) {
+    const els = doc.elements || [];
+    const id = doc.body && doc.body.freeOutlineFromElementId;
+    let el = id ? els.find(e => e.id === id) : null;
+    return el || els.find(e => e.type === "image") || els[0] || null;
+  }
+
   function docDomain(doc) {
     const W = doc.body.widthMm, H = doc.body.heightMm;
     const m = doc.mount;
     const PAD = 1.0; // mm of extra padding on expanded sides
+    // Plate-free "Bild" object: the domain is the defining image element's rotated bounding box
+    // (its rectangle IS the object). No plate box; mount/washer handled by the normal path below
+    // once the image element defines the extent.
+    if (doc.body.shape === "image") {
+      const bel = __bildElement(doc);
+      if (bel) {
+        const cx = bel.cxMm, cy = bel.cyMm, hw = (bel.wMm || 0) / 2, hh = (bel.hMm || 0) / 2;
+        const a = (bel.rotationDeg || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+        let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+        for (const [ddx, ddy] of [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]]) {
+          const px = cx + ddx * ca - ddy * sa, py = cy + ddx * sa + ddy * ca;
+          bx0 = Math.min(bx0, px); by0 = Math.min(by0, py); bx1 = Math.max(bx1, px); by1 = Math.max(by1, py);
+        }
+        return { x0: bx0, y0: by0, wMm: bx1 - bx0, hMm: by1 - by0 };
+      }
+    }
     if (m && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0) {
       const outerR = m.diameterMm / 2 + m.ringThicknessMm;
       const cx = m.xMm, cy = m.yMm;
@@ -543,6 +568,7 @@
 
     const comp = composeDesignV2(doc, cols, rows, grid);
     const free = doc.body.shape === "free";
+    const image = doc.body.shape === "image";
 
     // Determine whether the domain actually expanded beyond the body box.
     // An unexpanded domain has x0=y0=0 and the same dimensions as the body box.
@@ -560,7 +586,10 @@
     let footprint;
     const m = doc.mount;
     const isLoop = m && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0;
-    if (free) {
+    if (image) {
+      // Plate-free Bild object: footprint = the defining image element's rectangle.
+      footprint = imageFootprintField(doc, cols, rows, pitch, grid);
+    } else if (free) {
       // Pass grid only for expanded domain; default branch handles washer union itself.
       footprint = freeFootprintField(doc, cols, rows, pitch, domainExpanded ? grid : null);
     } else if (isLoop && domainExpanded) {
@@ -640,7 +669,7 @@
   // band(c,r) = footprint(c,r) > 0 && plateSdfMm(x,y) <= frame.widthMm && !cutout.
   function __frameBand(doc, grid, footprint, comp, domainExpanded) {
     const frame = doc.body.frame;
-    if (doc.body.shape === "free" || !frame || !((frame.widthMm || 0) > 0)) return null;
+    if (doc.body.shape === "free" || doc.body.shape === "image" || !frame || !((frame.widthMm || 0) > 0)) return null;
     // heightMm <= 0 emits no "rand" part, so the frame must be FULLY off (no band
     // either) — otherwise content in the band is silently swallowed with nothing
     // added (review finding).
@@ -963,11 +992,15 @@
     const { cols, rows, pitch } = grid;
     const m = doc.mount;
     const free = doc.body.shape === "free";
+    const image = doc.body.shape === "image";
     const isLoop = m && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0;
     const domainExpanded = domain.x0 !== 0 || domain.y0 !== 0 ||
       domain.wMm !== doc.body.widthMm || domain.hMm !== doc.body.heightMm;
     let footprint;
-    if (free) {
+    if (image) {
+      // Plate-free Bild object: footprint = the defining image element's rectangle.
+      footprint = imageFootprintField(doc, cols, rows, pitch, grid);
+    } else if (free) {
       // Pass grid only when domain expanded; default branch handles washer union itself.
       footprint = freeFootprintField(doc, cols, rows, pitch, domainExpanded ? grid : null);
     } else if (isLoop && domainExpanded) {
@@ -1019,7 +1052,25 @@
   window.buildHeightmapParts = buildHeightmapParts;
   window.buildFrameParts = buildFrameParts;
   window.buildParts = buildParts;
+  // Footprint = the defining image element's rotated rectangle (plate-free "Bild" object).
+  // >0 inside the rectangle, in cell units. borderMm is ignored (the image IS the object).
+  function imageFootprintField(doc, cols, rows, pitch, grid) {
+    const x0 = grid ? grid.x0 : 0, y0 = grid ? grid.y0 : 0;
+    const el = __bildElement(doc);
+    if (!el) return () => -1;
+    const cx = el.cxMm, cy = el.cyMm, hw = (el.wMm || 0) / 2, hh = (el.hMm || 0) / 2;
+    const a = -(el.rotationDeg || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a); // inverse rotate
+    const s = 1 / pitch;
+    return (c, r) => {
+      const x = x0 + (c + 0.5) * pitch, y = y0 + (r + 0.5) * pitch;
+      const dx = x - cx, dy = y - cy;
+      const lx = dx * ca - dy * sa, ly = dx * sa + dy * ca; // into element-local space
+      return Math.min(hw - Math.abs(lx), hh - Math.abs(ly)) * s; // >0 inside the rectangle, cell units
+    };
+  }
+
   window.freeFootprintField = freeFootprintField;
+  window.imageFootprintField = imageFootprintField;
   // Test-only: expose __renderElementV2 so island-removal.test.js can inspect mask/r/g/b
   // directly without going through full buildParts. Not called by production code.
   window.__renderElementV2ForTest = __renderElementV2;
