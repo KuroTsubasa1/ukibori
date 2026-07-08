@@ -74,6 +74,12 @@ Bild · Text · QR → Relief · Schwarz-Weiß, Farbe & AMS-Mehrfarb · KI-Freis
   verrauschte Bilder). Alle Elemente rasten auf dieselben Schichten ein, sodass gleiche
   Farben eine Schicht teilen. Im vertieften AMS-Modus wird auch die **Grundplatte** passend
   in Farbschichten geteilt, damit jede Druck­schicht einfarbig bleibt.
+- **Höhe je Farbe (AMS-Ebenen)** — Einfarbig-Elemente erhalten ihre Höhe automatisch aus
+  ihrer **Farbe**: gleiche Farbe = gleiche Ebene, jede weitere Farbe stapelt eine Stufe
+  höher (Palette-Reihenfolge zuerst, sonst Ebenen-Reihenfolge). Elemente in der
+  **Grundfarbe** bleiben bündig auf Plattenhöhe. Die **Relief-Höhe** wirkt dabei als
+  manueller Override pro Element (leer = automatisch). Abschaltbar per Häkchen; alte
+  gespeicherte Projekte behalten ihre manuellen Höhen.
 - **Helligkeit → Höhe** — kontinuierliches Höhenrelief direkt aus der Bildhelligkeit.
 - **Schriftarten** — System-Schriften + **Fett**, oder eine eigene **`.ttf`/`.otf`/`.woff`**
   laden (lokal eingebettet und im Projekt gespeichert).
