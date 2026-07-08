@@ -16,7 +16,6 @@
     });
   }
 
-  const VIEW_KEY = "ukibori.view";
   const SNAP_KEY = "ukibori.snap";
   const doc = window.defaultDoc();
   const cv = document.getElementById("canvas2d");
@@ -51,16 +50,6 @@
   let defaultDirection = "raised";
 
   // ---- View toggle (Task 1, preserved) ----
-  function getView() { return document.body.classList.contains("mode-advanced") ? "advanced" : "simple"; }
-  // One sidebar for both views: Simple is a CSS filter (body.mode-advanced absent →
-  // [data-advanced] rows are hidden), not a second DOM tree. No twin controls, no sync.
-  function setView(v) {
-    const adv = v === "advanced";
-    document.body.classList.toggle("mode-advanced", adv);
-    document.getElementById("viewSimple").classList.toggle("seg-active", !adv);
-    document.getElementById("viewAdvanced").classList.toggle("seg-active", adv);
-    try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
-  }
 
   // ---- visibleDoc: filter _hidden elements for 3D preview + export ----
   function visibleDoc() {
@@ -2568,15 +2557,6 @@
     });
   }());
 
-  // ---- View toggle wiring (Task 1, preserved) ----
-  document.getElementById("viewSimple").addEventListener("click", function () { setView("simple"); renderLayers(); });
-  document.getElementById("viewAdvanced").addEventListener("click", function () {
-    setView("advanced");
-    refreshAdvancedForSelection();
-    renderAdvancedLayers();
-  });
-  setView((function () { try { return localStorage.getItem(VIEW_KEY) || "simple"; } catch (e) { return "simple"; } })());
-
   // Initial render: fit scale first (B3: fitScale not in render2D anymore).
   // Restore persisted preview mode; default 'split' (2D + 3D side by side) per user request.
   setPreviewMode((function () { try { return localStorage.getItem(PREVIEW_MODE_KEY) || "split"; } catch (e) { return "split"; } })());
@@ -2591,7 +2571,7 @@
   }());
 
   // Public interface. Expose state so tests can inspect/mutate selection.
-  window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers, renderLayers, resetDocTo, buildDesignSVG, exportDesignCanvas };
+  window.editor = { doc, render2D, refreshAdvancedForSelection, renderAdvancedLayers, renderLayers, resetDocTo, buildDesignSVG, exportDesignCanvas };
   // Expose for Playwright smoke tests.
   window.__editorState = state;
   window.__editorHitTest = hitTest;

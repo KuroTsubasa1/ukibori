@@ -59,11 +59,10 @@ Bild · Text · QR → Relief · Schwarz-Weiß, Farbe & AMS-Mehrfarb · KI-Freis
 - **Kreis-Zuschnitt** mit erhabenem Rand — der klassische runde Untersetzer.
 - **Befestigung** — **Loch** zum Aufhängen/Verschrauben oder **Öse** (verstärkter
   Ring), per ziehbarem Marker frei platziert.
-- **Einfach/Erweitert-Umschalter** — eine gemeinsame, nach Geltungsbereich gegliederte
-  Seitenleiste (**Werkstück · Ebenen · Element · Druck & Export**); der Einfach-Modus
-  blendet die Detail-Regler (Tiefenmodus, Umwandlung, Position/Drehung, Druckparameter,
-  Einrasten) aus, statt eine zweite Oberfläche zu pflegen. Ebenen-Liste, Grundfarbe,
-  Höhe je Farbe, Deckschicht und die AMS-Palette sind in beiden Ansichten da.
+- **Eine Seitenleiste, nach Geltungsbereich gegliedert** — **Werkstück · Ebenen ·
+  Element · Druck & Export**: jede Einstellung wohnt dort, wo sie wirkt. Kein
+  Einfach/Erweitert-Umschalter mehr — alle Optionen sind immer da, die
+  Akkordeon-Gruppen halten sie überschaubar.
 - **Transparenz erhalten** — freigestellte Motive bleiben transparent (Vorschau,
   PNG **und** 3D: transparente Bereiche werden ausgespart).
 - **3D-Export** — **`.3mf`** (jede Farbe als eigenes Objekt für Mehrfarb-/AMS-Druck),

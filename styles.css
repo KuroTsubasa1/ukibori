@@ -90,7 +90,6 @@
     white-space: nowrap;
   }
   /* View toggle (Einfach/Erweitert) sits centred-ish between brand and actions */
-  #topbar #viewToggle { margin-left: var(--sp-2); }
   #topbar .topbar-actions { margin-left: auto; display: flex; gap: var(--sp-1); }
 
   /* Top-bar action buttons (Öffnen/Speichern/Exportieren/?) */
@@ -283,12 +282,6 @@
   .status.error { color: var(--danger); font-weight: 600; }
   .link { color: var(--accent); cursor: pointer; font-weight: 600; }
 
-  /* ============================================================
-     Einfach/Erweitert — ONE sidebar, Simple is a filter
-     ============================================================ */
-  /* Advanced-only rows/groups carry [data-advanced]; without body.mode-advanced
-     they are hidden. One DOM for both views — no twin controls, no sync drift. */
-  body:not(.mode-advanced) [data-advanced] { display: none !important; }
   .sp-add-row { display: flex; gap: var(--sp-1); }
   .sp-add-row .btn { flex: 1; text-align: center; padding: 9px 6px; }
 

@@ -19,8 +19,8 @@
       text: 'Wähle Form und Größe deines Objekts — Rechteck für Lesezeichen oder Untersetzer, Kreis für Untersetzer oder Schlüsselanhänger.'
     },
     {
-      id: 'viewAdvanced',
-      text: 'Erweitert schaltet mehr frei: Farb-Stapelung inkl. AMS-Farbschichten (eine Farbe pro Druckschicht) mit gemeinsamer Filament-Palette zum Umsortieren, Hinzufügen & Zusammenführen — plus Schriftarten mit eigenen Fonts.'
+      id: 'advAutoHeights',
+      text: 'Höhe je Farbe stapelt deine Ebenen wie AMS-Filamentschichten: jede Farbe wird eine massive Druckschicht. Dazu Deckschicht und AMS-Palette für die Schicht-Reihenfolge.'
     },
     {
       id: 'exportBtn',
@@ -246,11 +246,7 @@
     }
     try {
       var seen = localStorage.getItem(SEEN_KEY);
-      if (seen) return;
-      var isSimple = !document.body.classList.contains('mode-advanced');
-      if (isSimple) {
-        start();
-      }
+      if (!seen) start();
     } catch (e) { /* localStorage unavailable — fail silently */ }
   });
 

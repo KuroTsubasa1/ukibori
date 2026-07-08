@@ -15,10 +15,6 @@
 <header id="topbar">
   <span class="brand">ukibori</span>
   <span class="tagline">Lesezeichen · Untersetzer · Schlüsselanhänger</span>
-  <div id="viewToggle" class="seg-group" role="tablist" aria-label="Ansicht">
-    <button type="button" id="viewSimple" class="seg seg-active" title="Einfache Ansicht">Einfach</button>
-    <button type="button" id="viewAdvanced" class="seg" title="Alle Optionen">Erweitert</button>
-  </div>
   <div class="topbar-actions">
     <button type="button" id="undoBtn" title="Rückgängig (Strg/Cmd+Z)" aria-label="Rückgängig">↶</button>
     <button type="button" id="redoBtn" title="Wiederholen (Strg/Cmd+Umschalt+Z)" aria-label="Wiederholen">↷</button>
@@ -58,7 +54,7 @@
               <input type="number" id="sizeH" class="sp-num adv-num-full" min="5" max="500" step="1" value="150" title="Höhe der Platte in mm">
             </div>
           </div>
-          <div class="adv-field" data-advanced>
+          <div class="adv-field">
             <label for="advThickness" class="adv-label">Dicke (mm)</label>
             <input type="number" id="advThickness" class="sp-num adv-num-full" step="0.5" min="0.5" value="3" title="Gesamtdicke des Objekts in mm">
           </div>
@@ -117,7 +113,7 @@
             </label>
             <input type="color" id="advTopLayerColor" value="#ffffff" title="Farbe der Deckschicht">
           </div>
-          <div class="adv-field" data-advanced>
+          <div class="adv-field">
             <label for="advColorStep" class="adv-label">Farbschichten</label>
             <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="2" title="Höhenunterschied zwischen Farbschichten in Druck-Schichten">
           </div>
@@ -133,7 +129,7 @@
         <summary>Element</summary>
         <div class="acc-body adv-section">
           <div class="adv-field" id="advTextField" hidden><label for="advText" class="adv-label">Text</label><input type="text" id="advText" class="text-input" value="" title="Textinhalt des Elements"></div>
-          <div class="adv-field" id="advFontField" data-advanced hidden>
+          <div class="adv-field" id="advFontField" hidden>
             <label for="advFontFamily" class="adv-label">Schriftart</label>
             <select id="advFontFamily" class="text-input" title="Schriftart des Textes"></select>
             <div class="adv-font-row">
@@ -150,7 +146,7 @@
             <label for="advColor" class="adv-label">Farbe</label>
             <input type="color" id="advColor" value="#ffffff" title="Farbe des ausgewählten Elements">
           </div>
-          <div class="adv-field" data-advanced>
+          <div class="adv-field">
             <label class="adv-label">Tiefenmodus</label>
             <div id="modeSeg" class="seg-group seg-sm adv-seg-full">
               <button type="button" id="modeSolid" class="seg seg-active" style="flex:1" title="Einfarbig (eine Tiefe)">Einfarbig</button>
@@ -158,20 +154,20 @@
               <button type="button" id="modeHeightmap" class="seg" style="flex:1" title="Helligkeit als Höhe (Graustufenrelief)">Höhenrelief</button>
             </div>
           </div>
-          <div class="adv-field" data-advanced>
+          <div class="adv-field">
             <label class="adv-label">Richtung</label>
             <div id="advDirSeg" class="seg-group seg-sm" style="width:100%">
               <button type="button" id="advDirRaised" class="seg seg-active" style="flex:1" title="Element steht hervor">Erhaben</button>
               <button type="button" id="advDirEngraved" class="seg" style="flex:1" title="Element ist eingraviert">Vertieft</button>
             </div>
           </div>
-          <div class="adv-field" id="advReliefHeightField" data-advanced hidden>
+          <div class="adv-field" id="advReliefHeightField" hidden>
             <label for="advReliefHeight" class="adv-label">Relief-Höhe (mm)</label>
             <input type="number" id="advReliefHeight" class="sp-num adv-num-full" step="0.2" min="0" value="1" title="Wie weit das Element hervorsteht bzw. vertieft ist (0 = kein Relief; Gestuft: die oberste Farbe erreicht diese Höhe; bei „Höhe je Farbe“: manueller Override, leer = automatisch)">
           </div>
 
           <!-- Umwandlung (Bild → Relief-Parameter des Elements) -->
-          <div data-advanced>
+          <div>
             <div class="adv-field">
               <label for="advThreshold" class="adv-label">Schwellwert (0–255)</label>
               <input type="range" id="advThreshold" min="0" max="255" step="1" value="128" title="Schwellwert für Schwarz/Weiß-Umwandlung (0–255)">
@@ -205,7 +201,7 @@
             </div>
           </div>
 
-          <div class="adv-two-col" data-advanced>
+          <div class="adv-two-col">
             <div class="adv-field">
               <label for="advCx" class="adv-label">X (mm)</label>
               <input type="number" id="advCx" class="sp-num adv-num-full" step="0.5" value="25" title="Horizontale Position des Elements (Mitte, mm)">
@@ -215,7 +211,7 @@
               <input type="number" id="advCy" class="sp-num adv-num-full" step="0.5" value="75" title="Vertikale Position des Elements (Mitte, mm)">
             </div>
           </div>
-          <div class="adv-two-col" data-advanced>
+          <div class="adv-two-col">
             <div class="adv-field">
               <label for="advW" class="adv-label">Breite (mm)</label>
               <input type="number" id="advW" class="sp-num adv-num-full" step="0.5" min="0.5" value="30" title="Breite des Elements in mm">
@@ -225,12 +221,12 @@
               <input type="number" id="advH" class="sp-num adv-num-full" step="0.5" min="0.5" value="30" title="Höhe des Elements in mm">
             </div>
           </div>
-          <div class="adv-field" data-advanced>
+          <div class="adv-field">
             <label for="advRot" class="adv-label">Drehung (°)</label>
             <input type="range" id="advRot" min="-180" max="180" step="1" value="0" title="Drehung des Elements in Grad (−180 bis 180)">
             <span class="badge" id="advRotVal">0°</span>
           </div>
-          <div class="adv-field" data-advanced>
+          <div class="adv-field">
             <label class="adv-label toggle">
               <input type="checkbox" id="advCutout" title="Element als Aussparung (Loch) aus dem Objekt herausschneiden"> Als Loch ausschneiden
             </label>
@@ -246,7 +242,7 @@
       </details>
 
       <!-- 4. Druck & Export (nur Erweitert) -->
-      <details class="acc" id="accDruck" data-advanced open>
+      <details class="acc" id="accDruck" open>
         <summary>Druck &amp; Export</summary>
         <div class="acc-body adv-section">
           <div class="adv-field">
@@ -265,7 +261,7 @@
       </details>
 
       <!-- 5. Einrasten (Editor-Einstellungen, nur Erweitert) -->
-      <details class="acc" data-advanced open>
+      <details class="acc" open>
         <summary>Einrasten</summary>
         <div class="acc-body adv-section">
           <div class="adv-field">
