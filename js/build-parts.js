@@ -341,18 +341,12 @@
   // bands). Derived heights carry NO layerH floor so a compressed stack keeps
   // DISTINCT floors (uncompressed step is >= layerH anyway). Returns null when
   // the feature is off / not applicable → classic depth.heightMm behavior.
-  function __autoSolidHeight(doc, el, maxRecessMm, ignoreOverride) {
-    if (!doc.autoLayerHeights) return null;
-    if (!el || !el.depth || el.depth.mode !== "solid") return null;
-    const layerH = doc.body.layerHeightMm;
-    if (!ignoreOverride && el.depth.heightOverrideMm != null) {
-      const ov = el.depth.heightOverrideMm;
-      return ov <= 0 ? 0 : Math.max(ov, layerH);
-    }
+  // Ordered distinct auto-layer colors for one direction: doc.amsPalette colors
+  // first (palette order = filament order), then the rest in element stacking
+  // order (doc.elements[0] lowest). Base-colored and non-printing (hidden /
+  // cutout / undecoded-image) elements take no slot. UPPERCASE hexes.
+  function __autoSolidOrder(doc, dir) {
     const baseHex = String(doc.body.baseColor || "").toUpperCase();
-    const hex = String(el.color || "").toUpperCase();
-    if (hex === baseHex) return 0; // same color as the plate → same height as the plate
-    const dir = el.depth.direction || "raised";
     const ams = Array.isArray(doc.amsPalette) ? doc.amsPalette : [];
     const inPal = [], rest = [];
     for (const e of doc.elements) {
@@ -365,7 +359,21 @@
       else if (rest.indexOf(h) === -1) rest.push(h);
     }
     inPal.sort((a, b) => ams.indexOf(a) - ams.indexOf(b));
-    const order = inPal.concat(rest);
+    return inPal.concat(rest);
+  }
+
+  function __autoSolidHeight(doc, el, maxRecessMm, ignoreOverride) {
+    if (!doc.autoLayerHeights) return null;
+    if (!el || !el.depth || el.depth.mode !== "solid") return null;
+    const layerH = doc.body.layerHeightMm;
+    if (!ignoreOverride && el.depth.heightOverrideMm != null) {
+      const ov = el.depth.heightOverrideMm;
+      return ov <= 0 ? 0 : Math.max(ov, layerH);
+    }
+    const baseHex = String(doc.body.baseColor || "").toUpperCase();
+    const hex = String(el.color || "").toUpperCase();
+    if (hex === baseHex) return 0; // same color as the plate → same height as the plate
+    const order = __autoSolidOrder(doc, el.depth.direction || "raised");
     const rank = order.indexOf(hex);
     if (rank < 0) return null; // element itself prints nothing (hidden/cutout/undecoded)
     let step = Math.max(1, doc.colorStepLayers || 2) * layerH;
@@ -841,7 +849,43 @@
       arr.push({ hex: g.hex, set: g.set });
     }
 
+    // --- Auto layer heights (Höhe je Farbe): ONE global banded stack --------
+    // Like the AMS filament stack below: level L is a full slab
+    // [T+L*step, T+(L+1)*step] colored autoOrder[L] over every participating
+    // pixel whose element color ranks >= L — so each printed layer is a single
+    // solid color across the whole piece, lower colors running through under
+    // higher ones. Elements with a manual heightOverrideMm keep their classic
+    // own-color prism below (their color still holds its rank, so the other
+    // layers don't shift); base-colored elements own their pixels but appear in
+    // no band region — they punch through the stack down to the plate.
+    const autoOrder = doc.autoLayerHeights ? __autoSolidOrder(doc, "raised") : [];
+    const autoRank = new Map(); // ei -> rank, banded participants only
+    if (autoOrder.length) {
+      doc.elements.forEach((el, ei) => {
+        if (!el || !el.depth || el.depth.mode !== "solid" || el._hidden || el.cutout) return;
+        if (el.type === "image" && !el._img) return;
+        if ((el.depth.direction || "raised") !== "raised") return;
+        if (el.depth.heightOverrideMm != null) return; // manual height → own prism
+        const r = autoOrder.indexOf(String(el.color || "").toUpperCase());
+        if (r >= 0) autoRank.set(ei, r);
+      });
+    }
+    if (autoRank.size) {
+      const nn = cols * rows;
+      let maxL = 0; for (const r of autoRank.values()) if (r > maxL) maxL = r;
+      for (let L = 0; L <= maxL; L++) {
+        const region = new Uint8Array(nn);
+        for (const [ei, r] of autoRank) {
+          if (r < L) continue;
+          for (const g of (byElem.get(ei) || [])) { const s = g.set; for (let i = 0; i < nn; i++) region[i] |= s[i]; }
+        }
+        const facets = tracedFacets((c, r) => region[idx(c, r)] === 1, step, T + L * step);
+        if (facets.length) parts.push({ name: "farbschicht-auto-" + (L + 1), color: window.hexToRgb(autoOrder[L]), facets });
+      }
+    }
+
     for (const [ei, colorGroups] of byElem) {
+      if (autoRank.has(ei)) continue; // already printed by the shared auto stack
       const el = doc.elements[ei];
       const isBandsColorLayers = el.depth && el.depth.mode === "colorLayers" && colorStyleOf(el) === "bands";
 
