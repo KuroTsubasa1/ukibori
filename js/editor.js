@@ -52,13 +52,13 @@
 
   // ---- View toggle (Task 1, preserved) ----
   function getView() { return document.body.classList.contains("mode-advanced") ? "advanced" : "simple"; }
+  // One sidebar for both views: Simple is a CSS filter (body.mode-advanced absent →
+  // [data-advanced] rows are hidden), not a second DOM tree. No twin controls, no sync.
   function setView(v) {
     const adv = v === "advanced";
     document.body.classList.toggle("mode-advanced", adv);
     document.getElementById("viewSimple").classList.toggle("seg-active", !adv);
     document.getElementById("viewAdvanced").classList.toggle("seg-active", adv);
-    document.getElementById("sidebarSimple").hidden = adv;
-    document.getElementById("sidebarAdvanced").hidden = !adv;
     try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
   }
 
@@ -461,7 +461,7 @@
   }
 
   function wireAmsPalette() {
-    var cont = document.getElementById('advPaletteSwatch');
+    var cont = document.getElementById('amsPaletteHost');
     if (!cont) return;
     var refresh = function () { renderAmsPalette(cont); render2D(); scheduleRebuild3D(); };
     // Recolor a layer in place (preserve order). Do NOT rebuild the swatch DOM — that would
@@ -528,11 +528,13 @@
     var colorStyleField = document.getElementById('colorStyleField');
     if (colorStyleField) colorStyleField.hidden = !isColorLayers;
     if (!isColorLayers) { cont.innerHTML = ''; return; }
-    // AMS shared palette active for a bands element → show the doc-level filament-layer editor
-    // (add / recolor / drag-reorder / remove) in place of the per-element swatches.
+    // AMS shared palette active for a bands element → the doc-level filament-layer
+    // editor lives in the Ebenen group (renderAmsPaletteField); hide the per-element
+    // swatches, they would only duplicate it.
     var styleNow = (el.depth && el.depth.colorLayerStyle) || ((el.depth && el.depth.flush) ? 'bands' : 'stepped');
     if (styleNow === 'bands' && Array.isArray(doc.amsPalette) && doc.amsPalette.length) {
-      renderAmsPalette(cont);
+      field.hidden = true;
+      cont.innerHTML = '';
       return;
     }
     // Use the v1 shim to call __orderedNaturalHexes.
@@ -1560,23 +1562,22 @@
     doc.body.shape = shape;
     var seg = shape === "rect" ? "Rect" : shape === "circle" ? "Circle" : shape === "free" ? "Free" : "Image";
     setSegActive("shapeSeg", "shape" + seg);
-    setSegActive("advShapeSeg", "advShape" + seg);      // Advanced twin
     var isImage = shape === "image";
     // Plate-free "Bild": the image IS the object → hide all plate chrome (border/frame/corner
     // + plate size). border: free only; frame: rect/circle only; corner: rect only.
-    setHidden("borderField", shape !== "free");   setHidden("advBorderField", shape !== "free");
-    setHidden("frameField", shape === "free" || isImage);  setHidden("advFrameField", shape === "free" || isImage);
-    setHidden("cornerField", shape !== "rect");   setHidden("advCornerField", shape !== "rect");
-    setHidden("simpleSizeSection", isImage);      setHidden("advSizeRow", isImage);
+    setHidden("borderField", shape !== "free");
+    setHidden("frameField", shape === "free" || isImage);
+    setHidden("cornerField", shape !== "rect");
+    setHidden("simpleSizeSection", isImage);
     // A Bild object has no plate → mount (Befestigung) and plate-centered "Ausrichten" are
     // meaningless. Force mount off (so 2D marker, hit-test, and 3D geometry all agree) and hide
     // both control groups. Non-image shapes leave the mount untouched.
     if (isImage && doc.mount && doc.mount.type !== "none") {
       doc.mount.type = "none";
-      setSegActive("mountSeg", "mountNone"); setSegActive("advMountSeg", "advMountNone");
+      setSegActive("mountSeg", "mountNone");
     }
-    setHidden("simpleMountSection", isImage);     setHidden("advMountField", isImage);
-    setHidden("simpleCenterSection", isImage);    setHidden("advCenterField", isImage);
+    setHidden("simpleMountSection", isImage);
+    setHidden("simpleCenterSection", isImage);
     render2D();
     scheduleRebuild3D();
   }
@@ -1584,45 +1585,30 @@
   document.getElementById("shapeCircle").addEventListener("click", function () { applyShape("circle"); });
   document.getElementById("shapeFree").addEventListener("click", function () { applyShape("free"); });
   document.getElementById("shapeImage").addEventListener("click", function () { applyShape("image"); });
-  document.getElementById("advShapeRect").addEventListener("click", function () { applyShape("rect"); });
-  document.getElementById("advShapeCircle").addEventListener("click", function () { applyShape("circle"); });
-  document.getElementById("advShapeFree").addEventListener("click", function () { applyShape("free"); });
-  document.getElementById("advShapeImage").addEventListener("click", function () { applyShape("image"); });
 
-  // Wire a Simple+Advanced number-input pair to one apply(v); each mirrors the other's value
-  // so the two sidebars stay in sync (only the twin is written, never self → no cursor jumps).
-  function bindTwinNum(idA, idB, min, apply) {
-    [[idA, idB], [idB, idA]].forEach(function (p) {
-      var node = document.getElementById(p[0]);
-      if (!node) return;
-      node.addEventListener("input", function () {
-        var v = parseFloat(node.value);
-        if (isNaN(v) || v < min) return;
-        apply(v);
-        var twin = document.getElementById(p[1]);
-        if (twin) twin.value = node.value;
-      });
+  // Wire a number/color input to apply(v).
+  function bindNum(id, min, apply) {
+    var node = document.getElementById(id);
+    if (!node) return;
+    node.addEventListener("input", function () {
+      var v = parseFloat(node.value);
+      if (isNaN(v) || v < min) return;
+      apply(v);
     });
   }
-  function bindTwinColor(idA, idB, apply) {
-    [[idA, idB], [idB, idA]].forEach(function (p) {
-      var node = document.getElementById(p[0]);
-      if (!node) return;
-      node.addEventListener("input", function () {
-        apply(node.value);
-        var twin = document.getElementById(p[1]);
-        if (twin) twin.value = node.value;
-      });
-    });
+  function bindColor(id, apply) {
+    var node = document.getElementById(id);
+    if (!node) return;
+    node.addEventListener("input", function () { apply(node.value); });
   }
 
   // Eckenradius (shown only for Rechteck)
-  bindTwinNum("cornerMm", "advCornerMm", 0, function (v) {
+  bindNum("cornerMm", 0, function (v) {
     doc.body.cornerRadiusMm = v; render2D(); scheduleRebuild3D();
   });
 
   // Border (shown only for Free)
-  bindTwinNum("borderMm", "advBorderMm", 0, function (v) {
+  bindNum("borderMm", 0, function (v) {
     doc.body.borderMm = v; scheduleRebuild3D();
   });
 
@@ -1631,20 +1617,16 @@
     if (!doc.body.frame) doc.body.frame = window.defaultFrame ? window.defaultFrame() : { widthMm: 0, heightMm: 2, color: "#000000" };
     return doc.body.frame;
   }
-  bindTwinNum("frameMm", "advFrameMm", 0, function (v) {
+  bindNum("frameMm", 0, function (v) {
     ensureFrame().widthMm = v; render2D(); scheduleRebuild3D();
   });
-  bindTwinColor("frameColor", "advFrameColor", function (val) {
+  bindColor("frameColor", function (val) {
     ensureFrame().color = val; render2D(); scheduleRebuild3D();
   });
-  // Höhe in the Simple row; kept in sync with the Advanced #advFrameHeight field
-  // (both write body.frame.heightMm).
   document.getElementById("frameHeightMm").addEventListener("input", function () {
     var v = parseFloat(this.value);
     if (!isNaN(v) && v >= 0) {
       ensureFrame().heightMm = v;
-      var adv = document.getElementById("advFrameHeight");
-      if (adv) adv.value = v;
       render2D();
       scheduleRebuild3D();
     }
@@ -1687,7 +1669,6 @@
     }
     var seg = type === "none" ? "None" : type === "hole" ? "Hole" : "Loop";
     setSegActive("mountSeg", "mount" + seg);
-    setSegActive("advMountSeg", "advMount" + seg);      // Advanced twin
     // Re-fit canvas: domain may have expanded/contracted.
     fitScale();
     render2D();
@@ -1696,15 +1677,12 @@
   document.getElementById("mountNone").addEventListener("click", function () { applyMount("none", { snap: true }); });
   document.getElementById("mountHole").addEventListener("click", function () { applyMount("hole", { snap: true }); });
   document.getElementById("mountLoop").addEventListener("click", function () { applyMount("loop", { snap: true }); });
-  document.getElementById("advMountNone").addEventListener("click", function () { applyMount("none", { snap: true }); });
-  document.getElementById("advMountHole").addEventListener("click", function () { applyMount("hole", { snap: true }); });
-  document.getElementById("advMountLoop").addEventListener("click", function () { applyMount("loop", { snap: true }); });
 
-  // Size W/H (Simple sizeW/sizeH ↔ Advanced advSizeW/advSizeH)
-  bindTwinNum("sizeW", "advSizeW", 5, function (v) {
+  // Size W/H
+  bindNum("sizeW", 5, function (v) {
     doc.body.widthMm = v; fitScale(); render2D(); scheduleRebuild3D(); // B3: re-fit on dim change
   });
-  bindTwinNum("sizeH", "advSizeH", 5, function (v) {
+  bindNum("sizeH", 5, function (v) {
     doc.body.heightMm = v; fitScale(); render2D(); scheduleRebuild3D();
   });
 
@@ -1725,7 +1703,7 @@
     render2D();
     scheduleRebuild3D();
     // Auto-focus the visible text input so the user can type immediately.
-    var f = (getView() === "advanced") ? document.getElementById("advText") : document.getElementById("simpleText");
+    var f = document.getElementById("advText");
     if (f) { f.value = selectedEl() && selectedEl().text || ""; f.focus(); if (f.select) f.select(); }
   }
 
@@ -1779,19 +1757,13 @@
 
   // Bind Advanced buttons (guard each getElementById in case markup is missing).
   (function () {
-    var ib = document.getElementById("addImageBtnAdv"); if (ib) ib.addEventListener("click", addImageAction);
-    var tb = document.getElementById("addTextBtnAdv");  if (tb) tb.addEventListener("click", addTextAction);
-    var qb = document.getElementById("addQrBtnAdv");    if (qb) qb.addEventListener("click", addQrAction);
   }());
 
   // ---- Remove Background (KI) ----
-  // Advanced twin forwards to the Simple handler (which updates both sidebars via the proxies).
-  document.getElementById("removeBgBtnAdv").addEventListener("click", function () { document.getElementById("removeBgBtn").click(); });
   document.getElementById("removeBgBtn").addEventListener("click", function () {
-    // Proxies so btn.disabled / statusEl.textContent update BOTH sidebars' controls,
-    // keeping the (special-char) body below untouched.
-    var btn = { set disabled(v) { ["removeBgBtn", "removeBgBtnAdv"].forEach(function (id) { var n = document.getElementById(id); if (n) n.disabled = v; }); } };
-    var statusEl = { set textContent(v) { ["bgStatus", "bgStatusAdv"].forEach(function (id) { var n = document.getElementById(id); if (n) n.textContent = v; }); } };
+    // Setter proxies kept so the (special-char) body below stays untouched.
+    var btn = { set disabled(v) { var n = document.getElementById("removeBgBtn"); if (n) n.disabled = v; } };
+    var statusEl = { set textContent(v) { var n = document.getElementById("bgStatus"); if (n) n.textContent = v; } };
 
     var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
     if (!el || el.type !== "image" || !el._img) {
@@ -2012,15 +1984,11 @@
     }
   }
 
-  // Shared entry point: refresh both the Advanced and Simple layer lists.
+  // Refresh the (single) layer list.
   function renderLayers() {
     populateLayersList(
       document.getElementById("advLayers"),
       document.getElementById("advLayersEmpty")
-    );
-    populateLayersList(
-      document.getElementById("simpleLayers"),
-      document.getElementById("simpleLayersEmpty")
     );
   }
 
@@ -2105,16 +2073,12 @@
       if (advDirEngraved) advDirEngraved.classList.remove("seg-active");
     }
 
-    // Text content fields: show only for text elements; seed from el.text.
+    // Text content field: show only for text elements; seed from el.text.
     var advTextField = document.getElementById("advTextField");
-    var simpleTextSection = document.getElementById("simpleTextSection");
     var isText = el && el.type === "text";
     if (advTextField) advTextField.hidden = !isText;
-    if (simpleTextSection) simpleTextSection.hidden = !isText;
     var advTextNode = document.getElementById("advText");
-    var simpleTextNode = document.getElementById("simpleText");
     if (advTextNode) advTextNode.value = isText ? (el.text || "") : "";
-    if (simpleTextNode) simpleTextNode.value = isText ? (el.text || "") : "";
 
     // Font controls (Schriftart + Fett + Upload): text elements only.
     var advFontField = document.getElementById("advFontField");
@@ -2150,29 +2114,35 @@
         }
       }
     }
-    // "Höhe je Farbe" toggle (doc-level; surfaced here because Einfarbig heights are edited here).
-    var autoField = document.getElementById("advAutoHeightsField");
-    var showAuto = !!(el && (el.type === "text" || el.type === "image") && em === "solid");
-    if (autoField) {
-      autoField.hidden = !showAuto;
-      var ah = document.getElementById("advAutoHeights");
-      if (ah) ah.checked = !!doc.autoLayerHeights;
-    }
-    // Deckschicht (doc-level cover color): shown for Einfarbig elements in the
-    // auto-heights mode AND for Farbebenen elements in the AMS style (the deck
-    // rides on the shared palette there, independent of the Höhe-je-Farbe flag).
-    var tlField = document.getElementById("advTopLayerField");
-    if (tlField) {
-      var isAmsSel = !!(el && el.type === "image" && em === "colorLayers" && colorStyleOf(el) === "bands");
-      tlField.hidden = !((showAuto && doc.autoLayerHeights) || isAmsSel);
-      var tl = document.getElementById("advTopLayer");
-      var tlc = document.getElementById("advTopLayerColor");
-      if (tl) tl.checked = doc.topLayerColor != null;
-      if (tlc && doc.topLayerColor != null) tlc.value = doc.topLayerColor;
-    }
+    // "Höhe je Farbe" + Deckschicht live in the Ebenen group (doc scope, always
+    // visible) — only the state is synced here.
+    var ah = document.getElementById("advAutoHeights");
+    if (ah) ah.checked = !!doc.autoLayerHeights;
+    var tl = document.getElementById("advTopLayer");
+    var tlc = document.getElementById("advTopLayerColor");
+    if (tl) tl.checked = doc.topLayerColor != null;
+    if (tlc && doc.topLayerColor != null) tlc.value = doc.topLayerColor;
 
     // Palette swatches: show only for image elements in colorLayers mode.
     renderPaletteSwatches(el);
+    // Doc-level AMS filament palette (Ebenen group).
+    renderAmsPaletteField();
+  }
+
+  // AMS-Filament-Palette (Ebenen group, doc scope): visible whenever the shared
+  // palette is in use — i.e. it has colors AND some element prints in the AMS style —
+  // regardless of which element is selected.
+  function renderAmsPaletteField() {
+    var field = document.getElementById("amsPaletteField");
+    var host = document.getElementById("amsPaletteHost");
+    if (!field || !host) return;
+    var hasPal = Array.isArray(doc.amsPalette) && doc.amsPalette.length > 0;
+    var hasBandsEl = doc.elements.some(function (e) {
+      return e && e.type === "image" && e.depth && e.depth.mode === "colorLayers" && colorStyleOf(e) === "bands";
+    });
+    var show = hasPal && hasBandsEl;
+    field.hidden = !show;
+    if (show) renderAmsPalette(host); else host.innerHTML = "";
   }
 
   // -- Depth mode buttons --
@@ -2270,22 +2240,10 @@
     el.cutout = node.checked;
   });
 
-  // -- Text content fields (advText + simpleText, kept in sync) --
+  // -- Text content field --
   bindElementField("advText", "input", function (el, node) {
     if (el.type !== "text") return false;
     el.text = node.value;
-    // Keep Simple field in sync.
-    var simple = document.getElementById("simpleText");
-    if (simple) simple.value = node.value;
-    renderLayers();
-  });
-
-  bindElementField("simpleText", "input", function (el, node) {
-    if (el.type !== "text") return false;
-    el.text = node.value;
-    // Keep Advanced field in sync.
-    var adv = document.getElementById("advText");
-    if (adv) adv.value = node.value;
     renderLayers();
   });
 
@@ -2377,16 +2335,6 @@
     if (!isNaN(v) && v >= 1) { doc.colorStepLayers = v; scheduleRebuild3D(); }
   });
 
-  document.getElementById("advFrameHeight").addEventListener("input", function () {
-    var v = parseFloat(this.value);
-    if (!isNaN(v) && v >= 0) {
-      ensureFrame().heightMm = v;
-      var simple = document.getElementById("frameHeightMm");
-      if (simple) simple.value = v; // keep the Simple row in sync
-      scheduleRebuild3D();
-    }
-  });
-
   // Base color (Grundfarbe) for the base plate.
   (function () {
     var bc = document.getElementById("advBaseColor");
@@ -2474,8 +2422,6 @@
   (function () {
     var ch = document.getElementById("centerH"); if (ch) ch.addEventListener("click", centerH);
     var cv2 = document.getElementById("centerV"); if (cv2) cv2.addEventListener("click", centerV);
-    var chA = document.getElementById("centerHAdv"); if (chA) chA.addEventListener("click", centerH);
-    var cvA = document.getElementById("centerVAdv"); if (cvA) cvA.addEventListener("click", centerV);
   }());
 
   // -- Init Advanced panel doc-level values (also called by resetDocTo) --
@@ -2490,20 +2436,10 @@
     if (res) res.value = doc.resolution != null ? doc.resolution : 1024;
     var cs = document.getElementById("advColorStep");
     if (cs) cs.value = doc.colorStepLayers != null ? doc.colorStepLayers : 2;
-    var fh = document.getElementById("advFrameHeight");
-    if (fh) fh.value = (doc.body.frame && doc.body.frame.heightMm != null) ? doc.body.frame.heightMm : 2;
     var bc = document.getElementById("advBaseColor");
     if (bc) bc.value = doc.body.baseColor || "#000000";
-    // Objekt section (twins of the Simple plate controls). Seg-active states + field
-    // visibility are set by applyShape/applyMount (called from initSimpleUI).
-    var fr = doc.body.frame || {};
-    var setVal = function (id, v) { var n = document.getElementById(id); if (n) n.value = v; };
-    setVal("advSizeW", doc.body.widthMm);
-    setVal("advSizeH", doc.body.heightMm);
-    setVal("advCornerMm", doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 4);
-    setVal("advBorderMm", doc.body.borderMm != null ? doc.body.borderMm : 2);
-    setVal("advFrameMm", fr.widthMm != null ? fr.widthMm : 0);
-    setVal("advFrameColor", fr.color || "#000000");
+    // Plate controls (canonical ids; seg states + field visibility come from
+    // applyShape/applyMount, called from initSimpleUI).
     refreshAdvancedForSelection();
     renderAdvancedLayers();
   }
