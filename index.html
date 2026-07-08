@@ -173,6 +173,19 @@
     <div id="layerSliderWrap" hidden>
       <input type="range" id="layerSlider" min="2" max="100" step="1" value="100" title="Schicht-Vorschau: Modell nur bis zu dieser Höhe anzeigen (100 % = alles)" aria-label="Schicht-Vorschau">
     </div>
+    <div id="selToolbar" role="toolbar" aria-label="Element-Aktionen" hidden>
+      <button type="button" id="selDupBtn" title="Duplizieren (Strg/Cmd+D)">⧉</button>
+      <button type="button" id="selCenterHBtn" title="Horizontal zentrieren">↔</button>
+      <button type="button" id="selCenterVBtn" title="Vertikal zentrieren">↕</button>
+      <button type="button" id="selDelBtn" title="Löschen (Entf)">🗑</button>
+    </div>
+    <div id="stageHero" hidden>
+      <div class="hero-card">
+        <div class="hero-icon">⬚</div>
+        <p class="hero-title">Zieh ein Bild hierher</p>
+        <p class="hero-sub">… oder starte rechts mit <strong>+ Bild</strong>, <strong>+ Text</strong> oder <strong>+ QR</strong>.</p>
+      </div>
+    </div>
     <canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf. Beim Skalieren an den Ecken hält Umschalt das Seitenverhältnis."></canvas>
     <canvas id="preview3dCanvas" width="800" height="1000" hidden></canvas>
   </section>

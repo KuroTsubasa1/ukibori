@@ -1304,6 +1304,11 @@
       return;
     }
 
+    if (e.key === "Delete" || e.key === "Backspace") { // remove the selected element
+      if (state.selectedId != null) { e.preventDefault(); deleteSelected(); }
+      return;
+    }
+
     // --- Arrow nudge of the selected element ---
     var dx = 0, dy = 0;
     if (e.key === "ArrowLeft") dx = -1;
@@ -2006,7 +2011,41 @@
     del.textContent = "🗑";
     del.title = "Löschen";
 
-    li.append(nameSpan, vis, up, dn, del);
+    // Print-info badge: at what height/mode this layer prints. Solid rows also
+    // get a color dot (the thumb shows the source image, not the print color).
+    var d = el.depth || {};
+    var dirArrow = (d.direction === "engraved") ? "↓" : "↑";
+    var badge = document.createElement("span");
+    badge.className = "layer-badge";
+    var pinned = false;
+    if (d.mode === "heightmap") {
+      badge.textContent = dirArrow + " Relief";
+      badge.title = "Höhenrelief aus Bildhelligkeit";
+    } else if (d.mode === "colorLayers") {
+      var st = colorStyleOf(el);
+      badge.textContent = dirArrow + " " + (st === "bands" ? "AMS" : st === "flush" ? "Fläche" : "Gestuft");
+      badge.title = "Farbebenen (" + badge.textContent.slice(2) + ")";
+    } else {
+      var hmm = null;
+      if (doc.autoLayerHeights) {
+        if (d.heightOverrideMm != null) { hmm = d.heightOverrideMm; pinned = true; }
+        else if (window.autoSolidHeightMm) hmm = window.autoSolidHeightMm(doc, el);
+      }
+      if (hmm == null) hmm = (d.heightMm != null ? d.heightMm : 1);
+      badge.textContent = hmm <= 0 ? "bündig" : dirArrow + " " + (Math.round(hmm * 100) / 100) + (pinned ? " ✎" : "");
+      badge.title = hmm <= 0
+        ? "Bündig mit der Platte (Grundfarbe oder Höhe 0)"
+        : "Druckhöhe " + (Math.round(hmm * 100) / 100) + " mm" + (pinned ? " — manuell fixiert" : d.direction === "engraved" ? " vertieft" : " erhaben");
+    }
+    if ((d.mode || "solid") === "solid" && el.color) {
+      var dot = document.createElement("span");
+      dot.className = "layer-dot";
+      dot.style.background = el.color;
+      dot.title = "Druckfarbe " + el.color;
+      li.append(nameSpan, dot, badge, vis, up, dn, del);
+    } else {
+      li.append(nameSpan, badge, vis, up, dn, del);
+    }
 
     // Drag to reorder (same pattern as the AMS palette rows). Ids as strings —
     // loaded docs may carry non-numeric ids.
@@ -2104,12 +2143,15 @@
     }
   }
 
-  // Refresh the (single) layer list.
+  // Refresh the (single) layer list. Also drives the stage hero: a big
+  // drop-invitation while the project is empty.
   function renderLayers() {
     populateLayersList(
       document.getElementById("advLayers"),
       document.getElementById("advLayersEmpty")
     );
+    var hero = document.getElementById("stageHero");
+    if (hero) hero.hidden = doc.elements.length > 0;
   }
 
   // Backward-compat alias so existing call sites (and window.editor export) still work.
@@ -2123,6 +2165,11 @@
     // Inspector empty state: dim the panel + show the hint when nothing is selected.
     var insp = document.getElementById("sidebarElement");
     if (insp) insp.classList.toggle("no-selection", disabled);
+    // Floating selection toolbar on the stage follows the selection.
+    var selTb = document.getElementById("selToolbar");
+    if (selTb) selTb.hidden = disabled;
+    // Layer badges mirror color/height/mode — keep them fresh with the panel.
+    renderLayers();
 
     var threshold = document.getElementById("advThreshold");
     var thresholdVal = document.getElementById("advThresholdVal");
@@ -2392,15 +2439,17 @@
     // doesn't silently drop the override.
     if (node.validity && node.validity.badInput) return false;
     if (doc.autoLayerHeights && el.depth.mode === "solid") {
-      if (String(node.value).trim() === "") { el.depth.heightOverrideMm = null; return; }
+      if (String(node.value).trim() === "") { el.depth.heightOverrideMm = null; renderLayers(); return; }
       var ov = parseFloat(node.value);
       if (isNaN(ov) || ov < 0) return false; // 0 allowed = flush with the plate
       el.depth.heightOverrideMm = ov;
+      renderLayers(); // badge shows the pinned height
       return;
     }
     var v = parseFloat(node.value);
     if (isNaN(v) || v < 0) return false; // 0 allowed = no relief (off)
     el.depth.heightMm = v;
+    renderLayers();
   });
 
   // -- Custom font upload (.ttf/.otf/.woff) → FontFace + doc.fonts --
@@ -2532,6 +2581,19 @@
     }
   }());
 
+  // ---- Löschen (Toolbar + Entf/Backspace auf der Arbeitsfläche) ----
+  function deleteSelected() {
+    var el = selectedEl();
+    if (!el) return;
+    var i = doc.elements.indexOf(el);
+    if (i !== -1) doc.elements.splice(i, 1);
+    state.selectedId = null;
+    refreshAdvancedForSelection();
+    renderLayers();
+    render2D();
+    scheduleRebuild3D();
+  }
+
   // ---- Duplizieren (Strg/Cmd+D + Button) ----
   function duplicateSelected() {
     var el = selectedEl();
@@ -2561,6 +2623,15 @@
   (function () {
     var b = document.getElementById("duplicateBtn");
     if (b) b.addEventListener("click", duplicateSelected);
+  }());
+
+  // ---- Floating selection toolbar on the stage ----
+  (function () {
+    var wire = function (id, fn) { var n = document.getElementById(id); if (n) n.addEventListener("click", fn); };
+    wire("selDupBtn", duplicateSelected);
+    wire("selCenterHBtn", function () { centerH(); });
+    wire("selCenterVBtn", function () { centerV(); });
+    wire("selDelBtn", deleteSelected);
   }());
 
   // ---- Dünne-Stellen prüfen (nozzle-width check) ----
