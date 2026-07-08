@@ -359,7 +359,18 @@
       else if (rest.indexOf(h) === -1) rest.push(h);
     }
     inPal.sort((a, b) => ams.indexOf(a) - ams.indexOf(b));
-    return inPal.concat(rest);
+    const order = inPal.concat(rest);
+    // Deckschicht (top layer): the doc-level cover color always takes rank 0 — the
+    // workpiece's face (engraved: topmost plate band; raised: full-face slab) — and
+    // pushes element colors one step further. Ignored when it matches the base color
+    // (the plate face already IS that color).
+    const top = doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null;
+    if (top && top !== baseHex) {
+      const i = order.indexOf(top);
+      if (i !== -1) order.splice(i, 1);
+      order.unshift(top);
+    }
+    return order;
   }
 
   function __autoSolidHeight(doc, el, maxRecessMm, ignoreOverride) {
@@ -568,9 +579,6 @@
     // shallowest), lightest at the bottom of the stack; below the deepest band the interior stays
     // base color. No bands element → single full-height base slab (byte-identical parity).
     const surroundMember = (c, r) => { const i = idx(c, r); return comp.isBase[i] === 1 || inBand(i); };
-    // Band ONLY genuine interior base cells; the Rand-Rahmen band cells (the outer perimeter,
-    // whose side walls are exposed under the single-color frame cap) stay one base-color slab.
-    const interiorMember = (c, r) => { const i = idx(c, r); return comp.isBase[i] === 1 && !inBand(i); };
     // Split the plate only when EXACTLY ONE engraved element uses bands — its palette then maps
     // 1:1 onto its own inlay. Multiple bands elements with distinct palettes are ambiguous (a
     // global sort/count would carve deeper than any single inlay), so fall back to a plain base.
@@ -603,16 +611,17 @@
       const avail = Math.max(0, T - minBase);
       const bandThick = Math.min(step, avail / N); // compress to fit; never silently drop a color
       const interiorTop = T - N * bandThick;
-      if (interiorTop - minBase > 1e-6) baseAdd(interiorMember, interiorTop - minBase, minBase); // base interior below the bands
+      // The Rand-Rahmen understructure bands together with the interior — the border is
+      // part of the workpiece, so its printed layers stay one solid color too (the frame
+      // cap in frame.color still sits on top of it, above T).
+      if (interiorTop - minBase > 1e-6) baseAdd(surroundMember, interiorTop - minBase, minBase); // base below the bands
       // Rank k (1=darkest .. N=lightest) occupies [T-k*bandThick, T-(k-1)*bandThick].
       for (let k = N; k >= 1; k--) {
         const zBot = T - k * bandThick;
         if (bandThick <= 1e-6) continue;
-        const facets = tracedFacets(interiorMember, bandThick, zBot);
+        const facets = tracedFacets(surroundMember, bandThick, zBot);
         if (facets.length) baseParts.push({ name: "grundplatte-band-" + k, color: window.hexToRgb(bandHexes[k - 1]), facets });
       }
-      // Rand-Rahmen understructure: single base-color slab (frame cap sits on top; no stripes).
-      baseAdd((c, r) => inBand(idx(c, r)), T - minBase, minBase);
     } else {
       baseAdd(surroundMember, T - minBase, minBase);
     }
@@ -889,13 +898,50 @@
     if (autoRank.size) {
       const nn = cols * rows;
       let maxL = 0; for (const r of autoRank.values()) if (r > maxL) maxL = r;
-      for (let L = 0; L <= maxL; L++) {
-        const region = new Uint8Array(nn);
-        for (const [ei, r] of autoRank) {
-          if (r < L) continue;
-          for (const g of (byElem.get(ei) || [])) { const s = g.set; for (let i = 0; i < nn; i++) region[i] |= s[i]; }
+      // Deckschicht: when a top-layer color leads the order, level 0 covers the WHOLE
+      // plate face (not just motif pixels) — the motif levels stack on top of it.
+      // Pixels owned by non-participating elements punch through it: base-colored and
+      // overridden solids, engraved motifs (they carve down from T), colorLayers/
+      // heightmap elements (they own [T..] themselves), cutouts and the frame ring.
+      const baseHexR = String(doc.body.baseColor || "").toUpperCase();
+      const deckHex = (doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null);
+      const deckOn = !!(deckHex && deckHex !== baseHexR && autoOrder[0] === deckHex);
+      // Heightmap elements build UP from the plate top regardless of direction, but an
+      // engraved-direction heightmap claims no ownership of its BRIGHT pixels (the
+      // generic mask is luminance-filtered for non-raised), so the owner-based punch-
+      // through below misses them. Exclude their opaque regions explicitly — same
+      // alpha>=128 criterion as buildHeightmapParts — or deck and heightmap floor
+      // would interpenetrate in [T, T+step].
+      let hmExclude = null;
+      if (deckOn) {
+        for (const el of doc.elements) {
+          if (!el || !el.depth || el.depth.mode !== "heightmap") continue;
+          if (el.type === "image" && !el._img) continue;
+          const d = __drawElement(el, doc, cols, rows, grid);
+          if (!hmExclude) hmExclude = new Uint8Array(cols * rows);
+          for (let i = 0; i < cols * rows; i++) if (d[i * 4 + 3] >= 128) hmExclude[i] = 1;
         }
-        const facets = tracedFacets((c, r) => region[idx(c, r)] === 1, step, T + L * step);
+      }
+      const deckMember = (c, r) => {
+        const i = idx(c, r);
+        if (comp.cutout[i] || (band && band[i] === 1)) return false;
+        if (hmExclude && hmExclude[i] === 1) return false;
+        const o = comp.owner[i];
+        return o < 0 || autoRank.has(o);
+      };
+      for (let L = 0; L <= maxL; L++) {
+        let member;
+        if (L === 0 && deckOn) {
+          member = deckMember;
+        } else {
+          const region = new Uint8Array(nn);
+          for (const [ei, r] of autoRank) {
+            if (r < L) continue;
+            for (const g of (byElem.get(ei) || [])) { const s = g.set; for (let i = 0; i < nn; i++) region[i] |= s[i]; }
+          }
+          member = (c, r) => region[idx(c, r)] === 1;
+        }
+        const facets = tracedFacets(member, step, T + L * step);
         if (facets.length) parts.push({ name: "farbschicht-auto-" + (L + 1), color: window.hexToRgb(autoOrder[L]), facets });
       }
     }

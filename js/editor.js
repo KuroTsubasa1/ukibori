@@ -2152,10 +2152,20 @@
     }
     // "Höhe je Farbe" toggle (doc-level; surfaced here because Einfarbig heights are edited here).
     var autoField = document.getElementById("advAutoHeightsField");
+    var showAuto = !!(el && (el.type === "text" || el.type === "image") && em === "solid");
     if (autoField) {
-      autoField.hidden = !(el && (el.type === "text" || el.type === "image") && em === "solid");
+      autoField.hidden = !showAuto;
       var ah = document.getElementById("advAutoHeights");
       if (ah) ah.checked = !!doc.autoLayerHeights;
+    }
+    // Deckschicht (doc-level cover color) rides on the auto-heights mode.
+    var tlField = document.getElementById("advTopLayerField");
+    if (tlField) {
+      tlField.hidden = !(showAuto && doc.autoLayerHeights);
+      var tl = document.getElementById("advTopLayer");
+      var tlc = document.getElementById("advTopLayerColor");
+      if (tl) tl.checked = doc.topLayerColor != null;
+      if (tlc && doc.topLayerColor != null) tlc.value = doc.topLayerColor;
     }
 
     // Palette swatches: show only for image elements in colorLayers mode.
@@ -2391,6 +2401,36 @@
     if (ah) ah.addEventListener("change", function () {
       doc.autoLayerHeights = this.checked;
       refreshAdvancedForSelection(); // relief field switches between height and override semantics
+      scheduleRebuild3D();
+    });
+  }());
+
+  // Deckschicht (top layer): doc-level cover color at rank 0 of the auto stack.
+  (function () {
+    var tl = document.getElementById("advTopLayer");
+    var tlc = document.getElementById("advTopLayerColor");
+    if (tl) tl.addEventListener("change", function () {
+      if (this.checked) {
+        var v = (tlc && tlc.value) || "#ffffff";
+        // The engine ignores a base-colored deck — seed a visible default instead of
+        // silently storing a no-op (e.g. white deck on the default white plate).
+        if (v.toUpperCase() === String(doc.body.baseColor || "").toUpperCase()) {
+          var b = doc.body.baseColor || "#ffffff";
+          var lum = 0.299 * parseInt(b.substr(1, 2), 16) + 0.587 * parseInt(b.substr(3, 2), 16) + 0.114 * parseInt(b.substr(5, 2), 16);
+          v = lum > 128 ? "#333333" : "#ffffff";
+          if (tlc) tlc.value = v;
+        }
+        doc.topLayerColor = v;
+      } else {
+        doc.topLayerColor = null;
+      }
+      refreshAdvancedForSelection(); // element ranks shift one step → placeholder changes
+      scheduleRebuild3D();
+    });
+    if (tlc) tlc.addEventListener("input", function () {
+      if (doc.topLayerColor == null) return; // checkbox off → color is inert
+      doc.topLayerColor = this.value;
+      refreshAdvancedForSelection();
       scheduleRebuild3D();
     });
   }());

@@ -116,6 +116,10 @@ function defaultDoc() {
     // elements stay flush with the plate. New docs default ON; pre-feature saves migrate OFF
     // so their geometry is unchanged (see migrateProject).
     autoLayerHeights: true,
+    // Deckschicht: optional cover color for the auto-layer stack. Takes rank 0 (the
+    // workpiece's face — engraved: topmost plate band; raised: full-face slab under the
+    // motif stack), pushing element colors one step further. null = off.
+    topLayerColor: null,
     elements: [], fonts: {},
   };
 }
@@ -163,6 +167,7 @@ function migrateProject(doc) {
     if (doc.amsSolidBase == null) doc.amsSolidBase = false;
     // Auto layer heights shipped after these saves existed → keep their manual heights.
     if (doc.autoLayerHeights == null) doc.autoLayerHeights = false;
+    if (doc.topLayerColor === undefined) doc.topLayerColor = null;
     if (doc.body && doc.body.baseThicknessMm == null) doc.body.baseThicknessMm = 0;
     for (const el of doc.elements || []) {
       if (el.depth && el.depth.flush == null) el.depth.flush = false;
@@ -199,7 +204,7 @@ function migrateProject(doc) {
     resolution: doc.resolution != null ? doc.resolution : 1024,
     colorStepLayers: doc.colorStepLayers != null ? doc.colorStepLayers : 2,
     amsPalette: [], amsSolidBase: false,
-    autoLayerHeights: false, // v1 saves predate the feature: keep manual heights
+    autoLayerHeights: false, topLayerColor: null, // v1 saves predate the feature: keep manual heights
     elements: (doc.elements || []).map(el => migrateElement(el, doc, layerH)),
     fonts: doc.fonts || {},
   };

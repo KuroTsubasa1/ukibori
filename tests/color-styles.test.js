@@ -373,14 +373,19 @@
     assert(!buildParts(d).some(p => p.name.indexOf("erhaben") === 0), "heightMm 0 → no raised prism (element flush)");
   });
 
-  test("frame + bands: the Rand-Rahmen ring is NOT color-banded (bands inset from plate edge)", async () => {
+  test("frame + bands: the Rand-Rahmen understructure bands WITH the interior (frame cap on top)", async () => {
     const img = await threeColorImg(24, 24);
     const d = sqDoc(); d.body.frame = { widthMm: 6, heightMm: 2, color: "#00aa00" };
     d.elements = [makeEl(img, "engraved", "bands")];
-    const bands = buildParts(d).filter(p => p.name.indexOf("grundplatte-band") === 0);
+    const parts = buildParts(d);
+    const bands = parts.filter(p => p.name.indexOf("grundplatte-band") === 0);
     assertEqual(bands.length, 3, "interior still banded");
+    // The border is part of the workpiece: the Rand-Rahmen understructure bands along
+    // with the interior (each printed layer one solid color); only the frame CAP above
+    // the plate top keeps its own color.
     let x0 = Infinity, x1 = -Infinity;
     for (const p of bands) for (const t of p.facets) for (const pt of t) { if (pt[0] < x0) x0 = pt[0]; if (pt[0] > x1) x1 = pt[0]; }
-    assert(x0 >= 3 && x1 <= 57, "base bands inset from the 0..60 plate edge (frame ring excluded): x∈[" + x0.toFixed(1) + "," + x1.toFixed(1) + "]");
+    assert(x0 <= 1 && x1 >= 59, "base bands reach the plate edge (ring banded too): x∈[" + x0.toFixed(1) + "," + x1.toFixed(1) + "]");
+    assert(parts.some(p => p.name === "rand"), "frame cap still present above the bands");
   });
 })();
