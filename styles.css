@@ -84,28 +84,12 @@
     box-shadow: var(--shadow-sm);
     z-index: 5;
   }
+  /* The classic wordmark, unchanged. */
   #topbar .brand {
     font-weight: 700;
-    font-size: 17px;
+    font-size: 16px;
     letter-spacing: -.01em;
     color: var(--ink);
-    display: inline-flex;
-    align-items: baseline;
-    gap: 7px;
-  }
-  /* Vermillion hanko-style kanji mark next to the wordmark */
-  #topbar .brand::after {
-    content: "浮彫";
-    font-family: var(--font-display);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: .18em;
-    color: #fff;
-    background: var(--shu);
-    border-radius: 4px;
-    padding: 2px 5px 2px 7px;
-    line-height: 1.25;
-    transform: translateY(-1px);
   }
   #topbar .tagline {
     font-size: 12px;
@@ -162,7 +146,9 @@
     padding: var(--sp-3) var(--sp-4) var(--sp-4);
   }
 
-  /* Sidebar as a clean card */
+  /* Sidebars as clean cards. Editor layout: document panel LEFT (Werkstück /
+     Ebenen / Druck), stage CENTER, element inspector RIGHT — create & edit
+     happen next to the canvas where elements are selected. */
   .sidebar {
     flex: 0 0 312px;
     display: flex;
@@ -173,6 +159,12 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow);
     overflow: hidden;
+  }
+  #sidebarAdvanced { flex-basis: 288px; }
+  #sidebarElement { flex-basis: 300px; }
+  @media (max-width: 1150px) {
+    #sidebarAdvanced { flex-basis: 252px; }
+    #sidebarElement { flex-basis: 264px; }
   }
 
   /* Preview area = recessed stage the canvases float on */
@@ -357,7 +349,7 @@
   /* ============================================================
      Sidebar — scroll + accordions
      ============================================================ */
-  #sidebarAdvanced {
+  #sidebarAdvanced, #sidebarElement {
     display: flex; flex-direction: column; min-height: 0; overflow: hidden;
   }
   .adv-scroll {

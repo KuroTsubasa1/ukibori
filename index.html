@@ -28,9 +28,6 @@
   <aside id="sidebarAdvanced" class="sidebar">
     <div class="adv-scroll">
 
-      <!-- Hinzufuegen -->
-      <div class="adv-section"><div class="sp-add-row"><button type="button" id="addImageBtn" class="btn" title="Bild hinzufügen">Bild</button><button type="button" id="addTextBtn" class="btn" title="Text hinzufügen">Text</button><button type="button" id="addQrBtn" class="btn" title="QR-Code hinzufügen">QR</button></div></div>
-
       <!-- 1. Werkstueck: alles, was die Platte/das Objekt selbst beschreibt -->
       <details class="acc" id="accWerkstueck" open>
         <summary>Werkstück</summary>
@@ -124,6 +121,64 @@
         </div>
       </details>
 
+      <!-- 4. Druck & Export (nur Erweitert) -->
+      <details class="acc" id="accDruck" open>
+        <summary>Druck &amp; Export</summary>
+        <div class="acc-body adv-section">
+          <div class="adv-field">
+            <label for="advBaseThickness" class="adv-label">Basis-Dicke (mm)</label>
+            <input type="number" id="advBaseThickness" class="sp-num adv-num-full" step="0.2" min="0" value="0" title="Dicke der massiven Grundplatte unter dem vertieften Relief (0 = automatisch)">
+          </div>
+          <div class="adv-field">
+            <label for="advLayerHeight" class="adv-label">Schichthöhe (mm)</label>
+            <input type="number" id="advLayerHeight" class="sp-num adv-num-full" step="0.01" min="0.01" value="0.2" title="Schichthöhe des 3D-Druckers in mm (z. B. 0,2)">
+          </div>
+          <div class="adv-field">
+            <label for="advResolution" class="adv-label">Auflösung</label>
+            <input type="number" id="advResolution" class="sp-num adv-num-full" step="64" min="64" value="1024" title="Bildauflösung für die Umwandlung (Pixel, höher = genauer/langsamer)">
+          </div>
+          <div class="adv-field">
+            <button type="button" id="thinCheckBtn" class="btn" style="width:100%" title="Markiert gedruckte Bereiche, die schmaler als die Düse (0,4 mm) sind — sie verschwinden im Druck oder werden unsauber.">⚠ Dünne Stellen prüfen</button>
+            <div id="thinCheckStatus" class="hint" aria-live="polite"></div>
+          </div>
+        </div>
+      </details>
+
+      <!-- 5. Einrasten (Editor-Einstellungen, nur Erweitert) -->
+      <details class="acc" open>
+        <summary>Einrasten</summary>
+        <div class="acc-body adv-section">
+          <div class="adv-field">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="snapPlate" title="Beim Ziehen an Plattenrändern und Plattenmitte einrasten"> An Platte (Kanten/Mitte)
+            </label>
+          </div>
+          <div class="adv-field">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="snapElements" title="Beim Ziehen an anderen Elementen einrasten"> An Elementen
+            </label>
+          </div>
+          <div class="adv-field">
+            <label for="snapGrid" class="adv-label">Raster (mm, 0 = aus)</label>
+            <input type="number" id="snapGrid" class="sp-num adv-num-full" min="0" max="50" step="0.5" value="0" title="Beim Ziehen am Raster einrasten (0 = kein Raster)">
+          </div>
+        </div>
+      </details>
+
+    </div><!-- /adv-scroll -->
+  </aside>
+  <section id="preview">
+    <div class="view-toggle"><button id="view2dBtn" class="seg seg-active" title="2D-Vorschau">2D</button><button id="view3dBtn" class="seg" title="3D-Vorschau (rotierbar)">3D</button><button id="viewSplitBtn" class="seg" title="2D und 3D nebeneinander">Geteilt</button></div>
+    <div id="layerSliderWrap" hidden>
+      <input type="range" id="layerSlider" min="2" max="100" step="1" value="100" title="Schicht-Vorschau: Modell nur bis zu dieser Höhe anzeigen (100 % = alles)" aria-label="Schicht-Vorschau">
+    </div>
+    <canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf. Beim Skalieren an den Ecken hält Umschalt das Seitenverhältnis."></canvas>
+    <canvas id="preview3dCanvas" width="800" height="1000" hidden></canvas>
+  </section>
+  <aside id="sidebarElement" class="sidebar">
+    <div class="adv-scroll">
+      <!-- Hinzufuegen: neue Elemente entstehen dort, wo sie bearbeitet werden -->
+      <div class="adv-section"><div class="sp-add-row"><button type="button" id="addImageBtn" class="btn" title="Bild hinzufügen">Bild</button><button type="button" id="addTextBtn" class="btn" title="Text hinzufügen">Text</button><button type="button" id="addQrBtn" class="btn" title="QR-Code hinzufügen">QR</button></div></div>
       <!-- 3. Element: alles am ausgewählten Element -->
       <details class="acc" id="accElement" open>
         <summary>Element</summary>
@@ -243,61 +298,8 @@
           </div>
         </div>
       </details>
-
-      <!-- 4. Druck & Export (nur Erweitert) -->
-      <details class="acc" id="accDruck" open>
-        <summary>Druck &amp; Export</summary>
-        <div class="acc-body adv-section">
-          <div class="adv-field">
-            <label for="advBaseThickness" class="adv-label">Basis-Dicke (mm)</label>
-            <input type="number" id="advBaseThickness" class="sp-num adv-num-full" step="0.2" min="0" value="0" title="Dicke der massiven Grundplatte unter dem vertieften Relief (0 = automatisch)">
-          </div>
-          <div class="adv-field">
-            <label for="advLayerHeight" class="adv-label">Schichthöhe (mm)</label>
-            <input type="number" id="advLayerHeight" class="sp-num adv-num-full" step="0.01" min="0.01" value="0.2" title="Schichthöhe des 3D-Druckers in mm (z. B. 0,2)">
-          </div>
-          <div class="adv-field">
-            <label for="advResolution" class="adv-label">Auflösung</label>
-            <input type="number" id="advResolution" class="sp-num adv-num-full" step="64" min="64" value="1024" title="Bildauflösung für die Umwandlung (Pixel, höher = genauer/langsamer)">
-          </div>
-          <div class="adv-field">
-            <button type="button" id="thinCheckBtn" class="btn" style="width:100%" title="Markiert gedruckte Bereiche, die schmaler als die Düse (0,4 mm) sind — sie verschwinden im Druck oder werden unsauber.">⚠ Dünne Stellen prüfen</button>
-            <div id="thinCheckStatus" class="hint" aria-live="polite"></div>
-          </div>
-        </div>
-      </details>
-
-      <!-- 5. Einrasten (Editor-Einstellungen, nur Erweitert) -->
-      <details class="acc" open>
-        <summary>Einrasten</summary>
-        <div class="acc-body adv-section">
-          <div class="adv-field">
-            <label class="adv-label toggle">
-              <input type="checkbox" id="snapPlate" title="Beim Ziehen an Plattenrändern und Plattenmitte einrasten"> An Platte (Kanten/Mitte)
-            </label>
-          </div>
-          <div class="adv-field">
-            <label class="adv-label toggle">
-              <input type="checkbox" id="snapElements" title="Beim Ziehen an anderen Elementen einrasten"> An Elementen
-            </label>
-          </div>
-          <div class="adv-field">
-            <label for="snapGrid" class="adv-label">Raster (mm, 0 = aus)</label>
-            <input type="number" id="snapGrid" class="sp-num adv-num-full" min="0" max="50" step="0.5" value="0" title="Beim Ziehen am Raster einrasten (0 = kein Raster)">
-          </div>
-        </div>
-      </details>
-
     </div><!-- /adv-scroll -->
   </aside>
-  <section id="preview">
-    <div class="view-toggle"><button id="view2dBtn" class="seg seg-active" title="2D-Vorschau">2D</button><button id="view3dBtn" class="seg" title="3D-Vorschau (rotierbar)">3D</button><button id="viewSplitBtn" class="seg" title="2D und 3D nebeneinander">Geteilt</button></div>
-    <div id="layerSliderWrap" hidden>
-      <input type="range" id="layerSlider" min="2" max="100" step="1" value="100" title="Schicht-Vorschau: Modell nur bis zu dieser Höhe anzeigen (100 % = alles)" aria-label="Schicht-Vorschau">
-    </div>
-    <canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf. Beim Skalieren an den Ecken hält Umschalt das Seitenverhältnis."></canvas>
-    <canvas id="preview3dCanvas" width="800" height="1000" hidden></canvas>
-  </section>
 </main>
 
 <!-- Export dialog (kept for Task 3 rework) -->
