@@ -579,9 +579,25 @@
     // Band the base ONLY when an engraved bands element is actually present in this build — a
     // lingering (populated-but-unused) amsPalette must NOT stripe the plate of a non-AMS design.
     // amsSolidBase keeps the surrounding plate one solid base color (only the inlay is multicolor).
-    const bandHexes = (doc.amsSolidBase || bandsElemCount === 0)
+    let bandHexes = (doc.amsSolidBase || bandsElemCount === 0)
       ? []
       : (ams ? ams.slice() : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []));
+    // Auto layer heights (Höhe je Farbe): engraved Einfarbig elements split the plate
+    // the same way — the whole workpiece becomes solid single-color layers, band k
+    // matching the color at carve rank k (band 1 = shallowest = topmost). Only when
+    // no colorLayers-bands element is in the build (those keep the AMS palette above),
+    // and only if at least one auto-ranked engraved solid element actually prints
+    // (a manual heightOverrideMm opts an element out; its color still holds its rank).
+    if (!bandHexes.length && doc.autoLayerHeights && !doc.amsSolidBase && bandsElemCount === 0) {
+      const order = __autoSolidOrder(doc, "engraved");
+      const hasParticipant = order.length && doc.elements.some((e) =>
+        e && e.depth && e.depth.mode === "solid" && !e._hidden && !e.cutout &&
+        !(e.type === "image" && !e._img) &&
+        (e.depth.direction || "raised") === "engraved" &&
+        e.depth.heightOverrideMm == null &&
+        order.indexOf(String(e.color || "").toUpperCase()) !== -1);
+      if (hasParticipant) bandHexes = order;
+    }
     if (bandHexes.length > 0) {
       const N = bandHexes.length;
       const avail = Math.max(0, T - minBase);
