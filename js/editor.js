@@ -1996,6 +1996,11 @@
     vis.textContent = el._hidden ? "🙈" : "👁";
     vis.title = el._hidden ? "Einblenden" : "Ausblenden";
 
+    var dup = document.createElement("button");
+    dup.className = "adv-lbtn";
+    dup.textContent = "⧉";
+    dup.title = "Ebene duplizieren";
+
     var up = document.createElement("button");
     up.className = "adv-lbtn";
     up.textContent = "▲";
@@ -2042,9 +2047,9 @@
       dot.className = "layer-dot";
       dot.style.background = el.color;
       dot.title = "Druckfarbe " + el.color;
-      li.append(nameSpan, dot, badge, vis, up, dn, del);
+      li.append(nameSpan, dot, badge, vis, dup, up, dn, del);
     } else {
-      li.append(nameSpan, badge, vis, up, dn, del);
+      li.append(nameSpan, badge, vis, dup, up, dn, del);
     }
 
     // Drag to reorder (same pattern as the AMS palette rows). Ids as strings —
@@ -2084,6 +2089,11 @@
       refreshAdvancedForSelection();
       renderLayers();
       render2D();
+    });
+
+    dup.addEventListener("click", function (e) {
+      e.stopPropagation();
+      duplicateElement(el);
     });
 
     vis.addEventListener("click", function (e) {
@@ -2594,9 +2604,8 @@
     scheduleRebuild3D();
   }
 
-  // ---- Duplizieren (Strg/Cmd+D + Button) ----
-  function duplicateSelected() {
-    var el = selectedEl();
+  // ---- Duplizieren (Ebenen-Zeile, Strg/Cmd+D, Bühnen-Toolbar) ----
+  function duplicateElement(el) {
     if (!el) return;
     // Deep-copy the persisted fields; runtime caches are dropped and makeElementV2
     // mints a fresh id (the stripped id keeps props from overriding it).
@@ -2612,6 +2621,7 @@
     render2D();
     scheduleRebuild3D();
   }
+  function duplicateSelected() { duplicateElement(selectedEl()); }
   window.addEventListener("keydown", function (e) {
     if (!(e.metaKey || e.ctrlKey) || e.shiftKey || String(e.key).toLowerCase() !== "d") return;
     var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
@@ -2620,11 +2630,6 @@
     e.preventDefault();
     duplicateSelected();
   });
-  (function () {
-    var b = document.getElementById("duplicateBtn");
-    if (b) b.addEventListener("click", duplicateSelected);
-  }());
-
   // ---- Einrasten popover (topbar lock button) ----
   (function () {
     var btn = document.getElementById("snapBtn");
