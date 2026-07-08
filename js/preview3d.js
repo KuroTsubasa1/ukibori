@@ -28,7 +28,7 @@
 
   api.buildPreviewScene = function (parts) {
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xcccccc); // P1: lighter grey for better model contrast.
+    scene.background = new THREE.Color(0x2b2922); // Werkstatt stage: warm charcoal — the model pops like in a slicer.
     let meshCount = 0;
     for (const part of parts) {
       if (!part.facets || !part.facets.length) continue;
@@ -42,10 +42,13 @@
       scene.add(new THREE.Mesh(geo, mat));
       meshCount++;
     }
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7)); // more fill on the dark stage
     const dir = new THREE.DirectionalLight(0xffffff, 0.9);
     dir.position.set(0.4, -0.7, 1.0);
     scene.add(dir);
+    const rim = new THREE.DirectionalLight(0xfff4e0, 0.25); // warm rim from behind-left
+    rim.position.set(-0.6, 0.8, 0.5);
+    scene.add(rim);
     const box = new THREE.Box3().setFromObject(scene);
     const c = new THREE.Vector3(), s = new THREE.Vector3();
     if (box.isEmpty()) { c.set(0, 0, 0); s.set(0, 0, 0); }
