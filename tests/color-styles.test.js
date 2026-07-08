@@ -317,7 +317,7 @@
     const img = await threeColorImg(24, 24);
     const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
     el.depth.direction = "raised"; el.depth.mode = "solid"; el.depth.heightMm = 1.7; el._img = img;
-    const d = sqDoc(); d.elements = [el];
+    const d = sqDoc(); d.autoLayerHeights = false; d.elements = [el]; // classic manual heights
     const pr = buildParts(d).filter(p => p.name.indexOf("erhaben") === 0);
     assert(pr.length >= 1, "raised solid prism present");
     assertClose(Math.max(...pr.map(p => zbounds(p.facets).mx)), T + 1.7, 1e-5, "top at T + heightMm");
@@ -328,7 +328,7 @@
     const mk = (hmm) => {
       const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
       el.depth.direction = "engraved"; el.depth.mode = "solid"; el.depth.heightMm = hmm; el._img = img;
-      const d = sqDoc(); d.elements = [el];
+      const d = sqDoc(); d.autoLayerHeights = false; d.elements = [el]; // classic manual heights
       return buildParts(d).filter(p => p.name.indexOf("farbe-") === 0);
     };
     const z0 = (fs) => Math.min(...fs.map(p => zbounds(p.facets).mn));
@@ -367,7 +367,7 @@
     const img = await threeColorImg(24, 24);
     const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
     el.depth.direction = "raised"; el.depth.mode = "solid"; el.depth.heightMm = 0; el._img = img;
-    const d = sqDoc(); d.elements = [el];
+    const d = sqDoc(); d.autoLayerHeights = false; d.elements = [el]; // classic manual heights
     assert(!buildParts(d).some(p => p.name.indexOf("erhaben") === 0), "heightMm 0 → no raised prism (element flush)");
   });
 

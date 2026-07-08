@@ -28,6 +28,7 @@
     d.body.cornerRadiusMm = 0; d.body.thicknessMm = 3; d.body.baseColor = "#101010";
     d.resolution = 128;
     d.mount = { type: "none", xMm: 25, yMm: 10.5, diameterMm: 5, ringThicknessMm: 0, ringHeightMm: 2, marginMm: 8 };
+    d.autoLayerHeights = false; // fixtures predate auto heights; pin classic depth.heightMm behavior
     return d;
   }
   function setFrame(d, widthMm, heightMm, color) {
