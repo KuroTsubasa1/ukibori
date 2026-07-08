@@ -2158,10 +2158,13 @@
       var ah = document.getElementById("advAutoHeights");
       if (ah) ah.checked = !!doc.autoLayerHeights;
     }
-    // Deckschicht (doc-level cover color) rides on the auto-heights mode.
+    // Deckschicht (doc-level cover color): shown for Einfarbig elements in the
+    // auto-heights mode AND for Farbebenen elements in the AMS style (the deck
+    // rides on the shared palette there, independent of the Höhe-je-Farbe flag).
     var tlField = document.getElementById("advTopLayerField");
     if (tlField) {
-      tlField.hidden = !(showAuto && doc.autoLayerHeights);
+      var isAmsSel = !!(el && el.type === "image" && em === "colorLayers" && colorStyleOf(el) === "bands");
+      tlField.hidden = !((showAuto && doc.autoLayerHeights) || isAmsSel);
       var tl = document.getElementById("advTopLayer");
       var tlc = document.getElementById("advTopLayerColor");
       if (tl) tl.checked = doc.topLayerColor != null;

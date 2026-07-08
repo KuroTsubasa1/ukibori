@@ -271,20 +271,22 @@
     const mask = solidEl(img, "#101010", 30); // base-colored, punches through the deck
     d.elements = [solidEl(img, "#FF0000", 12), mask, solidEl(img, "#00FF00", 48)];
     const parts = buildParts(d);
-    const bands = bandsOf(parts);
-    assertEqual(bands.length, 3, "deck + one level per color");
-    assertEqual(bands[0].hex, "#FFFFFF", "level 1 = Deckschicht");
-    assertClose(bands[0].zb.mn, T, 1e-4, "deck starts at the plate top");
-    assertClose(bands[0].zb.mx, T + step, 1e-4, "deck is one step thick");
-    assert(bands[0].xb.mn < 2 && bands[0].xb.mx > 58, "deck covers the whole plate face");
+    const deckPart = parts.find(p => p.name === "deckschicht");
+    assert(!!deckPart, "deck slab present as its own part");
+    assertEqual(hexOf(deckPart.color), "#FFFFFF", "deck in the Deckschicht color");
+    const dzb = zbounds(deckPart.facets), dxb = xbounds(deckPart.facets);
+    assertClose(dzb.mn, T, 1e-4, "deck starts at the plate top");
+    assertClose(dzb.mx, T + step, 1e-4, "deck is one step thick");
+    assert(dxb.mn < 2 && dxb.mx > 58, "deck covers the whole plate face");
     // punch-through, pinned by real cap coverage (centroid probes cannot see a missing hole)
-    const deckPart = parts.find(p => p.name === "farbschicht-auto-1");
     assert(!faceCovers(deckPart, 30, 30, T + step), "deck cap has a hole over the base-colored element");
     assert(faceCovers(deckPart, 12, 30, T + step), "deck cap covers a participating motif region");
     assert(faceCovers(deckPart, 30, 8, T + step), "deck cap covers plain plate face");
-    assertEqual(bands[1].hex, "#FF0000", "red is level 2 now");
-    assertClose(bands[1].zb.mx, T + 2 * step, 1e-4, "red pushed one step up by the deck");
-    assertClose(bands[2].zb.mx, T + 3 * step, 1e-4, "green tops at 3 steps");
+    const bands = bandsOf(parts);
+    assertEqual(bands.length, 2, "one level per motif color above the deck");
+    assertEqual(bands[0].hex, "#FF0000", "red is layer 2 now");
+    assertClose(bands[0].zb.mx, T + 2 * step, 1e-4, "red pushed one step up by the deck");
+    assertClose(bands[1].zb.mx, T + 3 * step, 1e-4, "green tops at 3 steps");
   });
 
   test("auto-heights Deckschicht engraved: top band = deck color, carves deeper; deck counts in the carve budget", async () => {
@@ -307,6 +309,67 @@
     assertClose(byColor["#00FF00"], bu2(3 * s), 1e-4, "green at rank 2 — floors stay distinct");
   });
 
+  test("Deckschicht AMS raised: shared-palette stack rides one step up on the full-face deck", async () => {
+    // Pin flag-independence: the deck serves pure Farbebenen-AMS docs without Höhe je Farbe.
+    const cv = document.createElement("canvas"); cv.width = 30; cv.height = 20;
+    const c2 = cv.getContext("2d");
+    c2.fillStyle = "#000000"; c2.fillRect(0, 0, 15, 20);
+    c2.fillStyle = "#f0f0f0"; c2.fillRect(15, 0, 15, 20);
+    const img = new Image(); await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = cv.toDataURL("image/png"); });
+    const d = autoDoc();
+    d.autoLayerHeights = false;
+    d.amsPalette = ["#000000", "#F0F0F0"];
+    d.topLayerColor = "#FFCC00";
+    const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 20, hMm: 20 });
+    el.depth.direction = "raised"; el.depth.mode = "colorLayers"; el.depth.colorLayerStyle = "bands";
+    el.depth.reduce = { method: "palette", numColors: 8, levels: 4, remap: {}, order: [] };
+    el._img = img;
+    d.elements = [el];
+    const parts = buildParts(d);
+    const deck = parts.find(p => p.name === "deckschicht");
+    assert(!!deck, "deck slab present (no Höhe-je-Farbe flag needed)");
+    assertEqual(hexOf(deck.color), "#FFCC00", "deck in the Deckschicht color");
+    assertClose(zbounds(deck.facets).mn, T, 1e-4, "deck starts at the plate top");
+    assertClose(zbounds(deck.facets).mx, T + step, 1e-4, "deck is one step thick");
+    const xbD = xbounds(deck.facets);
+    assert(xbD.mn < 2 && xbD.mx > 58, "deck covers the whole plate face");
+    assert(faceCovers(deck, 30, 30, T + step), "deck runs UNDER the AMS element (stack rides on it)");
+    const l1 = parts.find(p => p.name === "farbschicht-1-1"), l2 = parts.find(p => p.name === "farbschicht-1-2");
+    assert(!!l1 && !!l2, "both palette layers present");
+    assertClose(zbounds(l1.facets).mn, T + step, 1e-4, "palette layer 1 sits ON the deck");
+    assertClose(zbounds(l2.facets).mx, T + 3 * step, 1e-4, "palette layer 2 shifted one step up");
+  });
+
+  test("Deckschicht AMS engraved: deck tops the plate bands, palette carves deeper (budget incl. deck)", async () => {
+    const cv = document.createElement("canvas"); cv.width = 30; cv.height = 20;
+    const c2 = cv.getContext("2d");
+    c2.fillStyle = "#000000"; c2.fillRect(0, 0, 15, 20);
+    c2.fillStyle = "#f0f0f0"; c2.fillRect(15, 0, 15, 20);
+    const img = new Image(); await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = cv.toDataURL("image/png"); });
+    const d = autoDoc();
+    d.autoLayerHeights = false;
+    d.amsPalette = ["#000000", "#F0F0F0"];
+    d.topLayerColor = "#FFCC00";
+    d.body.baseThicknessMm = 2.4; // TIGHT budget: maxRecess=0.2 → divisor (palette+deck=3) is live
+    const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 20, hMm: 20 });
+    el.depth.direction = "engraved"; el.depth.mode = "colorLayers"; el.depth.colorLayerStyle = "bands";
+    el.depth.reduce = { method: "palette", numColors: 8, levels: 4, remap: {}, order: [] };
+    el._img = img;
+    d.elements = [el];
+    const parts = buildParts(d);
+    const pb = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0)
+      .map(p => ({ hex: hexOf(p.color), zb: zbounds(p.facets) })).sort((a, b) => b.zb.mn - a.zb.mn);
+    assertEqual(pb.length, 3, "deck + one plate band per palette layer");
+    assertEqual(pb[0].hex, "#FFCC00", "top band = Deckschicht");
+    assertClose(pb[0].zb.mx, T, 1e-4, "deck band at the plate top");
+    assertEqual(pb[1].hex, "#000000", "palette layer 1 below the deck");
+    const mr = 0.2, s = Math.min(step, mr / 3); // deck counts in the compression divisor
+    const bu2 = (dd) => T - Math.min(dd, mr) - floor;
+    const byColor = {}; parts.filter(p => p.name.indexOf("farbe-") === 0).forEach(p => { byColor[hexOf(p.color)] = zbounds(p.facets).mn; });
+    assertClose(byColor["#000000"], bu2(2 * s), 1e-4, "palette layer 1 carves through the deck");
+    assertClose(byColor["#F0F0F0"], bu2(3 * s), 1e-4, "palette layer 2 one compressed step deeper — distinct");
+  });
+
   test("auto-heights Deckschicht: engraved-direction heightmap keeps its z-space (no deck overlap)", async () => {
     const img = await imgSolid(20, 20);
     const bright = await imgSolid(20, 20, "#C8C8C8"); // lum >= threshold → unowned pixels when engraved
@@ -317,7 +380,7 @@
     hm.depth.heightMm = 1; hm._img = bright;
     d.elements = [solidEl(img, "#FF0000", 12), hm];
     const parts = buildParts(d);
-    const deck = parts.find(p => p.name === "farbschicht-auto-1");
+    const deck = parts.find(p => p.name === "deckschicht");
     assert(!!deck, "deck present");
     assert(!faceCovers(deck, 30, 30, T + step), "deck keeps out of the heightmap element's region");
     assert(faceCovers(deck, 30, 8, T + step), "deck still covers the plain plate face");
@@ -329,7 +392,9 @@
     const d = autoDoc();
     d.topLayerColor = "#101010"; // == baseColor
     d.elements = [solidEl(img, "#FF0000", 15), solidEl(img, "#00FF00", 45)];
-    const bands = bandsOf(buildParts(d));
+    const parts = buildParts(d);
+    assert(!parts.some(p => p.name === "deckschicht"), "no deck part");
+    const bands = bandsOf(parts);
     assertEqual(bands.length, 2, "no deck level");
     assertEqual(bands[0].hex, "#FF0000", "red stays level 1");
     assertClose(bands[0].zb.mx, T + step, 1e-4, "heights unshifted");

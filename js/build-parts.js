@@ -503,9 +503,15 @@
     // global palette, so the same color lands at the same depth across every element.
     const ams = (Array.isArray(doc.amsPalette) && doc.amsPalette.length) ? doc.amsPalette : null;
     const amsRank = ams ? ((hex) => { const i = ams.indexOf(hex); return i < 0 ? ams.length - 1 : i; }) : null;
+    // Deckschicht on the shared palette: the deck color becomes the topmost plate band
+    // and every palette layer carves ONE STEP DEEPER (through the deck). The deck also
+    // counts in the carve-budget compression. Motif pixels never quantize to the deck
+    // color — it is the workpiece's face, not a palette slot.
+    const deckHexE = doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null;
+    const deckShiftE = (deckHexE && deckHexE !== baseHex && ams) ? 1 : 0;
     // Compress the per-layer step so the whole palette fits the plate's carve budget — deep
     // palettes then keep DISTINCT floors instead of clamping several layers onto one depth.
-    const amsStep = ams ? Math.min(step, maxRecess / ams.length) : step;
+    const amsStep = ams ? Math.min(step, maxRecess / (ams.length + deckShiftE)) : step;
     for (const ei of special) {
       const el = doc.elements[ei];
       const style = colorStyleOf(el);
@@ -544,7 +550,8 @@
         const N = sorted.length;
         const n = cols * rows;
         // depth of the color at sorted position k: global (amsRank+1)*step, else per-element (k+1)*step.
-        const depthOfPos = (k) => ams ? (amsRank(sorted[k]) + 1) * amsStep : (k + 1) * step;
+        // deckShiftE: with a Deckschicht, every palette layer carves one step deeper (through the deck).
+        const depthOfPos = (k) => ams ? (amsRank(sorted[k]) + 1 + deckShiftE) * amsStep : (k + 1) * step;
         // cumUpTo[k] = union of pixels of the colors at sorted positions 0..k (layer index <= this).
         const cumUpTo = new Array(N);
         cumUpTo[0] = presentSets.get(sorted[0]);
@@ -589,7 +596,8 @@
     // amsSolidBase keeps the surrounding plate one solid base color (only the inlay is multicolor).
     let bandHexes = (doc.amsSolidBase || bandsElemCount === 0)
       ? []
-      : (ams ? ams.slice() : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []));
+      : (ams ? (deckShiftE ? [deckHexE].concat(ams) : ams.slice())
+             : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []));
     // Auto layer heights (Höhe je Farbe): engraved Einfarbig elements split the plate
     // the same way — the whole workpiece becomes solid single-color layers, band k
     // matching the color at carve rank k (band 1 = shallowest = topmost). Only when
@@ -895,25 +903,35 @@
         if (r >= 0) autoRank.set(ei, r);
       });
     }
-    if (autoRank.size) {
+    // --- Deckschicht: the workpiece's face at [T, T+step] --------------------
+    // Independent of the Höhe-je-Farbe flag so it also serves pure Farbebenen-AMS
+    // docs. It carries: the solid auto participants (their ranks already include
+    // the deck at order[0]) and raised AMS-bands elements with a shared palette
+    // (their filament stacks shift one step up). Everything else punches through:
+    // base-colored/overridden solids, engraved motifs (they carve down from T),
+    // stepped/flush colorLayers and heightmap elements (they own [T..] themselves),
+    // cutouts and the frame ring.
+    const baseHexR = String(doc.body.baseColor || "").toUpperCase();
+    const deckHex = (doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null);
+    const deckValid = !!(deckHex && deckHex !== baseHexR);
+    const amsShifted = new Set(); // raised AMS-bands elements riding on the deck
+    if (deckValid && ams) {
+      doc.elements.forEach((el, ei) => {
+        if (el && el.type === "image" && !el._hidden && el._img &&
+            el.depth && el.depth.mode === "colorLayers" && colorStyleOf(el) === "bands" &&
+            (el.depth.direction || "raised") === "raised") amsShifted.add(ei);
+      });
+    }
+    if (autoRank.size || (deckValid && amsShifted.size)) {
       const nn = cols * rows;
-      let maxL = 0; for (const r of autoRank.values()) if (r > maxL) maxL = r;
-      // Deckschicht: when a top-layer color leads the order, level 0 covers the WHOLE
-      // plate face (not just motif pixels) — the motif levels stack on top of it.
-      // Pixels owned by non-participating elements punch through it: base-colored and
-      // overridden solids, engraved motifs (they carve down from T), colorLayers/
-      // heightmap elements (they own [T..] themselves), cutouts and the frame ring.
-      const baseHexR = String(doc.body.baseColor || "").toUpperCase();
-      const deckHex = (doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null);
-      const deckOn = !!(deckHex && deckHex !== baseHexR && autoOrder[0] === deckHex);
-      // Heightmap elements build UP from the plate top regardless of direction, but an
-      // engraved-direction heightmap claims no ownership of its BRIGHT pixels (the
-      // generic mask is luminance-filtered for non-raised), so the owner-based punch-
-      // through below misses them. Exclude their opaque regions explicitly — same
-      // alpha>=128 criterion as buildHeightmapParts — or deck and heightmap floor
-      // would interpenetrate in [T, T+step].
-      let hmExclude = null;
-      if (deckOn) {
+      if (deckValid) {
+        // Heightmap elements build UP from the plate top regardless of direction, but an
+        // engraved-direction heightmap claims no ownership of its BRIGHT pixels (the
+        // generic mask is luminance-filtered for non-raised), so the owner-based punch-
+        // through below misses them. Exclude their opaque regions explicitly — same
+        // alpha>=128 criterion as buildHeightmapParts — or deck and heightmap floor
+        // would interpenetrate in [T, T+step].
+        let hmExclude = null;
         for (const el of doc.elements) {
           if (!el || !el.depth || el.depth.mode !== "heightmap") continue;
           if (el.type === "image" && !el._img) continue;
@@ -921,28 +939,29 @@
           if (!hmExclude) hmExclude = new Uint8Array(cols * rows);
           for (let i = 0; i < cols * rows; i++) if (d[i * 4 + 3] >= 128) hmExclude[i] = 1;
         }
+        const deckMember = (c, r) => {
+          const i = idx(c, r);
+          if (comp.cutout[i] || (band && band[i] === 1)) return false;
+          if (hmExclude && hmExclude[i] === 1) return false;
+          const o = comp.owner[i];
+          return o < 0 || autoRank.has(o) || amsShifted.has(o);
+        };
+        const facets = tracedFacets(deckMember, step, T);
+        if (facets.length) parts.push({ name: "deckschicht", color: window.hexToRgb(deckHex), facets });
       }
-      const deckMember = (c, r) => {
-        const i = idx(c, r);
-        if (comp.cutout[i] || (band && band[i] === 1)) return false;
-        if (hmExclude && hmExclude[i] === 1) return false;
-        const o = comp.owner[i];
-        return o < 0 || autoRank.has(o);
-      };
-      for (let L = 0; L <= maxL; L++) {
-        let member;
-        if (L === 0 && deckOn) {
-          member = deckMember;
-        } else {
+      // Solid participant levels. With a valid deck, autoOrder[0] is the deck color and
+      // element ranks start at 1 — their slabs land on top of the deck automatically.
+      if (autoRank.size) {
+        let maxL = 0; for (const r of autoRank.values()) if (r > maxL) maxL = r;
+        for (let L = (deckValid ? 1 : 0); L <= maxL; L++) {
           const region = new Uint8Array(nn);
           for (const [ei, r] of autoRank) {
             if (r < L) continue;
             for (const g of (byElem.get(ei) || [])) { const s = g.set; for (let i = 0; i < nn; i++) region[i] |= s[i]; }
           }
-          member = (c, r) => region[idx(c, r)] === 1;
+          const facets = tracedFacets((c, r) => region[idx(c, r)] === 1, step, T + L * step);
+          if (facets.length) parts.push({ name: "farbschicht-auto-" + (L + 1), color: window.hexToRgb(autoOrder[L]), facets });
         }
-        const facets = tracedFacets(member, step, T + L * step);
-        if (facets.length) parts.push({ name: "farbschicht-auto-" + (L + 1), color: window.hexToRgb(autoOrder[L]), facets });
       }
     }
 
@@ -959,10 +978,12 @@
         const nn = cols * rows;
         let maxG = -1;
         colorGroups.forEach((g) => { const rk = amsRankR(g.hex); if (rk > maxG) maxG = rk; });
+        // Deckschicht: the whole filament stack rides one step up on the deck slab.
+        const zOff = amsShifted.has(ei) ? 1 : 0;
         for (let L = 0; L <= maxG; L++) {
           const region = new Uint8Array(nn);
           for (const g of colorGroups) if (amsRankR(g.hex) >= L) { const s = g.set; for (let i = 0; i < nn; i++) region[i] |= s[i]; }
-          const facets = tracedFacets((c, r) => region[idx(c, r)] === 1, step, T + L * step);
+          const facets = tracedFacets((c, r) => region[idx(c, r)] === 1, step, T + (L + zOff) * step);
           if (facets.length) parts.push({ name: "farbschicht-" + (ei + 1) + "-" + (L + 1), color: window.hexToRgb(ams[L]), facets });
         }
       } else if (isBandsColorLayers) {

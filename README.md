@@ -85,7 +85,10 @@ Bild · Text · QR → Relief · Schwarz-Weiß, Farbe & AMS-Mehrfarb · KI-Freis
   sodass auch dort jede Druckschicht einfarbig bleibt. Optional legt eine
   **Deckschicht** eine eigene Farbe als oberste Ebene über das ganze Werkstück —
   erhaben als durchgehende Fläche unter den Motiven, vertieft als oberstes
-  Plattenband, durch das die Motive gravieren. Die **Relief-Höhe** wirkt als
+  Plattenband, durch das die Motive gravieren. Sie gilt auch für
+  **AMS-Farbebenen**: die gesamte Filament-Palette rückt eine Ebene weiter
+  (erhaben nach oben, vertieft tiefer), ohne dass Motive je auf die Deckfarbe
+  quantisiert werden. Die **Relief-Höhe** wirkt als
   manueller Override pro Element (leer = automatisch; das Element druckt dann als
   eigenes Prisma bzw. eigene Gravur in seiner Farbe). Abschaltbar per Häkchen;
   alte gespeicherte Projekte behalten ihre manuellen Höhen.
