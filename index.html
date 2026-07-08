@@ -87,41 +87,6 @@
         </div>
       </details>
 
-      <!-- 2. Ebenen: Liste + alles, was die Farb-/Höhenstapelung des ganzen Werkstücks steuert -->
-      <details class="acc" id="accEbenen" open>
-        <summary>Ebenen</summary>
-        <div class="acc-body adv-section">
-          <ul id="advLayers" class="adv-layers-list"></ul>
-          <p id="advLayersEmpty" class="hint">Keine Elemente vorhanden.</p>
-          <div class="adv-field">
-            <label class="adv-label">Tiefe (alle Ebenen)</label>
-            <div id="depthSeg" class="seg-group seg-sm" style="width:100%">
-              <button type="button" id="depthRaised" class="seg seg-active" style="flex:1" title="Alle Ebenen erhaben (stehen hervor); gilt auch für neue Elemente">Erhaben</button>
-              <button type="button" id="depthEngraved" class="seg" style="flex:1" title="Alle Ebenen vertieft (eingraviert); gilt auch für neue Elemente">Vertieft</button>
-            </div>
-          </div>
-          <div class="adv-field" id="advAutoHeightsField">
-            <label class="adv-label toggle">
-              <input type="checkbox" id="advAutoHeights" title="Einfarbige Elemente drucken als gemeinsamer Ebenen-Stapel (wie AMS): jede Ebene ist eine massive einfarbige Schicht, untere Farben laufen unter höheren durch. Gleiche Farbe = gleiche Ebene; Elemente in der Grundfarbe bleiben auf Plattenhöhe. Relief-Höhe wirkt dann als manueller Override (leer = automatisch)."> Höhe je Farbe (AMS-Ebenen)
-            </label>
-          </div>
-          <div class="adv-field" id="advTopLayerField">
-            <label class="adv-label toggle" style="flex:1">
-              <input type="checkbox" id="advTopLayer" title="Deckschicht: eine eigene Farbe als oberste Ebene des Werkstücks (Ebene 1). Erhaben: durchgehende Fläche über der ganzen Platte, die Motive stapeln darauf. Vertieft: oberstes Plattenband; die Motive gravieren hindurch. Gilt auch für Farbebenen im AMS-Stil: die Palette rückt eine Ebene tiefer bzw. höher. Elemente in der Grundfarbe stanzen weiterhin durch. Eine Deckschicht in der Grundfarbe wird ignoriert (die Plattenoberseite hat diese Farbe bereits)."> Deckschicht
-            </label>
-            <input type="color" id="advTopLayerColor" value="#ffffff" title="Farbe der Deckschicht">
-          </div>
-          <div class="adv-field">
-            <label for="advColorStep" class="adv-label">Farbschichten</label>
-            <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="2" title="Höhenunterschied zwischen Farbschichten in Druck-Schichten">
-          </div>
-          <div class="adv-field" id="amsPaletteField" hidden>
-            <label class="adv-label">AMS-Filament-Palette (1 = unterste Schicht)</label>
-            <div id="amsPaletteHost" class="adv-swatches"></div>
-          </div>
-        </div>
-      </details>
-
       <!-- 4. Druck & Export (nur Erweitert) -->
       <details class="acc" id="accDruck" open>
         <summary>Druck &amp; Export</summary>
@@ -189,6 +154,7 @@
     <canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf. Beim Skalieren an den Ecken hält Umschalt das Seitenverhältnis."></canvas>
     <canvas id="preview3dCanvas" width="800" height="1000" hidden></canvas>
   </section>
+  <div id="rightCol">
   <aside id="sidebarElement" class="sidebar">
     <div class="panel-head">Element</div>
     <div class="adv-scroll">
@@ -315,6 +281,42 @@
       </div>
     </div><!-- /adv-scroll -->
   </aside>
+  <aside id="sidebarEbenen" class="sidebar">
+    <div class="panel-head">Ebenen</div>
+    <div class="adv-scroll">
+      <div class="acc-body adv-section">
+          <ul id="advLayers" class="adv-layers-list"></ul>
+          <p id="advLayersEmpty" class="hint">Keine Elemente vorhanden.</p>
+          <div class="adv-field">
+            <label class="adv-label">Tiefe (alle Ebenen)</label>
+            <div id="depthSeg" class="seg-group seg-sm" style="width:100%">
+              <button type="button" id="depthRaised" class="seg seg-active" style="flex:1" title="Alle Ebenen erhaben (stehen hervor); gilt auch für neue Elemente">Erhaben</button>
+              <button type="button" id="depthEngraved" class="seg" style="flex:1" title="Alle Ebenen vertieft (eingraviert); gilt auch für neue Elemente">Vertieft</button>
+            </div>
+          </div>
+          <div class="adv-field" id="advAutoHeightsField">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="advAutoHeights" title="Einfarbige Elemente drucken als gemeinsamer Ebenen-Stapel (wie AMS): jede Ebene ist eine massive einfarbige Schicht, untere Farben laufen unter höheren durch. Gleiche Farbe = gleiche Ebene; Elemente in der Grundfarbe bleiben auf Plattenhöhe. Relief-Höhe wirkt dann als manueller Override (leer = automatisch)."> Höhe je Farbe (AMS-Ebenen)
+            </label>
+          </div>
+          <div class="adv-field" id="advTopLayerField">
+            <label class="adv-label toggle" style="flex:1">
+              <input type="checkbox" id="advTopLayer" title="Deckschicht: eine eigene Farbe als oberste Ebene des Werkstücks (Ebene 1). Erhaben: durchgehende Fläche über der ganzen Platte, die Motive stapeln darauf. Vertieft: oberstes Plattenband; die Motive gravieren hindurch. Gilt auch für Farbebenen im AMS-Stil: die Palette rückt eine Ebene tiefer bzw. höher. Elemente in der Grundfarbe stanzen weiterhin durch. Eine Deckschicht in der Grundfarbe wird ignoriert (die Plattenoberseite hat diese Farbe bereits)."> Deckschicht
+            </label>
+            <input type="color" id="advTopLayerColor" value="#ffffff" title="Farbe der Deckschicht">
+          </div>
+          <div class="adv-field">
+            <label for="advColorStep" class="adv-label">Farbschichten</label>
+            <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="2" title="Höhenunterschied zwischen Farbschichten in Druck-Schichten">
+          </div>
+          <div class="adv-field" id="amsPaletteField" hidden>
+            <label class="adv-label">AMS-Filament-Palette (1 = unterste Schicht)</label>
+            <div id="amsPaletteHost" class="adv-swatches"></div>
+          </div>
+        </div>
+    </div>
+  </aside>
+  </div><!-- /rightCol -->
 </main>
 
 <!-- Export dialog (kept for Task 3 rework) -->
