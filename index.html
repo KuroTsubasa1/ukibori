@@ -18,6 +18,25 @@
   <div class="topbar-actions">
     <button type="button" id="undoBtn" title="Rückgängig (Strg/Cmd+Z)" aria-label="Rückgängig">↶</button>
     <button type="button" id="redoBtn" title="Wiederholen (Strg/Cmd+Umschalt+Z)" aria-label="Wiederholen">↷</button>
+    <div id="snapWrap">
+      <button type="button" id="snapBtn" title="Einrasten-Optionen" aria-label="Einrasten-Optionen" aria-haspopup="true" aria-expanded="false">🔒</button>
+      <div id="snapPopover" hidden>
+        <div class="adv-field">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="snapPlate" title="Beim Ziehen an Plattenrändern und Plattenmitte einrasten"> An Platte (Kanten/Mitte)
+            </label>
+          </div>
+          <div class="adv-field">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="snapElements" title="Beim Ziehen an anderen Elementen einrasten"> An Elementen
+            </label>
+          </div>
+          <div class="adv-field">
+            <label for="snapGrid" class="adv-label">Raster (mm, 0 = aus)</label>
+            <input type="number" id="snapGrid" class="sp-num adv-num-full" min="0" max="50" step="0.5" value="0" title="Beim Ziehen am Raster einrasten (0 = kein Raster)">
+          </div>
+      </div>
+    </div>
     <button type="button" id="openBtn" title="Projekt öffnen (.json)">Öffnen</button>
     <button type="button" id="saveBtn" title="Projekt speichern (.json)">Speichern</button>
     <button type="button" id="exportBtn" title="3D-Modell exportieren (3MF/STL/PNG)">Exportieren</button>
@@ -87,6 +106,39 @@
         </div>
       </details>
 
+      <!-- Stapelung: doc-weite Farb-/Höhen-Politik des Ebenen-Stapels -->
+      <details class="acc" id="accStapelung" open>
+        <summary>Stapelung</summary>
+        <div class="acc-body adv-section">
+          <div class="adv-field">
+            <label class="adv-label">Tiefe (alle Ebenen)</label>
+            <div id="depthSeg" class="seg-group seg-sm" style="width:100%">
+              <button type="button" id="depthRaised" class="seg seg-active" style="flex:1" title="Alle Ebenen erhaben (stehen hervor); gilt auch für neue Elemente">Erhaben</button>
+              <button type="button" id="depthEngraved" class="seg" style="flex:1" title="Alle Ebenen vertieft (eingraviert); gilt auch für neue Elemente">Vertieft</button>
+            </div>
+          </div>
+          <div class="adv-field" id="advAutoHeightsField">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="advAutoHeights" title="Einfarbige Elemente drucken als gemeinsamer Ebenen-Stapel (wie AMS): jede Ebene ist eine massive einfarbige Schicht, untere Farben laufen unter höheren durch. Gleiche Farbe = gleiche Ebene; Elemente in der Grundfarbe bleiben auf Plattenhöhe. Relief-Höhe wirkt dann als manueller Override (leer = automatisch)."> Höhe je Farbe (AMS-Ebenen)
+            </label>
+          </div>
+          <div class="adv-field" id="advTopLayerField">
+            <label class="adv-label toggle" style="flex:1">
+              <input type="checkbox" id="advTopLayer" title="Deckschicht: eine eigene Farbe als oberste Ebene des Werkstücks (Ebene 1). Erhaben: durchgehende Fläche über der ganzen Platte, die Motive stapeln darauf. Vertieft: oberstes Plattenband; die Motive gravieren hindurch. Gilt auch für Farbebenen im AMS-Stil: die Palette rückt eine Ebene tiefer bzw. höher. Elemente in der Grundfarbe stanzen weiterhin durch. Eine Deckschicht in der Grundfarbe wird ignoriert (die Plattenoberseite hat diese Farbe bereits)."> Deckschicht
+            </label>
+            <input type="color" id="advTopLayerColor" value="#ffffff" title="Farbe der Deckschicht">
+          </div>
+          <div class="adv-field">
+            <label for="advColorStep" class="adv-label">Farbschichten</label>
+            <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="2" title="Höhenunterschied zwischen Farbschichten in Druck-Schichten">
+          </div>
+          <div class="adv-field" id="amsPaletteField" hidden>
+            <label class="adv-label">AMS-Filament-Palette (1 = unterste Schicht)</label>
+            <div id="amsPaletteHost" class="adv-swatches"></div>
+          </div>
+        </div>
+      </details>
+
       <!-- 4. Druck & Export (nur Erweitert) -->
       <details class="acc" id="accDruck" open>
         <summary>Druck &amp; Export</summary>
@@ -106,27 +158,6 @@
           <div class="adv-field">
             <button type="button" id="thinCheckBtn" class="btn" style="width:100%" title="Markiert gedruckte Bereiche, die schmaler als die Düse (0,4 mm) sind — sie verschwinden im Druck oder werden unsauber.">⚠ Dünne Stellen prüfen</button>
             <div id="thinCheckStatus" class="hint" aria-live="polite"></div>
-          </div>
-        </div>
-      </details>
-
-      <!-- 5. Einrasten (Editor-Einstellungen, nur Erweitert) -->
-      <details class="acc" open>
-        <summary>Einrasten</summary>
-        <div class="acc-body adv-section">
-          <div class="adv-field">
-            <label class="adv-label toggle">
-              <input type="checkbox" id="snapPlate" title="Beim Ziehen an Plattenrändern und Plattenmitte einrasten"> An Platte (Kanten/Mitte)
-            </label>
-          </div>
-          <div class="adv-field">
-            <label class="adv-label toggle">
-              <input type="checkbox" id="snapElements" title="Beim Ziehen an anderen Elementen einrasten"> An Elementen
-            </label>
-          </div>
-          <div class="adv-field">
-            <label for="snapGrid" class="adv-label">Raster (mm, 0 = aus)</label>
-            <input type="number" id="snapGrid" class="sp-num adv-num-full" min="0" max="50" step="0.5" value="0" title="Beim Ziehen am Raster einrasten (0 = kein Raster)">
           </div>
         </div>
       </details>
@@ -287,32 +318,7 @@
       <div class="acc-body adv-section">
           <ul id="advLayers" class="adv-layers-list"></ul>
           <p id="advLayersEmpty" class="hint">Keine Elemente vorhanden.</p>
-          <div class="adv-field">
-            <label class="adv-label">Tiefe (alle Ebenen)</label>
-            <div id="depthSeg" class="seg-group seg-sm" style="width:100%">
-              <button type="button" id="depthRaised" class="seg seg-active" style="flex:1" title="Alle Ebenen erhaben (stehen hervor); gilt auch für neue Elemente">Erhaben</button>
-              <button type="button" id="depthEngraved" class="seg" style="flex:1" title="Alle Ebenen vertieft (eingraviert); gilt auch für neue Elemente">Vertieft</button>
-            </div>
-          </div>
-          <div class="adv-field" id="advAutoHeightsField">
-            <label class="adv-label toggle">
-              <input type="checkbox" id="advAutoHeights" title="Einfarbige Elemente drucken als gemeinsamer Ebenen-Stapel (wie AMS): jede Ebene ist eine massive einfarbige Schicht, untere Farben laufen unter höheren durch. Gleiche Farbe = gleiche Ebene; Elemente in der Grundfarbe bleiben auf Plattenhöhe. Relief-Höhe wirkt dann als manueller Override (leer = automatisch)."> Höhe je Farbe (AMS-Ebenen)
-            </label>
-          </div>
-          <div class="adv-field" id="advTopLayerField">
-            <label class="adv-label toggle" style="flex:1">
-              <input type="checkbox" id="advTopLayer" title="Deckschicht: eine eigene Farbe als oberste Ebene des Werkstücks (Ebene 1). Erhaben: durchgehende Fläche über der ganzen Platte, die Motive stapeln darauf. Vertieft: oberstes Plattenband; die Motive gravieren hindurch. Gilt auch für Farbebenen im AMS-Stil: die Palette rückt eine Ebene tiefer bzw. höher. Elemente in der Grundfarbe stanzen weiterhin durch. Eine Deckschicht in der Grundfarbe wird ignoriert (die Plattenoberseite hat diese Farbe bereits)."> Deckschicht
-            </label>
-            <input type="color" id="advTopLayerColor" value="#ffffff" title="Farbe der Deckschicht">
-          </div>
-          <div class="adv-field">
-            <label for="advColorStep" class="adv-label">Farbschichten</label>
-            <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="2" title="Höhenunterschied zwischen Farbschichten in Druck-Schichten">
-          </div>
-          <div class="adv-field" id="amsPaletteField" hidden>
-            <label class="adv-label">AMS-Filament-Palette (1 = unterste Schicht)</label>
-            <div id="amsPaletteHost" class="adv-swatches"></div>
-          </div>
+          
         </div>
     </div>
   </aside>

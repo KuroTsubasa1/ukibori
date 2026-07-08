@@ -2625,6 +2625,24 @@
     if (b) b.addEventListener("click", duplicateSelected);
   }());
 
+  // ---- Einrasten popover (topbar lock button) ----
+  (function () {
+    var btn = document.getElementById("snapBtn");
+    var pop = document.getElementById("snapPopover");
+    if (!btn || !pop) return;
+    function close() { pop.hidden = true; btn.setAttribute("aria-expanded", "false"); btn.classList.remove("open"); }
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var show = pop.hidden;
+      pop.hidden = !show;
+      btn.setAttribute("aria-expanded", String(show));
+      btn.classList.toggle("open", show);
+    });
+    pop.addEventListener("click", function (e) { e.stopPropagation(); }); // clicks inside stay inside
+    document.addEventListener("click", function () { if (!pop.hidden) close(); });
+    window.addEventListener("keydown", function (e) { if (e.key === "Escape" && !pop.hidden) close(); });
+  }());
+
   // ---- Floating selection toolbar on the stage ----
   (function () {
     var wire = function (id, fn) { var n = document.getElementById(id); if (n) n.addEventListener("click", fn); };
