@@ -224,6 +224,7 @@
       d.body.shape = "rect"; d.body.widthMm = 40; d.body.heightMm = 80;
       d.body.cornerRadiusMm = 0; d.body.thicknessMm = 3; d.body.baseColor = "#334455";
       d.resolution = 120;
+      d.autoLayerHeights = false; // pins classic manual depth.heightMm behavior
       d.mount = withLoop
         ? { type:"loop", xMm:20, yMm:0, diameterMm:6, ringThicknessMm:2.5, ringHeightMm:2, marginMm:7 }
         : { type:"none", xMm:20, yMm:0, diameterMm:6, ringThicknessMm:2.5, ringHeightMm:2, marginMm:7 };
