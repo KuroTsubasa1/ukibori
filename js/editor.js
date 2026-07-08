@@ -1609,9 +1609,9 @@
     setSegActive("shapeSeg", "shape" + seg);
     var isImage = shape === "image";
     // Plate-free "Bild": the image IS the object → hide all plate chrome (border/frame/corner
-    // + plate size). border: free only; frame: rect/circle only; corner: rect only.
+    // + plate size). border: free only; frame: rect/circle/free; corner: rect only.
     setHidden("borderField", shape !== "free");
-    setHidden("frameField", shape === "free" || isImage);
+    setHidden("frameField", isImage); // rect/circle/free all support the Rand-Rahmen
     setHidden("cornerField", shape !== "rect");
     setHidden("simpleSizeSection", isImage);
     // A Bild object has no plate → mount (Befestigung) and plate-centered "Ausrichten" are
@@ -1657,7 +1657,7 @@
     doc.body.borderMm = v; scheduleRebuild3D();
   });
 
-  // Rand-Rahmen (shown for Rechteck/Kreis; engine ignores it for Frei)
+  // Rand-Rahmen (Rechteck/Kreis/Frei; 'Bild' objects have no plate to frame)
   function ensureFrame() {
     if (!doc.body.frame) doc.body.frame = window.defaultFrame ? window.defaultFrame() : { widthMm: 0, heightMm: 2, color: "#000000" };
     return doc.body.frame;

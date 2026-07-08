@@ -118,23 +118,8 @@
     assertEqual(partsJson(buildParts(a)), partsJson(buildParts(b)), "byte-identical parts");
   });
 
-  test("frame: free body ignores the frame entirely (no rand, content unchanged)", async () => {
-    const img = await solidImg("#ff0000", 8, 8);
-    const mk = () => {
-      const d = sqDoc();
-      d.body.shape = "free"; d.body.borderMm = 2;
-      const el = makeElementV2("image", { src: "a", cxMm: 25, cyMm: 25, wMm: 20, hMm: 20 });
-      el.depth.direction = "raised"; el.depth.mode = "solid"; el.depth.heightMm = 2;
-      el.color = "#ff0000"; el._img = img;
-      d.elements = [el];
-      return d;
-    };
-    const a = setFrame(mk(), 5, 2, "#00ff00");
-    const partsA = buildParts(a);
-    assert(!partsA.some(p => p.name === "rand"), "no rand part for free bodies");
-    const b = mk(); delete b.body.frame;
-    assertEqual(partsJson(partsA), partsJson(buildParts(b)), "free-body content unchanged by frame");
-  });
+  // (The former "free body ignores the frame" pin was retired 2026-07-08: free
+  // bodies now band along their outline — see the free-RING tests at the bottom.)
 
   // ---- (d) circle plate + frame -> rand within circle radius ----
   test("frame: circle plate emits rand with all xy within the circle radius", () => {
@@ -248,5 +233,52 @@
     const rt = deserializeProject(serializeProject(d));
     assertEqual(JSON.stringify(rt.body.frame), JSON.stringify({ widthMm: 3.5, heightMm: 1.6, color: "#123456" }), "frame round-trips");
     assertEqual(rt.elements[0].depth.colorLayerStyle, "bands", "colorLayerStyle round-trips");
+  });
+
+  // ---- free-form body + frame: der Rahmen folgt der freien Kontur ----
+  // True iff the part's horizontal cap at height z covers point (x,y) — barycentric
+  // test over facets whose three vertices all sit at z.
+  function faceCovers(part, x, y, z) {
+    for (const t of part.facets) {
+      if (Math.abs(t[0][2] - z) > 1e-6 || Math.abs(t[1][2] - z) > 1e-6 || Math.abs(t[2][2] - z) > 1e-6) continue;
+      const ax = t[0][0], ay = t[0][1], bx = t[1][0], by = t[1][1], cx = t[2][0], cy = t[2][1];
+      const den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+      if (Math.abs(den) < 1e-12) continue;
+      const u = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / den;
+      const v = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / den;
+      if (u >= -1e-9 && v >= -1e-9 && u + v <= 1 + 1e-9) return true;
+    }
+    return false;
+  }
+  async function freeFrameDoc(frameW) {
+    const img = await solidImg("#c8c8c8", 24, 24);
+    const d = sqDoc();
+    d.body.shape = "free"; d.body.borderMm = 2;
+    const el = makeElementV2("image", { src: "a", cxMm: 25, cyMm: 25, wMm: 20, hMm: 20 });
+    el.depth.direction = "raised"; el._img = img;
+    d.elements = [el];
+    return setFrame(d, frameW, 2, "#00aa00");
+  }
+
+  test("frame: free body emits a 'rand' RING along the free outline", async () => {
+    // silhouette [15,35]^2 + border 2 -> plate [13,37]^2; frame width 3 hugs the edge.
+    const d = await freeFrameDoc(3);
+    const rand = buildParts(d).find(p => p.name === "rand");
+    assert(!!rand, "rand part exists on a free body");
+    const zb = zbounds(rand.facets);
+    assertClose(zb.mn, 3, 1e-6, "rand bottom at thicknessMm");
+    assertClose(zb.mx, 5, 1e-6, "rand top at thicknessMm + frame.heightMm");
+    assert(faceCovers(rand, 14, 25, 5), "band covers cells near the outer edge");
+    assert(!faceCovers(rand, 25, 25, 5), "band is a RING — the interior stays clear");
+  });
+
+  test("frame: free ring stays a ring even when widthMm >= borderMm (no saturation swallow)", async () => {
+    // The border-capped footprint saturates at borderMm (2); a naive band test would
+    // then swallow the whole interior for widthMm 4. The chamfer depth must not.
+    const d = await freeFrameDoc(4);
+    const rand = buildParts(d).find(p => p.name === "rand");
+    assert(!!rand, "rand present");
+    assert(faceCovers(rand, 14, 25, 5), "edge banded");
+    assert(!faceCovers(rand, 25, 25, 5), "interior clear despite widthMm > borderMm");
   });
 })();

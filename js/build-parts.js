@@ -773,15 +773,47 @@
   // band(c,r) = footprint(c,r) > 0 && plateSdfMm(x,y) <= frame.widthMm && !cutout.
   function __frameBand(doc, grid, footprint, comp, domainExpanded) {
     const frame = doc.body.frame;
-    if (doc.body.shape === "free" || doc.body.shape === "image" || !frame || !((frame.widthMm || 0) > 0)) return null;
+    if (doc.body.shape === "image" || !frame || !((frame.widthMm || 0) > 0)) return null;
     // heightMm <= 0 emits no "rand" part, so the frame must be FULLY off (no band
     // either) — otherwise content in the band is silently swallowed with nothing
     // added (review finding).
     if (!((frame.heightMm || 0) > 0)) return null;
     const { cols, rows, pitch } = grid;
-    const plateSdfMm = window.bodySdfMm(doc.body);
     const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
     const band = new Uint8Array(cols * rows);
+
+    if (doc.body.shape === "free") {
+      // Free outline: no analytic SDF — measure the depth inside the plate with a
+      // chamfer DT seeded on the OUTSIDE cells; band = within frame.widthMm of the
+      // outer edge. (The border-capped footprint field can't be used directly: its
+      // values saturate at borderMm, so widthMm >= borderMm would swallow the whole
+      // silhouette.) The mount hole counts as INSIDE for the distance — like the
+      // rect/circle analytic SDF, the frame hugs the outer rim only and never rings
+      // the hole; band cells still require footprint>0, so the hole itself is clear.
+      const m = doc.mount || { type: "none" };
+      const hasHole = m.type === "hole" || m.type === "loop";
+      const holeR = hasHole ? (m.diameterMm || 0) / 2 : 0;
+      const outside = new Uint8Array(cols * rows);
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        if (footprint(c, r) > 0) continue;
+        if (hasHole) {
+          const x = domainExpanded ? grid.x0 + (c + 0.5) * pitch : (c + 0.5) / sx;
+          const y = domainExpanded ? grid.y0 + (r + 0.5) * pitch : (r + 0.5) / sy;
+          if (Math.hypot(x - m.xMm, y - m.yMm) <= holeR + pitch) continue; // hole ≠ outside
+        }
+        outside[r * cols + c] = 1;
+      }
+      const depth = __chamferDT(outside, cols, rows); // cells to the outer edge
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        const i = r * cols + c;
+        if (comp && comp.cutout[i]) continue;        // cutout holes win over the ring
+        if (!(footprint(c, r) > 0)) continue;
+        if (depth[i] * pitch <= frame.widthMm) band[i] = 1;
+      }
+      return band;
+    }
+
+    const plateSdfMm = window.bodySdfMm(doc.body);
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const i = r * cols + c;
       if (comp && comp.cutout[i]) continue;        // cutout holes win over the ring
