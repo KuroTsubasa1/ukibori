@@ -1153,6 +1153,7 @@
   // ---- Drop handler on canvas/preview ----
   function handleDrop(e) {
     e.preventDefault();
+    e.stopPropagation(); // #canvas2d sits inside #preview — both have this handler, so stop the bubble or one drop loads twice
     const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
     if (!file || !file.type.startsWith("image/")) return;
     const rd = new FileReader();
