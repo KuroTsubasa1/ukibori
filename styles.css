@@ -172,7 +172,7 @@
   }
   #rightCol .sidebar { flex-basis: auto; }
   #sidebarElement { flex: 1 1 auto; min-height: 0; }
-  #sidebarEbenen { flex: 0 1 auto; max-height: 44%; min-height: 176px; }
+  #sidebarEbenen { flex: 0 1 auto; max-height: 58%; min-height: 235px; }
   #sidebarEbenen .adv-scroll { padding-top: var(--sp-2); }
 
   /* Slim identity header per panel */
@@ -659,7 +659,7 @@
     #editor { flex-direction: column; padding: var(--sp-2) var(--sp-2); }
     .sidebar { flex: 0 0 auto; width: 100%; max-height: none; }
     #rightCol { flex: 0 0 auto; width: 100%; }
-    #sidebarEbenen { max-height: 320px; }
+    #sidebarEbenen { max-height: 426px; }
     #sidebarAdvanced { max-height: none; }
     #editor #preview { min-height: 420px; }
     #topbar { flex-wrap: wrap; height: auto; padding: var(--sp-2) var(--sp-2); gap: var(--sp-2); }
