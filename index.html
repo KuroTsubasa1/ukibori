@@ -288,6 +288,12 @@
               <input type="checkbox" id="advAutoHeights" title="Einfarbige Elemente drucken als gemeinsamer Ebenen-Stapel (wie AMS): jede Ebene ist eine massive einfarbige Schicht, untere Farben laufen unter höheren durch. Gleiche Farbe = gleiche Ebene; Elemente in der Grundfarbe bleiben auf Plattenhöhe. Relief-Höhe wirkt dann als manueller Override (leer = automatisch)."> Höhe je Farbe (AMS-Ebenen)
             </label>
           </div>
+          <div class="adv-field" id="advTopLayerField" hidden>
+            <label class="adv-label toggle" style="flex:1">
+              <input type="checkbox" id="advTopLayer" title="Deckschicht: eine eigene Farbe als oberste Ebene des Werkstücks (Ebene 1). Erhaben: durchgehende Fläche über der ganzen Platte, die Motive stapeln darauf. Vertieft: oberstes Plattenband; die Motive gravieren hindurch. Elemente in der Grundfarbe stanzen weiterhin durch. Eine Deckschicht in der Grundfarbe wird ignoriert (die Plattenoberseite hat diese Farbe bereits)."> Deckschicht
+            </label>
+            <input type="color" id="advTopLayerColor" value="#ffffff" title="Farbe der Deckschicht">
+          </div>
           <div class="adv-field" id="advReliefHeightField" hidden>
             <label for="advReliefHeight" class="adv-label">Relief-Höhe (mm)</label>
             <input type="number" id="advReliefHeight" class="sp-num adv-num-full" step="0.2" min="0" value="1" title="Wie weit das Element hervorsteht bzw. vertieft ist (0 = kein Relief; Gestuft: die oberste Farbe erreicht diese Höhe; bei „Höhe je Farbe“: manueller Override, leer = automatisch)">

@@ -12,11 +12,26 @@
   function xbounds(f) { let mn = Infinity, mx = -Infinity; for (const t of f) for (const p of t) { if (p[0] < mn) mn = p[0]; if (p[0] > mx) mx = p[0]; } return { mn, mx }; }
   const hexOf = (rgb) => ("#" + rgb.map(x => x.toString(16).padStart(2, "0")).join("")).toUpperCase();
 
-  async function imgSolid(w, h) { // opaque black square: alpha silhouette (raised) + dark under threshold (engraved)
+  async function imgSolid(w, h, fill) { // opaque square: alpha silhouette (raised) + luminance vs threshold (engraved)
     const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
-    const cx = cv.getContext("2d"); cx.fillStyle = "#000000"; cx.fillRect(0, 0, w, h);
+    const cx = cv.getContext("2d"); cx.fillStyle = fill || "#000000"; cx.fillRect(0, 0, w, h);
     const img = new Image(); await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = cv.toDataURL("image/png"); });
     return img;
+  }
+  // True iff the part's horizontal cap at height z covers point (x,y): barycentric test
+  // over facets whose three vertices all sit at z. Robust against triangulation choices
+  // (a centroid-in-box probe is NOT — large cap triangles can miss any given box).
+  function faceCovers(part, x, y, z) {
+    for (const t of part.facets) {
+      if (Math.abs(t[0][2] - z) > 1e-6 || Math.abs(t[1][2] - z) > 1e-6 || Math.abs(t[2][2] - z) > 1e-6) continue;
+      const ax = t[0][0], ay = t[0][1], bx = t[1][0], by = t[1][1], cx = t[2][0], cy = t[2][1];
+      const den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+      if (Math.abs(den) < 1e-12) continue;
+      const u = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / den;
+      const v = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / den;
+      if (u >= -1e-9 && v >= -1e-9 && u + v <= 1 + 1e-9) return true;
+    }
+    return false;
   }
   function autoDoc() {
     const d = defaultDoc();
@@ -233,6 +248,101 @@
     const ov = solidEl(img, "#FF0000", 15, "engraved"); ov.depth.heightOverrideMm = 1.0;
     d3.elements = [ov];
     assert(noBands(d3), "only overridden elements → no participants → plain plate");
+  });
+
+  test("auto-heights engraved: Rand-Rahmen understructure bands with the interior", async () => {
+    const img = await imgSolid(20, 20);
+    const d = autoDoc();
+    d.body.frame = { widthMm: 6, heightMm: 2, color: "#00AA00" };
+    d.elements = [solidEl(img, "#FF0000", 15, "engraved"), solidEl(img, "#00FF00", 45, "engraved")];
+    const parts = buildParts(d);
+    const bands = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0);
+    assertEqual(bands.length, 2, "plate bands present");
+    let x0 = Infinity, x1 = -Infinity;
+    for (const p of bands) for (const t of p.facets) for (const pt of t) { if (pt[0] < x0) x0 = pt[0]; if (pt[0] > x1) x1 = pt[0]; }
+    assert(x0 <= 1 && x1 >= 59, "bands span the whole plate incl. the border ring: x∈[" + x0.toFixed(1) + "," + x1.toFixed(1) + "]");
+    assert(parts.some(p => p.name === "rand"), "frame cap still present above the bands");
+  });
+
+  test("auto-heights Deckschicht raised: full-face level 1, motifs stack on top, base color punches through", async () => {
+    const img = await imgSolid(20, 20);
+    const d = autoDoc();
+    d.topLayerColor = "#FFFFFF";
+    const mask = solidEl(img, "#101010", 30); // base-colored, punches through the deck
+    d.elements = [solidEl(img, "#FF0000", 12), mask, solidEl(img, "#00FF00", 48)];
+    const parts = buildParts(d);
+    const bands = bandsOf(parts);
+    assertEqual(bands.length, 3, "deck + one level per color");
+    assertEqual(bands[0].hex, "#FFFFFF", "level 1 = Deckschicht");
+    assertClose(bands[0].zb.mn, T, 1e-4, "deck starts at the plate top");
+    assertClose(bands[0].zb.mx, T + step, 1e-4, "deck is one step thick");
+    assert(bands[0].xb.mn < 2 && bands[0].xb.mx > 58, "deck covers the whole plate face");
+    // punch-through, pinned by real cap coverage (centroid probes cannot see a missing hole)
+    const deckPart = parts.find(p => p.name === "farbschicht-auto-1");
+    assert(!faceCovers(deckPart, 30, 30, T + step), "deck cap has a hole over the base-colored element");
+    assert(faceCovers(deckPart, 12, 30, T + step), "deck cap covers a participating motif region");
+    assert(faceCovers(deckPart, 30, 8, T + step), "deck cap covers plain plate face");
+    assertEqual(bands[1].hex, "#FF0000", "red is level 2 now");
+    assertClose(bands[1].zb.mx, T + 2 * step, 1e-4, "red pushed one step up by the deck");
+    assertClose(bands[2].zb.mx, T + 3 * step, 1e-4, "green tops at 3 steps");
+  });
+
+  test("auto-heights Deckschicht engraved: top band = deck color, carves deeper; deck counts in the carve budget", async () => {
+    const img = await imgSolid(20, 20);
+    const d = autoDoc();
+    d.topLayerColor = "#FFFFFF";
+    d.body.baseThicknessMm = 2.4; // TIGHT budget: maxRecess=0.2 → compression divisor (3, incl. deck) is live
+    d.elements = [solidEl(img, "#FF0000", 12, "engraved"), solidEl(img, "#00FF00", 45, "engraved")];
+    const parts = buildParts(d);
+    const pb = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0)
+      .map(p => ({ hex: hexOf(p.color), zb: zbounds(p.facets) })).sort((a, b) => b.zb.mn - a.zb.mn);
+    assertEqual(pb.length, 3, "deck + one band per color");
+    assertEqual(pb[0].hex, "#FFFFFF", "top band = Deckschicht");
+    assertClose(pb[0].zb.mx, T, 1e-4, "deck band at the plate top");
+    assertClose(pb[0].zb.mn, T - Math.min(step, (T - 2.4) / 3), 1e-4, "band thickness compressed to the budget");
+    const mr = 0.2, s = Math.min(step, mr / 3); // deck occupies rank 0 → divisor is 3, NOT 2
+    const bu2 = (dd) => T - Math.min(dd, mr) - floor;
+    const byColor = {}; parts.filter(p => p.name.indexOf("farbe-") === 0).forEach(p => { byColor[hexOf(p.color)] = zbounds(p.facets).mn; });
+    assertClose(byColor["#FF0000"], bu2(2 * s), 1e-4, "red carves through the deck (rank 1, compressed step)");
+    assertClose(byColor["#00FF00"], bu2(3 * s), 1e-4, "green at rank 2 — floors stay distinct");
+  });
+
+  test("auto-heights Deckschicht: engraved-direction heightmap keeps its z-space (no deck overlap)", async () => {
+    const img = await imgSolid(20, 20);
+    const bright = await imgSolid(20, 20, "#C8C8C8"); // lum >= threshold → unowned pixels when engraved
+    const d = autoDoc();
+    d.topLayerColor = "#FFFFFF";
+    const hm = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 14, hMm: 14 });
+    hm.color = "#888888"; hm.depth.mode = "heightmap"; hm.depth.direction = "engraved";
+    hm.depth.heightMm = 1; hm._img = bright;
+    d.elements = [solidEl(img, "#FF0000", 12), hm];
+    const parts = buildParts(d);
+    const deck = parts.find(p => p.name === "farbschicht-auto-1");
+    assert(!!deck, "deck present");
+    assert(!faceCovers(deck, 30, 30, T + step), "deck keeps out of the heightmap element's region");
+    assert(faceCovers(deck, 30, 8, T + step), "deck still covers the plain plate face");
+    assert(parts.some(p => p.name.indexOf("hoehe-") === 0), "heightmap relief present");
+  });
+
+  test("auto-heights Deckschicht: base-colored deck is ignored (plate face already is that color)", async () => {
+    const img = await imgSolid(20, 20);
+    const d = autoDoc();
+    d.topLayerColor = "#101010"; // == baseColor
+    d.elements = [solidEl(img, "#FF0000", 15), solidEl(img, "#00FF00", 45)];
+    const bands = bandsOf(buildParts(d));
+    assertEqual(bands.length, 2, "no deck level");
+    assertEqual(bands[0].hex, "#FF0000", "red stays level 1");
+    assertClose(bands[0].zb.mx, T + step, 1e-4, "heights unshifted");
+  });
+
+  test("auto-heights Deckschicht model: default off, migration backfill, round-trip", () => {
+    assert(defaultDoc().topLayerColor === null, "new docs: no deck");
+    const d = defaultDoc(); d.elements = [];
+    const saved = JSON.parse(serializeProject(d));
+    delete saved.topLayerColor;
+    assert(migrateProject(saved).topLayerColor === null, "pre-feature saves backfill null");
+    const d2 = defaultDoc(); d2.topLayerColor = "#FFAA00"; d2.elements = [];
+    assertEqual(migrateProject(JSON.parse(serializeProject(d2))).topLayerColor, "#FFAA00", "deck color survives round-trip");
   });
 
   test("auto-heights: raised and engraved stacks rank independently (per direction)", async () => {
