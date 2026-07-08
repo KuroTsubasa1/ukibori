@@ -1166,10 +1166,18 @@
       const ang = Math.atan2(py - mmY(el.cyMm), px - mmX(el.cxMm)) * 180 / Math.PI + 90;
       el.rotationDeg = Math.round(ang);
     } else {
-      // Corner handle: scale width/height symmetrically.
+      // Corner handle: scale width/height symmetrically. Shift = proportional —
+      // keep the aspect ratio from the drag start, following the dominant axis.
       const [lx, ly] = elemToLocal(el, px, py, s);
-      el.wMm = Math.max(2, Math.abs(lx) * 2 / s);
-      el.hMm = Math.max(2, Math.abs(ly) * 2 / s);
+      if (e.shiftKey && drag.start.w > 0 && drag.start.h > 0) {
+        let k = Math.max((Math.abs(lx) * 2 / s) / drag.start.w, (Math.abs(ly) * 2 / s) / drag.start.h);
+        k = Math.max(k, 2 / drag.start.w, 2 / drag.start.h); // 2mm floor on both axes, ratio intact
+        el.wMm = drag.start.w * k;
+        el.hMm = drag.start.h * k;
+      } else {
+        el.wMm = Math.max(2, Math.abs(lx) * 2 / s);
+        el.hMm = Math.max(2, Math.abs(ly) * 2 / s);
+      }
     }
     render2D();
   });
