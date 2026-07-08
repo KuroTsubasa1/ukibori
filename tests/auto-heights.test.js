@@ -203,6 +203,38 @@
     assertClose(byColor["#0000FF"], baseUnder(0.2), 1e-4, "blue 0.05 clamps up to layerH (printable)");
   });
 
+  test("auto-heights engraved: plate splits into solid color bands matching the carve ranks", async () => {
+    const img = await imgSolid(20, 20);
+    const d = autoDoc();
+    d.elements = [solidEl(img, "#FF0000", 12, "engraved"), solidEl(img, "#00FF00", 45, "engraved")];
+    const parts = buildParts(d);
+    const bands = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0)
+      .map(p => ({ name: p.name, hex: hexOf(p.color), zb: zbounds(p.facets) }))
+      .sort((a, b) => b.zb.mn - a.zb.mn); // top first
+    assertEqual(bands.length, 2, "one plate band per color");
+    const bt = Math.min(step, (T - minBase) / 2);
+    assertEqual(bands[0].hex, "#FF0000", "top band = rank-0 color (shallowest carve)");
+    assertClose(bands[0].zb.mx, T, 1e-4, "top band reaches the plate top");
+    assertClose(bands[0].zb.mn, T - bt, 1e-4, "top band is one band step thick");
+    assertEqual(bands[1].hex, "#00FF00", "second band = rank-1 color");
+    assertClose(bands[1].zb.mn, T - 2 * bt, 1e-4, "second band below the first");
+  });
+
+  test("auto-heights engraved: no plate bands when off, raised-only, or all overridden", async () => {
+    const img = await imgSolid(20, 20);
+    const noBands = (d) => !buildParts(d).some(p => p.name.indexOf("grundplatte-band-") === 0);
+    const d1 = autoDoc(); d1.autoLayerHeights = false;
+    d1.elements = [solidEl(img, "#FF0000", 15, "engraved")];
+    assert(noBands(d1), "flag off → plain plate");
+    const d2 = autoDoc();
+    d2.elements = [solidEl(img, "#FF0000", 15, "raised")];
+    assert(noBands(d2), "raised-only doc → plain plate (the raised stack carries the layers)");
+    const d3 = autoDoc();
+    const ov = solidEl(img, "#FF0000", 15, "engraved"); ov.depth.heightOverrideMm = 1.0;
+    d3.elements = [ov];
+    assert(noBands(d3), "only overridden elements → no participants → plain plate");
+  });
+
   test("auto-heights: raised and engraved stacks rank independently (per direction)", async () => {
     const img = await imgSolid(20, 20);
     const d = autoDoc();

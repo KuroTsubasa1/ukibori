@@ -79,10 +79,13 @@ Bild · Text · QR → Relief · Schwarz-Weiß, Farbe & AMS-Mehrfarb · KI-Freis
   Schichten** geteilt — Ebene 1 läuft als durchgehende Schicht auch unter höheren
   Farben durch, jede weitere Farbe stapelt eine Stufe höher (Palette-Reihenfolge
   zuerst, sonst Ebenen-Reihenfolge; gleiche Farbe = gleiche Ebene). Elemente in der
-  **Grundfarbe** bleiben bündig auf Plattenhöhe und stanzen durch den Stapel. Die
-  **Relief-Höhe** wirkt als manueller Override pro Element (leer = automatisch; das
-  Element druckt dann als eigenes Prisma in seiner Farbe). Abschaltbar per Häkchen;
-  alte gespeicherte Projekte behalten ihre manuellen Höhen.
+  **Grundfarbe** bleiben bündig auf Plattenhöhe und stanzen durch den Stapel. Bei
+  **Vertieft** wird stattdessen die Grundplatte in passende Farbschichten geteilt
+  (Band 1 = flachste Gravur ganz oben), sodass auch dort jede Druckschicht einfarbig
+  bleibt. Die **Relief-Höhe** wirkt als manueller Override pro Element (leer =
+  automatisch; das Element druckt dann als eigenes Prisma bzw. eigene Gravur in
+  seiner Farbe). Abschaltbar per Häkchen; alte gespeicherte Projekte behalten ihre
+  manuellen Höhen.
 - **Helligkeit → Höhe** — kontinuierliches Höhenrelief direkt aus der Bildhelligkeit.
 - **Schriftarten** — System-Schriften + **Fett**, oder eine eigene **`.ttf`/`.otf`/`.woff`**
   laden (lokal eingebettet und im Projekt gespeichert).

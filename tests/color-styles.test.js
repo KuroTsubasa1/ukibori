@@ -285,7 +285,9 @@
     }
     const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
     el.depth.direction = "engraved"; el.depth.mode = "solid"; el._img = img;
-    const d2 = sqDoc(); d2.elements = [el];
+    // Classic mode only: with autoLayerHeights ON, solid engraved DOES band the plate
+    // (Höhe je Farbe — covered in auto-heights.test.js).
+    const d2 = sqDoc(); d2.autoLayerHeights = false; d2.elements = [el];
     assert(!buildParts(d2).some(p => p.name.indexOf("grundplatte-band") === 0), "solid engraved has no base bands");
   });
 
