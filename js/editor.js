@@ -2120,6 +2120,9 @@
     var adv = document.getElementById("sidebarAdvanced");
     var el = doc.elements.find(function (e) { return e.id === state.selectedId; }) || null;
     var disabled = !el;
+    // Inspector empty state: dim the panel + show the hint when nothing is selected.
+    var insp = document.getElementById("sidebarElement");
+    if (insp) insp.classList.toggle("no-selection", disabled);
 
     var threshold = document.getElementById("advThreshold");
     var thresholdVal = document.getElementById("advThresholdVal");

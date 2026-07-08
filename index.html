@@ -26,6 +26,7 @@
 </header>
 <main id="editor">
   <aside id="sidebarAdvanced" class="sidebar">
+    <div class="panel-head">Dokument</div>
     <div class="adv-scroll">
 
       <!-- 1. Werkstueck: alles, was die Platte/das Objekt selbst beschreibt -->
@@ -176,13 +177,14 @@
     <canvas id="preview3dCanvas" width="800" height="1000" hidden></canvas>
   </section>
   <aside id="sidebarElement" class="sidebar">
+    <div class="panel-head">Element</div>
     <div class="adv-scroll">
       <!-- Hinzufuegen: neue Elemente entstehen dort, wo sie bearbeitet werden -->
-      <div class="adv-section"><div class="sp-add-row"><button type="button" id="addImageBtn" class="btn" title="Bild hinzufügen">Bild</button><button type="button" id="addTextBtn" class="btn" title="Text hinzufügen">Text</button><button type="button" id="addQrBtn" class="btn" title="QR-Code hinzufügen">QR</button></div></div>
+      <div class="adv-section add-dock"><div class="sp-add-row"><button type="button" id="addImageBtn" class="btn" title="Bild hinzufügen">+ Bild</button><button type="button" id="addTextBtn" class="btn" title="Text hinzufügen">+ Text</button><button type="button" id="addQrBtn" class="btn" title="QR-Code hinzufügen">+ QR</button></div></div>
       <!-- 3. Element: alles am ausgewählten Element -->
-      <details class="acc" id="accElement" open>
-        <summary>Element</summary>
+      <div id="accElement">
         <div class="acc-body adv-section">
+          <p class="element-empty hint">Kein Element ausgewählt.<br>Füge oben eines hinzu oder klicke ein Element auf der Arbeitsfläche an.</p>
           <div class="adv-field" id="advTextField" hidden><label for="advText" class="adv-label">Text</label><input type="text" id="advText" class="text-input" value="" title="Textinhalt des Elements"></div>
           <div class="adv-field" id="advFontField" hidden>
             <label for="advFontFamily" class="adv-label">Schriftart</label>
@@ -238,9 +240,9 @@
               <input type="number" id="advNumColors" class="sp-num" min="2" max="16" step="1" value="8" title="Anzahl reduzierter Farben (2–16)">
             </div>
             <div class="adv-field" id="advMinIslandField" hidden>
-              <label for="advMinIsland" class="adv-label">Inseln entfernen</label>
+              <label for="advMinIsland" class="adv-label">Inseln entfernen (px)</label>
               <input type="range" id="advMinIsland" min="0" max="2000" step="1" value="0" title="Entfernt kleine Pixel-Inseln/Sprenkel unterhalb dieser Größe (0 = aus)">
-              <span class="badge" id="advMinIslandVal">0</span> px
+              <span class="badge" id="advMinIslandVal">0</span>
             </div>
             <div class="adv-field" id="colorStyleField" hidden>
               <label class="adv-label">Farb-Stapelung</label>
@@ -297,7 +299,7 @@
             </div>
           </div>
         </div>
-      </details>
+      </div>
     </div><!-- /adv-scroll -->
   </aside>
 </main>
