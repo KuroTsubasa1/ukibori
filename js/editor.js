@@ -70,10 +70,65 @@
   // ---- 3D rebuild (debounced, 120 ms) ----
   let _rebuild3DTimer = null;
   function scheduleRebuild3D() {
+    noteDocChanged();
     if (!window.preview3d || !window.preview3d.isActive()) return;
     clearTimeout(_rebuild3DTimer);
     _rebuild3DTimer = setTimeout(function () { window.preview3d.rebuild(); }, 120);
   }
+
+  // ---- Undo/Redo (Cmd/Ctrl+Z, +Shift = Wiederholen) ------------------------
+  // Snapshot stack over the doc (serializeProject strips runtime fields). No
+  // per-handler wiring: render2D/scheduleRebuild3D — the universal post-mutation
+  // calls — poke noteDocChanged, which debounces and pushes only when the
+  // serialized doc actually differs (selection-only renders and drag frames
+  // collapse into one entry). Restore rides the Open path (resetDocTo), which
+  // re-decodes images and re-inits the panels.
+  var _undo = { stack: [], redo: [], cap: 30, timer: null, muted: false };
+  function noteDocChanged() {
+    if (_undo.muted) return;
+    clearTimeout(_undo.timer);
+    _undo.timer = setTimeout(function () {
+      var snap;
+      try { snap = window.serializeProject(doc); } catch (e) { return; }
+      if (snap !== _undo.stack[_undo.stack.length - 1]) {
+        _undo.stack.push(snap);
+        if (_undo.stack.length > _undo.cap) _undo.stack.shift();
+        _undo.redo = [];
+      }
+    }, 500);
+  }
+  function _undoRestore(json) {
+    _undo.muted = true;
+    try {
+      resetDocTo(window.migrateProject(window.deserializeProject(json)));
+    } finally {
+      // Outlive the debounce + async image decodes; a stray late compare is
+      // harmless anyway (restored doc serializes identical to the stack top).
+      setTimeout(function () { _undo.muted = false; }, 700);
+    }
+  }
+  function undoAction() {
+    clearTimeout(_undo.timer);
+    var cur;
+    try { cur = window.serializeProject(doc); } catch (e) { return; }
+    if (cur !== _undo.stack[_undo.stack.length - 1]) _undo.stack.push(cur); // pending edit → redo can return here
+    if (_undo.stack.length < 2) return;
+    _undo.redo.push(_undo.stack.pop());
+    _undoRestore(_undo.stack[_undo.stack.length - 1]);
+  }
+  function redoAction() {
+    if (!_undo.redo.length) return;
+    var snap = _undo.redo.pop();
+    _undo.stack.push(snap);
+    _undoRestore(snap);
+  }
+  window.addEventListener("keydown", function (e) {
+    if (!(e.metaKey || e.ctrlKey) || String(e.key).toLowerCase() !== "z") return;
+    var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable)) return; // native text undo
+    e.preventDefault();
+    if (e.shiftKey) redoAction(); else undoAction();
+  });
 
   // ---- Element-field helpers (DRY refactor) ----
 
@@ -721,6 +776,7 @@
 
   // ---- Main render (exported as render2D) ----
   function render2D() {
+    noteDocChanged();
     if (!cv) return;
     // B3: fitScale is NOT called here; it is called on initial load, window resize,
     // and when body size (sizeW/sizeH) changes. This prevents re-zoom on every control change.
@@ -2525,6 +2581,14 @@
   // Restore persisted preview mode; default 'split' (2D + 3D side by side) per user request.
   setPreviewMode((function () { try { return localStorage.getItem(PREVIEW_MODE_KEY) || "split"; } catch (e) { return "split"; } })());
   renderLayers();
+
+  // Undo baseline: the pristine doc is the floor of the stack.
+  try { _undo.stack = [window.serializeProject(doc)]; } catch (e) {}
+  (function () {
+    var ub = document.getElementById("undoBtn"), rb = document.getElementById("redoBtn");
+    if (ub) ub.addEventListener("click", undoAction);
+    if (rb) rb.addEventListener("click", redoAction);
+  }());
 
   // Public interface. Expose state so tests can inspect/mutate selection.
   window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers, renderLayers, resetDocTo, buildDesignSVG, exportDesignCanvas };
