@@ -48,6 +48,7 @@
     d.colorStepLayers = 2; // step = 0.4 mm
     d.resolution = 64;
     d.mount = { type: "none", xMm: 30, yMm: 10, diameterMm: 5, ringThicknessMm: 0, ringHeightMm: 2, marginMm: 8 };
+    d.autoLayerHeights = false; // T13 legacy fixtures pin classic manual depth.heightMm behavior
     return d;
   }
 

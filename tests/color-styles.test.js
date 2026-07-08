@@ -285,7 +285,9 @@
     }
     const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
     el.depth.direction = "engraved"; el.depth.mode = "solid"; el._img = img;
-    const d2 = sqDoc(); d2.elements = [el];
+    // Classic mode only: with autoLayerHeights ON, solid engraved DOES band the plate
+    // (Höhe je Farbe — covered in auto-heights.test.js).
+    const d2 = sqDoc(); d2.autoLayerHeights = false; d2.elements = [el];
     assert(!buildParts(d2).some(p => p.name.indexOf("grundplatte-band") === 0), "solid engraved has no base bands");
   });
 
@@ -317,7 +319,7 @@
     const img = await threeColorImg(24, 24);
     const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
     el.depth.direction = "raised"; el.depth.mode = "solid"; el.depth.heightMm = 1.7; el._img = img;
-    const d = sqDoc(); d.elements = [el];
+    const d = sqDoc(); d.autoLayerHeights = false; d.elements = [el]; // classic manual heights
     const pr = buildParts(d).filter(p => p.name.indexOf("erhaben") === 0);
     assert(pr.length >= 1, "raised solid prism present");
     assertClose(Math.max(...pr.map(p => zbounds(p.facets).mx)), T + 1.7, 1e-5, "top at T + heightMm");
@@ -328,7 +330,7 @@
     const mk = (hmm) => {
       const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
       el.depth.direction = "engraved"; el.depth.mode = "solid"; el.depth.heightMm = hmm; el._img = img;
-      const d = sqDoc(); d.elements = [el];
+      const d = sqDoc(); d.autoLayerHeights = false; d.elements = [el]; // classic manual heights
       return buildParts(d).filter(p => p.name.indexOf("farbe-") === 0);
     };
     const z0 = (fs) => Math.min(...fs.map(p => zbounds(p.facets).mn));
@@ -367,18 +369,23 @@
     const img = await threeColorImg(24, 24);
     const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
     el.depth.direction = "raised"; el.depth.mode = "solid"; el.depth.heightMm = 0; el._img = img;
-    const d = sqDoc(); d.elements = [el];
+    const d = sqDoc(); d.autoLayerHeights = false; d.elements = [el]; // classic manual heights
     assert(!buildParts(d).some(p => p.name.indexOf("erhaben") === 0), "heightMm 0 → no raised prism (element flush)");
   });
 
-  test("frame + bands: the Rand-Rahmen ring is NOT color-banded (bands inset from plate edge)", async () => {
+  test("frame + bands: the Rand-Rahmen understructure bands WITH the interior (frame cap on top)", async () => {
     const img = await threeColorImg(24, 24);
     const d = sqDoc(); d.body.frame = { widthMm: 6, heightMm: 2, color: "#00aa00" };
     d.elements = [makeEl(img, "engraved", "bands")];
-    const bands = buildParts(d).filter(p => p.name.indexOf("grundplatte-band") === 0);
+    const parts = buildParts(d);
+    const bands = parts.filter(p => p.name.indexOf("grundplatte-band") === 0);
     assertEqual(bands.length, 3, "interior still banded");
+    // The border is part of the workpiece: the Rand-Rahmen understructure bands along
+    // with the interior (each printed layer one solid color); only the frame CAP above
+    // the plate top keeps its own color.
     let x0 = Infinity, x1 = -Infinity;
     for (const p of bands) for (const t of p.facets) for (const pt of t) { if (pt[0] < x0) x0 = pt[0]; if (pt[0] > x1) x1 = pt[0]; }
-    assert(x0 >= 3 && x1 <= 57, "base bands inset from the 0..60 plate edge (frame ring excluded): x∈[" + x0.toFixed(1) + "," + x1.toFixed(1) + "]");
+    assert(x0 <= 1 && x1 >= 59, "base bands reach the plate edge (ring banded too): x∈[" + x0.toFixed(1) + "," + x1.toFixed(1) + "]");
+    assert(parts.some(p => p.name === "rand"), "frame cap still present above the bands");
   });
 })();

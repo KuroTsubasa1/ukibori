@@ -69,6 +69,7 @@ function defaultDepth(type) {
     mode: "solid",                 // text/qr are always solid; images may change later
     direction: "raised",
     heightMm: 1.0,
+    heightOverrideMm: null,        // autoLayerHeights: manual per-element height (null = auto from color)
     stepLayers: 2,
     reduce: { method: "palette", numColors: 8, levels: 4, remap: {}, order: [] },
     threshold: 128,
@@ -110,6 +111,15 @@ function defaultDoc() {
     // When true, keep the surrounding plate a single solid base color in AMS bands mode
     // (don't split it into color bands); only the recessed inlay stays multicolor.
     amsSolidBase: false,
+    // Einfarbig (solid) elements take their height from their COLOR, AMS-style: same color =
+    // same layer, distinct colors stack in colorStepLayers*layerHeightMm steps, base-colored
+    // elements stay flush with the plate. New docs default ON; pre-feature saves migrate OFF
+    // so their geometry is unchanged (see migrateProject).
+    autoLayerHeights: true,
+    // Deckschicht: optional cover color for the auto-layer stack. Takes rank 0 (the
+    // workpiece's face — engraved: topmost plate band; raised: full-face slab under the
+    // motif stack), pushing element colors one step further. null = off.
+    topLayerColor: null,
     elements: [], fonts: {},
   };
 }
@@ -120,6 +130,7 @@ function migrateElement(el, doc, layerHmm) {
     mode: isReduce ? "colorLayers" : "solid",
     direction: "engraved",                       // v1 composer engraved colors into the front
     heightMm: (el.depthLayers != null ? el.depthLayers : 2) * layerHmm,
+    heightOverrideMm: null,        // v1 had no auto layer heights → no override
     stepLayers: doc.colorStepLayers != null ? doc.colorStepLayers : 2,
     reduce: el.reduce
       ? { method: el.reduce.method || "palette", numColors: el.reduce.numColors || 8,
@@ -154,9 +165,13 @@ function migrateProject(doc) {
     if (!Array.isArray(doc.amsPalette)) doc.amsPalette = [];
     else if (doc.amsPalette.length) setAmsPalette(doc, doc.amsPalette);
     if (doc.amsSolidBase == null) doc.amsSolidBase = false;
+    // Auto layer heights shipped after these saves existed → keep their manual heights.
+    if (doc.autoLayerHeights == null) doc.autoLayerHeights = false;
+    if (doc.topLayerColor === undefined) doc.topLayerColor = null;
     if (doc.body && doc.body.baseThicknessMm == null) doc.body.baseThicknessMm = 0;
     for (const el of doc.elements || []) {
       if (el.depth && el.depth.flush == null) el.depth.flush = false;
+      if (el.depth && el.depth.heightOverrideMm === undefined) el.depth.heightOverrideMm = null;
       // colorLayerStyle added in T14: derive from legacy flush when absent
       // (post-T13 flush=true meant bands / AMS).
       if (el.depth && el.depth.colorLayerStyle == null) {
@@ -189,6 +204,7 @@ function migrateProject(doc) {
     resolution: doc.resolution != null ? doc.resolution : 1024,
     colorStepLayers: doc.colorStepLayers != null ? doc.colorStepLayers : 2,
     amsPalette: [], amsSolidBase: false,
+    autoLayerHeights: false, topLayerColor: null, // v1 saves predate the feature: keep manual heights
     elements: (doc.elements || []).map(el => migrateElement(el, doc, layerH)),
     fonts: doc.fonts || {},
   };

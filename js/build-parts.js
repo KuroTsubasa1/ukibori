@@ -310,6 +310,88 @@
     return d.colorLayerStyle || (d.flush ? "bands" : "stepped");
   }
 
+  // Engraved carve budget: color-floor slab thickness, solid base under the deepest
+  // recess (user body.baseThicknessMm override, clamped to leave room for a color
+  // floor, else auto-derived from the overall thickness), and the recess depth left
+  // for color floors. Shared by __engravedBaseAndFloors and the auto-layer-height
+  // preview (window.autoSolidHeightMm) so both see the same numbers.
+  function __engravedBudget(body) {
+    const T = body.thicknessMm, layerH = body.layerHeightMm;
+    const floor = Math.min(2 * layerH, T);
+    const autoMinBase = Math.min(Math.max(0.8, T * 0.34, 2 * layerH), Math.max(0, T - floor));
+    const setBase = (body.baseThicknessMm || 0);
+    const minBase = setBase > 0 ? Math.max(0, Math.min(setBase, T - floor)) : autoMinBase;
+    const maxRecess = Math.max(0, T - floor - minBase);
+    return { floor, minBase, maxRecess };
+  }
+
+  // --- Auto layer heights (Höhe je Farbe) -----------------------------------
+  // When doc.autoLayerHeights is on, an Einfarbig (solid-mode) element's height
+  // comes from its COLOR, AMS-style: elements sharing a color share one height;
+  // distinct colors stack in steps of colorStepLayers*layerHeightMm. Colors
+  // present in doc.amsPalette rank first (palette order = layer order), the
+  // remaining colors follow in element stacking order (doc.elements[0] lowest).
+  // An element in the base-plate color gets 0 — flush with the plate. A set
+  // depth.heightOverrideMm wins over the derived height (null = auto; keeps its
+  // color's rank so the other layers don't shift) and gets the same printability
+  // clamp as depth.heightMm (0 = flush, else >= layerH). Elements that print
+  // nothing (hidden, cutout holes, undecoded images) take no rank. Ranks are per
+  // direction (raised and engraved stacks are independent); pass maxRecessMm on
+  // the engraved path to compress the stack into the carve budget (like AMS
+  // bands). Derived heights carry NO layerH floor so a compressed stack keeps
+  // DISTINCT floors (uncompressed step is >= layerH anyway). Returns null when
+  // the feature is off / not applicable → classic depth.heightMm behavior.
+  // Ordered distinct auto-layer colors for one direction: doc.amsPalette colors
+  // first (palette order = filament order), then the rest in element stacking
+  // order (doc.elements[0] lowest). Base-colored and non-printing (hidden /
+  // cutout / undecoded-image) elements take no slot. UPPERCASE hexes.
+  function __autoSolidOrder(doc, dir) {
+    const baseHex = String(doc.body.baseColor || "").toUpperCase();
+    const ams = Array.isArray(doc.amsPalette) ? doc.amsPalette : [];
+    const inPal = [], rest = [];
+    for (const e of doc.elements) {
+      if (!e || !e.depth || e.depth.mode !== "solid" || e._hidden || e.cutout) continue;
+      if (e.type === "image" && !e._img) continue; // undecoded image prints nothing
+      if ((e.depth.direction || "raised") !== dir) continue;
+      const h = String(e.color || "").toUpperCase();
+      if (!h || h === baseHex) continue;
+      if (ams.indexOf(h) !== -1) { if (inPal.indexOf(h) === -1) inPal.push(h); }
+      else if (rest.indexOf(h) === -1) rest.push(h);
+    }
+    inPal.sort((a, b) => ams.indexOf(a) - ams.indexOf(b));
+    const order = inPal.concat(rest);
+    // Deckschicht (top layer): the doc-level cover color always takes rank 0 — the
+    // workpiece's face (engraved: topmost plate band; raised: full-face slab) — and
+    // pushes element colors one step further. Ignored when it matches the base color
+    // (the plate face already IS that color).
+    const top = doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null;
+    if (top && top !== baseHex) {
+      const i = order.indexOf(top);
+      if (i !== -1) order.splice(i, 1);
+      order.unshift(top);
+    }
+    return order;
+  }
+
+  function __autoSolidHeight(doc, el, maxRecessMm, ignoreOverride) {
+    if (!doc.autoLayerHeights) return null;
+    if (!el || !el.depth || el.depth.mode !== "solid") return null;
+    const layerH = doc.body.layerHeightMm;
+    if (!ignoreOverride && el.depth.heightOverrideMm != null) {
+      const ov = el.depth.heightOverrideMm;
+      return ov <= 0 ? 0 : Math.max(ov, layerH);
+    }
+    const baseHex = String(doc.body.baseColor || "").toUpperCase();
+    const hex = String(el.color || "").toUpperCase();
+    if (hex === baseHex) return 0; // same color as the plate → same height as the plate
+    const order = __autoSolidOrder(doc, el.depth.direction || "raised");
+    const rank = order.indexOf(hex);
+    if (rank < 0) return null; // element itself prints nothing (hidden/cutout/undecoded)
+    let step = Math.max(1, doc.colorStepLayers || 2) * layerH;
+    if (maxRecessMm != null && order.length > 0) step = Math.min(step, maxRecessMm / order.length);
+    return (rank + 1) * step;
+  }
+
   // v2 analogue of bookmark-export __orderedNaturalHexes: a reduce-image element's
   // natural palette in the user's preferred order (el.depth.reduce.order first, then
   // any new colors). Reads el.depth.reduce (v1 read el.reduce).
@@ -341,13 +423,7 @@
     const tracedFacets = (member, thickness, z0) => window.orientOutward(
       window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
 
-    const floor = Math.min(2 * layerH, T);
-    // Base-plate floor thickness under engraved detail: user override (body.baseThicknessMm > 0,
-    // clamped to leave room for a color floor) else auto-derived from the overall thickness.
-    const autoMinBase = Math.min(Math.max(0.8, T * 0.34, 2 * layerH), Math.max(0, T - floor));
-    const setBase = (doc.body.baseThicknessMm || 0);
-    const minBase = setBase > 0 ? Math.max(0, Math.min(setBase, T - floor)) : autoMinBase;
-    const maxRecess = Math.max(0, T - floor - minBase);
+    const { floor, minBase, maxRecess } = __engravedBudget(doc.body);
     const recessOf = (d) => Math.max(0, Math.min(d, maxRecess));
     const baseUnder = (d) => T - recessOf(d) - floor;
 
@@ -371,6 +447,10 @@
     // height). Depth is per element, so each element's relief height is independent of the others.
     const depthForOwnerHex = (ei, hex) => {
       const el = doc.elements[ei];
+      // Auto layer heights: Einfarbig recess derived from the element's color,
+      // stack compressed into the carve budget (maxRecess) like AMS bands.
+      const autoD = __autoSolidHeight(doc, el, maxRecess);
+      if (autoD != null) return autoD;
       const hm = (el && el.depth && el.depth.heightMm != null) ? el.depth.heightMm : layerH;
       const h = hm <= 0 ? 0 : Math.max(hm, layerH); // Relief-Höhe 0 = no recess (off)
       if (h <= 0) return 0;
@@ -499,9 +579,6 @@
     // shallowest), lightest at the bottom of the stack; below the deepest band the interior stays
     // base color. No bands element → single full-height base slab (byte-identical parity).
     const surroundMember = (c, r) => { const i = idx(c, r); return comp.isBase[i] === 1 || inBand(i); };
-    // Band ONLY genuine interior base cells; the Rand-Rahmen band cells (the outer perimeter,
-    // whose side walls are exposed under the single-color frame cap) stay one base-color slab.
-    const interiorMember = (c, r) => { const i = idx(c, r); return comp.isBase[i] === 1 && !inBand(i); };
     // Split the plate only when EXACTLY ONE engraved element uses bands — its palette then maps
     // 1:1 onto its own inlay. Multiple bands elements with distinct palettes are ambiguous (a
     // global sort/count would carve deeper than any single inlay), so fall back to a plain base.
@@ -510,24 +587,41 @@
     // Band the base ONLY when an engraved bands element is actually present in this build — a
     // lingering (populated-but-unused) amsPalette must NOT stripe the plate of a non-AMS design.
     // amsSolidBase keeps the surrounding plate one solid base color (only the inlay is multicolor).
-    const bandHexes = (doc.amsSolidBase || bandsElemCount === 0)
+    let bandHexes = (doc.amsSolidBase || bandsElemCount === 0)
       ? []
       : (ams ? ams.slice() : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []));
+    // Auto layer heights (Höhe je Farbe): engraved Einfarbig elements split the plate
+    // the same way — the whole workpiece becomes solid single-color layers, band k
+    // matching the color at carve rank k (band 1 = shallowest = topmost). Only when
+    // no colorLayers-bands element is in the build (those keep the AMS palette above),
+    // and only if at least one auto-ranked engraved solid element actually prints
+    // (a manual heightOverrideMm opts an element out; its color still holds its rank).
+    if (!bandHexes.length && doc.autoLayerHeights && !doc.amsSolidBase && bandsElemCount === 0) {
+      const order = __autoSolidOrder(doc, "engraved");
+      const hasParticipant = order.length && doc.elements.some((e) =>
+        e && e.depth && e.depth.mode === "solid" && !e._hidden && !e.cutout &&
+        !(e.type === "image" && !e._img) &&
+        (e.depth.direction || "raised") === "engraved" &&
+        e.depth.heightOverrideMm == null &&
+        order.indexOf(String(e.color || "").toUpperCase()) !== -1);
+      if (hasParticipant) bandHexes = order;
+    }
     if (bandHexes.length > 0) {
       const N = bandHexes.length;
       const avail = Math.max(0, T - minBase);
       const bandThick = Math.min(step, avail / N); // compress to fit; never silently drop a color
       const interiorTop = T - N * bandThick;
-      if (interiorTop - minBase > 1e-6) baseAdd(interiorMember, interiorTop - minBase, minBase); // base interior below the bands
+      // The Rand-Rahmen understructure bands together with the interior — the border is
+      // part of the workpiece, so its printed layers stay one solid color too (the frame
+      // cap in frame.color still sits on top of it, above T).
+      if (interiorTop - minBase > 1e-6) baseAdd(surroundMember, interiorTop - minBase, minBase); // base below the bands
       // Rank k (1=darkest .. N=lightest) occupies [T-k*bandThick, T-(k-1)*bandThick].
       for (let k = N; k >= 1; k--) {
         const zBot = T - k * bandThick;
         if (bandThick <= 1e-6) continue;
-        const facets = tracedFacets(interiorMember, bandThick, zBot);
+        const facets = tracedFacets(surroundMember, bandThick, zBot);
         if (facets.length) baseParts.push({ name: "grundplatte-band-" + k, color: window.hexToRgb(bandHexes[k - 1]), facets });
       }
-      // Rand-Rahmen understructure: single base-color slab (frame cap sits on top; no stripes).
-      baseAdd((c, r) => inBand(idx(c, r)), T - minBase, minBase);
     } else {
       baseAdd(surroundMember, T - minBase, minBase);
     }
@@ -730,6 +824,10 @@
       window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
 
     const heightForElemColor = (el, hex) => {
+      // Auto layer heights: Einfarbig height derived from the element's color
+      // (override/printability clamps applied inside; base color = 0 = flush).
+      const autoH = __autoSolidHeight(doc, el, null);
+      if (autoH != null) return autoH;
       const hm = (el.depth && el.depth.heightMm != null) ? el.depth.heightMm : layerH;
       const h = hm <= 0 ? 0 : Math.max(hm, layerH); // Relief-Höhe 0 = no relief (off)
       if (el.depth && el.depth.mode === "colorLayers") {
@@ -776,7 +874,80 @@
       arr.push({ hex: g.hex, set: g.set });
     }
 
+    // --- Auto layer heights (Höhe je Farbe): ONE global banded stack --------
+    // Like the AMS filament stack below: level L is a full slab
+    // [T+L*step, T+(L+1)*step] colored autoOrder[L] over every participating
+    // pixel whose element color ranks >= L — so each printed layer is a single
+    // solid color across the whole piece, lower colors running through under
+    // higher ones. Elements with a manual heightOverrideMm keep their classic
+    // own-color prism below (their color still holds its rank, so the other
+    // layers don't shift); base-colored elements own their pixels but appear in
+    // no band region — they punch through the stack down to the plate.
+    const autoOrder = doc.autoLayerHeights ? __autoSolidOrder(doc, "raised") : [];
+    const autoRank = new Map(); // ei -> rank, banded participants only
+    if (autoOrder.length) {
+      doc.elements.forEach((el, ei) => {
+        if (!el || !el.depth || el.depth.mode !== "solid" || el._hidden || el.cutout) return;
+        if (el.type === "image" && !el._img) return;
+        if ((el.depth.direction || "raised") !== "raised") return;
+        if (el.depth.heightOverrideMm != null) return; // manual height → own prism
+        const r = autoOrder.indexOf(String(el.color || "").toUpperCase());
+        if (r >= 0) autoRank.set(ei, r);
+      });
+    }
+    if (autoRank.size) {
+      const nn = cols * rows;
+      let maxL = 0; for (const r of autoRank.values()) if (r > maxL) maxL = r;
+      // Deckschicht: when a top-layer color leads the order, level 0 covers the WHOLE
+      // plate face (not just motif pixels) — the motif levels stack on top of it.
+      // Pixels owned by non-participating elements punch through it: base-colored and
+      // overridden solids, engraved motifs (they carve down from T), colorLayers/
+      // heightmap elements (they own [T..] themselves), cutouts and the frame ring.
+      const baseHexR = String(doc.body.baseColor || "").toUpperCase();
+      const deckHex = (doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null);
+      const deckOn = !!(deckHex && deckHex !== baseHexR && autoOrder[0] === deckHex);
+      // Heightmap elements build UP from the plate top regardless of direction, but an
+      // engraved-direction heightmap claims no ownership of its BRIGHT pixels (the
+      // generic mask is luminance-filtered for non-raised), so the owner-based punch-
+      // through below misses them. Exclude their opaque regions explicitly — same
+      // alpha>=128 criterion as buildHeightmapParts — or deck and heightmap floor
+      // would interpenetrate in [T, T+step].
+      let hmExclude = null;
+      if (deckOn) {
+        for (const el of doc.elements) {
+          if (!el || !el.depth || el.depth.mode !== "heightmap") continue;
+          if (el.type === "image" && !el._img) continue;
+          const d = __drawElement(el, doc, cols, rows, grid);
+          if (!hmExclude) hmExclude = new Uint8Array(cols * rows);
+          for (let i = 0; i < cols * rows; i++) if (d[i * 4 + 3] >= 128) hmExclude[i] = 1;
+        }
+      }
+      const deckMember = (c, r) => {
+        const i = idx(c, r);
+        if (comp.cutout[i] || (band && band[i] === 1)) return false;
+        if (hmExclude && hmExclude[i] === 1) return false;
+        const o = comp.owner[i];
+        return o < 0 || autoRank.has(o);
+      };
+      for (let L = 0; L <= maxL; L++) {
+        let member;
+        if (L === 0 && deckOn) {
+          member = deckMember;
+        } else {
+          const region = new Uint8Array(nn);
+          for (const [ei, r] of autoRank) {
+            if (r < L) continue;
+            for (const g of (byElem.get(ei) || [])) { const s = g.set; for (let i = 0; i < nn; i++) region[i] |= s[i]; }
+          }
+          member = (c, r) => region[idx(c, r)] === 1;
+        }
+        const facets = tracedFacets(member, step, T + L * step);
+        if (facets.length) parts.push({ name: "farbschicht-auto-" + (L + 1), color: window.hexToRgb(autoOrder[L]), facets });
+      }
+    }
+
     for (const [ei, colorGroups] of byElem) {
+      if (autoRank.has(ei)) continue; // already printed by the shared auto stack
       const el = doc.elements[ei];
       const isBandsColorLayers = el.depth && el.depth.mode === "colorLayers" && colorStyleOf(el) === "bands";
 
@@ -1054,6 +1225,13 @@
   window.buildHeightmapParts = buildHeightmapParts;
   window.buildFrameParts = buildFrameParts;
   window.buildParts = buildParts;
+  // Editor UI: preview the AUTO height (Höhe je Farbe) an Einfarbig element falls
+  // back to — ignores a set override (the input shows that itself) and applies the
+  // engraved carve-budget compression so the shown value matches the build.
+  window.autoSolidHeightMm = (doc, el) => __autoSolidHeight(
+    doc, el,
+    (el && el.depth && el.depth.direction) === "engraved" ? __engravedBudget(doc.body).maxRecess : null,
+    true);
   // Footprint = the defining image element's rotated rectangle (plate-free "Bild" object).
   // >0 inside the rectangle, in cell units. borderMm is ignored (the image IS the object).
   function imageFootprintField(doc, cols, rows, pitch, grid) {

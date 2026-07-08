@@ -1153,6 +1153,7 @@
   // ---- Drop handler on canvas/preview ----
   function handleDrop(e) {
     e.preventDefault();
+    e.stopPropagation(); // #canvas2d sits inside #preview — both have this handler, so stop the bubble or one drop loads twice
     const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
     if (!file || !file.type.startsWith("image/")) return;
     const rd = new FileReader();
@@ -2125,17 +2126,46 @@
     }
 
     // Relief height (depth.heightMm): shown for Einfarbig (solid/text) and Farbebenen→Gestuft.
+    // With "Höhe je Farbe" (doc.autoLayerHeights) on, the field is the per-element OVERRIDE for
+    // Einfarbig elements: empty = automatic height from the color (shown as placeholder).
     var reliefField = document.getElementById("advReliefHeightField");
+    var em = el && el.depth && el.depth.mode;
     if (reliefField) {
-      var em = el && el.depth && el.depth.mode;
       var estyle = (el && el.depth && el.depth.colorLayerStyle) || ((el && el.depth && el.depth.flush) ? "bands" : "stepped");
       var showRelief = el && (el.type === "text" || el.type === "image") &&
         (em === "solid" || (em === "colorLayers" && estyle === "stepped"));
       reliefField.hidden = !showRelief;
       if (showRelief) {
         var rh = document.getElementById("advReliefHeight");
-        if (rh) rh.value = (el.depth && el.depth.heightMm != null) ? el.depth.heightMm : 1;
+        if (rh) {
+          if (doc.autoLayerHeights && em === "solid") {
+            var ov = el.depth.heightOverrideMm;
+            rh.value = ov != null ? ov : "";
+            var autoH = window.autoSolidHeightMm ? window.autoSolidHeightMm(doc, el) : null;
+            rh.placeholder = autoH != null ? "auto: " + (Math.round(autoH * 100) / 100) + " mm" : "auto";
+          } else {
+            rh.placeholder = "";
+            rh.value = (el.depth && el.depth.heightMm != null) ? el.depth.heightMm : 1;
+          }
+        }
       }
+    }
+    // "Höhe je Farbe" toggle (doc-level; surfaced here because Einfarbig heights are edited here).
+    var autoField = document.getElementById("advAutoHeightsField");
+    var showAuto = !!(el && (el.type === "text" || el.type === "image") && em === "solid");
+    if (autoField) {
+      autoField.hidden = !showAuto;
+      var ah = document.getElementById("advAutoHeights");
+      if (ah) ah.checked = !!doc.autoLayerHeights;
+    }
+    // Deckschicht (doc-level cover color) rides on the auto-heights mode.
+    var tlField = document.getElementById("advTopLayerField");
+    if (tlField) {
+      tlField.hidden = !(showAuto && doc.autoLayerHeights);
+      var tl = document.getElementById("advTopLayer");
+      var tlc = document.getElementById("advTopLayerColor");
+      if (tl) tl.checked = doc.topLayerColor != null;
+      if (tlc && doc.topLayerColor != null) tlc.value = doc.topLayerColor;
     }
 
     // Palette swatches: show only for image elements in colorLayers mode.
@@ -2209,6 +2239,7 @@
   // -- Element inputs --
   bindElementField("advColor", "input", function (el, node) {
     el.color = node.value;
+    refreshAdvancedForSelection(); // auto-height placeholder follows the color (base-colored = flush)
   }, { invalidate: true });
 
   bindElementField("advCx", "input", function (el, node) {
@@ -2268,10 +2299,23 @@
   });
 
   // -- Relief height (Einfarbig + Gestuft): how far the element rises / recesses --
+  // With "Höhe je Farbe" on (Einfarbig): edits the per-element OVERRIDE instead;
+  // clearing the field returns the element to its automatic per-color height.
   bindElementField("advReliefHeight", "input", function (el, node) {
+    if (!el.depth) return false;
+    // A number input reports "" while holding invalid text (e.g. "1.4e") — badInput
+    // distinguishes that from an intentionally cleared field, so typing garbage
+    // doesn't silently drop the override.
+    if (node.validity && node.validity.badInput) return false;
+    if (doc.autoLayerHeights && el.depth.mode === "solid") {
+      if (String(node.value).trim() === "") { el.depth.heightOverrideMm = null; return; }
+      var ov = parseFloat(node.value);
+      if (isNaN(ov) || ov < 0) return false; // 0 allowed = flush with the plate
+      el.depth.heightOverrideMm = ov;
+      return;
+    }
     var v = parseFloat(node.value);
     if (isNaN(v) || v < 0) return false; // 0 allowed = no relief (off)
-    if (!el.depth) return false;
     el.depth.heightMm = v;
   });
 
@@ -2294,12 +2338,14 @@
     el.depth.direction = "raised";
     var r = document.getElementById("advDirRaised"), g = document.getElementById("advDirEngraved");
     if (r) r.classList.add("seg-active"); if (g) g.classList.remove("seg-active");
+    refreshAdvancedForSelection(); // auto-height ranks are per direction → placeholder changes
   });
 
   bindElementField("advDirEngraved", "click", function (el) {
     el.depth.direction = "engraved";
     var r = document.getElementById("advDirRaised"), g = document.getElementById("advDirEngraved");
     if (r) r.classList.remove("seg-active"); if (g) g.classList.add("seg-active");
+    refreshAdvancedForSelection(); // auto-height ranks are per direction → placeholder changes
   });
 
   // -- 3D / Export doc-level inputs --
@@ -2343,7 +2389,48 @@
     var bc = document.getElementById("advBaseColor");
     if (bc) bc.addEventListener("input", function () {
       doc.body.baseColor = this.value;
+      refreshAdvancedForSelection(); // auto-height placeholder can change (base-colored = flush)
       render2D();
+      scheduleRebuild3D();
+    });
+  }());
+
+  // "Höhe je Farbe" (auto layer heights): doc-level toggle, wired from the element panel.
+  (function () {
+    var ah = document.getElementById("advAutoHeights");
+    if (ah) ah.addEventListener("change", function () {
+      doc.autoLayerHeights = this.checked;
+      refreshAdvancedForSelection(); // relief field switches between height and override semantics
+      scheduleRebuild3D();
+    });
+  }());
+
+  // Deckschicht (top layer): doc-level cover color at rank 0 of the auto stack.
+  (function () {
+    var tl = document.getElementById("advTopLayer");
+    var tlc = document.getElementById("advTopLayerColor");
+    if (tl) tl.addEventListener("change", function () {
+      if (this.checked) {
+        var v = (tlc && tlc.value) || "#ffffff";
+        // The engine ignores a base-colored deck — seed a visible default instead of
+        // silently storing a no-op (e.g. white deck on the default white plate).
+        if (v.toUpperCase() === String(doc.body.baseColor || "").toUpperCase()) {
+          var b = doc.body.baseColor || "#ffffff";
+          var lum = 0.299 * parseInt(b.substr(1, 2), 16) + 0.587 * parseInt(b.substr(3, 2), 16) + 0.114 * parseInt(b.substr(5, 2), 16);
+          v = lum > 128 ? "#333333" : "#ffffff";
+          if (tlc) tlc.value = v;
+        }
+        doc.topLayerColor = v;
+      } else {
+        doc.topLayerColor = null;
+      }
+      refreshAdvancedForSelection(); // element ranks shift one step → placeholder changes
+      scheduleRebuild3D();
+    });
+    if (tlc) tlc.addEventListener("input", function () {
+      if (doc.topLayerColor == null) return; // checkbox off → color is inert
+      doc.topLayerColor = this.value;
+      refreshAdvancedForSelection();
       scheduleRebuild3D();
     });
   }());
