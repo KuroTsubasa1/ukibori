@@ -83,6 +83,13 @@
         _undo.stack.push(snap);
         if (_undo.stack.length > _undo.cap) _undo.stack.shift();
         _undo.redo = [];
+        // The doc really changed → any Dünne-Stellen overlay is stale now.
+        if (state.thinOverlay) {
+          state.thinOverlay = null;
+          var ts = document.getElementById("thinCheckStatus");
+          if (ts) ts.textContent = "";
+          render2D();
+        }
       }
     }, 500);
   }
@@ -893,6 +900,33 @@
       ctx.setLineDash([]);
       ctx.restore();
     }
+
+    drawThinOverlay(ctx);
+  }
+
+  // ---- Dünne-Stellen-Overlay (red cells from the last thinFeatureMask run) ----
+  // The probe grid covers the body box [0..W, 0..H] mm; it is rasterized once
+  // into an offscreen canvas and blitted over the design at the current zoom.
+  function drawThinOverlay(ctx) {
+    var ov = state.thinOverlay;
+    if (!ov) return;
+    if (!ov._canvas) {
+      var oc = document.createElement("canvas");
+      oc.width = ov.cols; oc.height = ov.rows;
+      var octx = oc.getContext("2d");
+      var od = octx.createImageData(ov.cols, ov.rows);
+      for (var i = 0; i < ov.thin.length; i++) {
+        if (!ov.thin[i]) continue;
+        od.data[i * 4] = 224; od.data[i * 4 + 1] = 32; od.data[i * 4 + 2] = 32; od.data[i * 4 + 3] = 190;
+      }
+      octx.putImageData(od, 0, 0);
+      ov._canvas = oc;
+    }
+    var w = ov.cols * ov.pitch, h = ov.rows * ov.pitch; // mm covered by the probe grid
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(ov._canvas, mmX(0), mmY(0), w * state.scale, h * state.scale);
+    ctx.restore();
   }
 
   // ---- Hit test: pointer canvas-px → element/handle ----
@@ -1329,6 +1363,8 @@
     }
     canvas2d.hidden = (mode === "3d");
     canvas3d.hidden = (mode === "2d");
+    var lsw = document.getElementById("layerSliderWrap");
+    if (lsw) lsw.hidden = (mode === "2d"); // Schicht-Vorschau only makes sense with 3D visible
 
     // 2. Button active state.
     document.getElementById("view2dBtn").classList.toggle("seg-active", mode === "2d");
@@ -1964,6 +2000,37 @@
 
     li.append(nameSpan, vis, up, dn, del);
 
+    // Drag to reorder (same pattern as the AMS palette rows). Ids as strings —
+    // loaded docs may carry non-numeric ids.
+    li.draggable = true;
+    li.addEventListener("dragstart", function (e) {
+      e.dataTransfer.setData("text/plain", String(el.id));
+      e.dataTransfer.effectAllowed = "move";
+      li.classList.add("dragging");
+    });
+    li.addEventListener("dragend", function () { li.classList.remove("dragging"); });
+    li.addEventListener("dragover", function (e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      li.classList.add("drag-over");
+    });
+    li.addEventListener("dragleave", function () { li.classList.remove("drag-over"); });
+    li.addEventListener("drop", function (e) {
+      e.preventDefault();
+      e.stopPropagation(); // never bubble into the file-drop chain
+      li.classList.remove("drag-over");
+      var fromId = e.dataTransfer.getData("text/plain");
+      if (!fromId || fromId === String(el.id)) return;
+      var from = doc.elements.findIndex(function (x) { return String(x.id) === fromId; });
+      var to = doc.elements.findIndex(function (x) { return x.id === el.id; });
+      if (from === -1 || to === -1) return;
+      var moved = doc.elements.splice(from, 1)[0];
+      doc.elements.splice(to, 0, moved); // take the drop target's position
+      renderLayers();
+      render2D();
+      scheduleRebuild3D();
+    });
+
     li.addEventListener("click", function (e) {
       if (e.target.classList.contains("adv-lbtn")) return;
       state.selectedId = el.id;
@@ -2452,6 +2519,67 @@
         if (!isNaN(v) && v >= 0) { state.snap.gridMm = v; persistSnap(); }
       });
     }
+  }());
+
+  // ---- Duplizieren (Strg/Cmd+D + Button) ----
+  function duplicateSelected() {
+    var el = selectedEl();
+    if (!el) return;
+    // Deep-copy the persisted fields; runtime caches are dropped and makeElementV2
+    // mints a fresh id (the stripped id keeps props from overriding it).
+    var drop = { _img: 1, _display: 1, _displayKey: 1, _hidden: 1, id: 1 };
+    var props = JSON.parse(JSON.stringify(el, function (k, v) { return drop[k] ? undefined : v; }));
+    var copy = window.makeElementV2(el.type, props);
+    copy._img = el._img || null; // share the decoded bitmap (read-only)
+    copy.cxMm = el.cxMm + 4; copy.cyMm = el.cyMm + 4; // nudge so the copy is visible
+    doc.elements.splice(doc.elements.indexOf(el) + 1, 0, copy); // directly above the original
+    state.selectedId = copy.id;
+    refreshAdvancedForSelection();
+    renderLayers();
+    render2D();
+    scheduleRebuild3D();
+  }
+  window.addEventListener("keydown", function (e) {
+    if (!(e.metaKey || e.ctrlKey) || e.shiftKey || String(e.key).toLowerCase() !== "d") return;
+    var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable)) return;
+    if (!selectedEl()) return; // nothing selected → leave Cmd+D to the browser
+    e.preventDefault();
+    duplicateSelected();
+  });
+  (function () {
+    var b = document.getElementById("duplicateBtn");
+    if (b) b.addEventListener("click", duplicateSelected);
+  }());
+
+  // ---- Dünne-Stellen prüfen (nozzle-width check) ----
+  (function () {
+    var btn = document.getElementById("thinCheckBtn");
+    var status = document.getElementById("thinCheckStatus");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      var res;
+      try { res = window.thinFeatureMask(visibleDoc(), 0.4); }
+      catch (e) {
+        if (status) status.textContent = "Prüfung fehlgeschlagen: " + (e && e.message || e);
+        return;
+      }
+      state.thinOverlay = res.count ? res : null;
+      if (status) status.textContent = res.count
+        ? "⚠ ~" + res.areaMm2.toFixed(1) + " mm² schmaler als 0,4 mm — im 2D rot markiert"
+        : "✓ Keine dünnen Stellen gefunden";
+      render2D();
+    });
+  }());
+
+  // ---- Schicht-Vorschau (3D layer scrubber) ----
+  (function () {
+    var s = document.getElementById("layerSlider");
+    if (s) s.addEventListener("input", function () {
+      if (window.preview3d && window.preview3d.setClipRatio) {
+        window.preview3d.setClipRatio(parseFloat(this.value) / 100);
+      }
+    });
   }());
 
   // ---- Center buttons ----

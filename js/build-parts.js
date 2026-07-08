@@ -341,25 +341,26 @@
   // bands). Derived heights carry NO layerH floor so a compressed stack keeps
   // DISTINCT floors (uncompressed step is >= layerH anyway). Returns null when
   // the feature is off / not applicable → classic depth.heightMm behavior.
-  // Ordered distinct auto-layer colors for one direction: doc.amsPalette colors
-  // first (palette order = filament order), then the rest in element stacking
-  // order (doc.elements[0] lowest). Base-colored and non-printing (hidden /
-  // cutout / undecoded-image) elements take no slot. UPPERCASE hexes.
+  // Ordered auto-layer colors for one direction: the FULL doc.amsPalette leads
+  // the order — used or not — so a palette color sits at its ABSOLUTE slot,
+  // identical to its layer in AMS Farbebenen images (unused slots print as
+  // under-layers, exactly like the AMS image stack does for skipped layers).
+  // Non-palette colors follow in element stacking order (doc.elements[0]
+  // lowest). Base-colored and non-printing (hidden / cutout / undecoded-image)
+  // elements take no extra slot. UPPERCASE hexes.
   function __autoSolidOrder(doc, dir) {
     const baseHex = String(doc.body.baseColor || "").toUpperCase();
     const ams = Array.isArray(doc.amsPalette) ? doc.amsPalette : [];
-    const inPal = [], rest = [];
+    const rest = [];
     for (const e of doc.elements) {
       if (!e || !e.depth || e.depth.mode !== "solid" || e._hidden || e.cutout) continue;
       if (e.type === "image" && !e._img) continue; // undecoded image prints nothing
       if ((e.depth.direction || "raised") !== dir) continue;
       const h = String(e.color || "").toUpperCase();
       if (!h || h === baseHex) continue;
-      if (ams.indexOf(h) !== -1) { if (inPal.indexOf(h) === -1) inPal.push(h); }
-      else if (rest.indexOf(h) === -1) rest.push(h);
+      if (ams.indexOf(h) === -1 && rest.indexOf(h) === -1) rest.push(h);
     }
-    inPal.sort((a, b) => ams.indexOf(a) - ams.indexOf(b));
-    const order = inPal.concat(rest);
+    const order = ams.concat(rest);
     // Deckschicht (top layer): the doc-level cover color always takes rank 0 — the
     // workpiece's face (engraved: topmost plate band; raised: full-face slab) — and
     // pushes element colors one step further. Ignored when it matches the base color
@@ -1278,6 +1279,36 @@
   window.buildHeightmapParts = buildHeightmapParts;
   window.buildFrameParts = buildFrameParts;
   window.buildParts = buildParts;
+
+  // Dünne-Stellen-Prüfung: flag printed regions narrower than minWidthMm (nozzle
+  // width). Morphological opening via two chamfer DTs: erode the element mask by
+  // r = minWidth/2 (pixels deeper than r survive as the core), dilate the core
+  // back by r — mask pixels NOT recovered belong to features thinner than 2r
+  // (hairlines, thin necks, small islands). Returns the flag mask on a modest
+  // probe grid plus mm² total for a human-readable verdict.
+  function thinFeatureMask(doc, minWidthMm) {
+    // Probe at the doc's OWN resolution — a coarser grid would drop sub-cell
+    // hairlines from the mask and report "clean" for features the build includes.
+    const grid = gridForBody(doc.body, doc.resolution || 1024);
+    const { cols, rows, pitch } = grid;
+    const comp = composeDesignV2(doc, cols, rows);
+    const n = cols * rows;
+    const mask = new Uint8Array(n);
+    for (let i = 0; i < n; i++) mask[i] = (!comp.isBase[i] && !comp.cutout[i] && comp.owner[i] >= 0) ? 1 : 0;
+    const r = ((minWidthMm || 0.4) / 2) / pitch;   // radius in cells
+    const inv = new Uint8Array(n);
+    for (let i = 0; i < n; i++) inv[i] = mask[i] ? 0 : 1;
+    const dIn = __chamferDT(inv, cols, rows);      // depth inside the mask
+    const core = new Uint8Array(n);
+    for (let i = 0; i < n; i++) core[i] = (mask[i] && dIn[i] > r) ? 1 : 0;
+    const dCore = __chamferDT(core, cols, rows);   // distance to the eroded core
+    const thin = new Uint8Array(n);
+    let count = 0;
+    for (let i = 0; i < n; i++) if (mask[i] && !(dCore[i] <= r)) { thin[i] = 1; count++; }
+    return { thin, cols, rows, pitch, count, areaMm2: count * pitch * pitch };
+  }
+  window.thinFeatureMask = thinFeatureMask;
+
   // Editor UI: preview the AUTO height (Höhe je Farbe) an Einfarbig element falls
   // back to — ignores a set override (the input shows that itself) and applies the
   // engraved carve-budget compression so the shown value matches the build.

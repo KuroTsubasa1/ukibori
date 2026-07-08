@@ -143,6 +143,19 @@
     assertClose(bands[2].zb.mx, T + 3 * step, 1e-4, "blue tops at 3 steps");
   });
 
+  test("auto-heights: palette colors sit at ABSOLUTE slots (consistent with AMS images)", async () => {
+    const img = await imgSolid(20, 20);
+    const d = autoDoc();
+    d.amsPalette = ["#112233", "#FF0000"]; // slot 1 is used by NO element
+    d.elements = [solidEl(img, "#FF0000", 30)];
+    const bands = bandsOf(buildParts(d));
+    assertEqual(bands.length, 2, "unused slot 1 prints as under-layer, red on top");
+    assertEqual(bands[0].hex, "#112233", "level 1 = palette slot 1 (unused → under-layer, like AMS images)");
+    assertClose(bands[0].zb.mx, T + step, 1e-4, "slot-1 under-layer one step thick");
+    assertEqual(bands[1].hex, "#FF0000", "red keeps its ABSOLUTE palette slot 2");
+    assertClose(bands[1].zb.mx, T + 2 * step, 1e-4, "red tops at 2 steps (not compacted to 1)");
+  });
+
   test("auto-heights raised: amsPalette order beats element stacking order", async () => {
     const img = await imgSolid(20, 20);
     const d = autoDoc();

@@ -231,6 +231,9 @@
               <input type="checkbox" id="advCutout" title="Element als Aussparung (Loch) aus dem Objekt herausschneiden"> Als Loch ausschneiden
             </label>
           </div>
+          <div class="adv-field">
+            <button type="button" id="duplicateBtn" class="btn" style="width:100%" title="Ausgewähltes Element duplizieren (Strg/Cmd+D)">⧉ Duplizieren</button>
+          </div>
           <div class="adv-field" id="simpleCenterSection">
             <label class="adv-label">Ausrichten</label>
             <div style="display:flex;gap:6px">
@@ -256,6 +259,10 @@
           <div class="adv-field">
             <label for="advResolution" class="adv-label">Auflösung</label>
             <input type="number" id="advResolution" class="sp-num adv-num-full" step="64" min="64" value="1024" title="Bildauflösung für die Umwandlung (Pixel, höher = genauer/langsamer)">
+          </div>
+          <div class="adv-field">
+            <button type="button" id="thinCheckBtn" class="btn" style="width:100%" title="Markiert gedruckte Bereiche, die schmaler als die Düse (0,4 mm) sind — sie verschwinden im Druck oder werden unsauber.">⚠ Dünne Stellen prüfen</button>
+            <div id="thinCheckStatus" class="hint" aria-live="polite"></div>
           </div>
         </div>
       </details>
@@ -285,6 +292,9 @@
   </aside>
   <section id="preview">
     <div class="view-toggle"><button id="view2dBtn" class="seg seg-active" title="2D-Vorschau">2D</button><button id="view3dBtn" class="seg" title="3D-Vorschau (rotierbar)">3D</button><button id="viewSplitBtn" class="seg" title="2D und 3D nebeneinander">Geteilt</button></div>
+    <div id="layerSliderWrap" hidden>
+      <input type="range" id="layerSlider" min="2" max="100" step="1" value="100" title="Schicht-Vorschau: Modell nur bis zu dieser Höhe anzeigen (100 % = alles)" aria-label="Schicht-Vorschau">
+    </div>
     <canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf."></canvas>
     <canvas id="preview3dCanvas" width="800" height="1000" hidden></canvas>
   </section>
