@@ -2192,6 +2192,9 @@
     // Inspector empty state: dim the panel + show the hint when nothing is selected.
     var insp = document.getElementById("sidebarElement");
     if (insp) insp.classList.toggle("no-selection", disabled);
+    // Umwandlung (Bild → Relief) applies to image elements only.
+    var conv = document.getElementById("convGroup");
+    if (conv) conv.hidden = !(el && el.type === "image");
     // Floating selection toolbar on the stage follows the selection.
     var selTb = document.getElementById("selToolbar");
     if (selTb) selTb.hidden = disabled;
@@ -2698,7 +2701,7 @@
       }
       state.thinOverlay = res.count ? res : null;
       if (status) status.textContent = res.count
-        ? "⚠ ~" + res.areaMm2.toFixed(1) + " mm² schmaler als 0,4 mm — im 2D rot markiert"
+        ? "~" + res.areaMm2.toFixed(1) + " mm² schmaler als 0,4 mm — im 2D rot markiert"
         : "✓ Keine dünnen Stellen gefunden";
       render2D();
     });

@@ -217,6 +217,19 @@
     border-bottom: 1px solid var(--line);
   }
 
+  /* Inspector groups: labeled sections; a group with only hidden fields vanishes */
+  .insp-group {
+    display: flex; flex-direction: column; gap: var(--sp-2);
+    border-top: 1px solid var(--line); padding-top: var(--sp-2);
+  }
+  .insp-group:first-of-type { border-top: 0; padding-top: 0; }
+  .insp-group:not(:has(> :not(.group-label):not([hidden]))) { display: none; }
+  .group-label {
+    font-size: 10.5px; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--faint);
+  }
+
   /* Inspector empty state: hint on, controls dimmed & inert until a selection exists */
   #sidebarElement .element-empty { display: none; padding: 2px 0 4px; }
   #sidebarElement.no-selection .element-empty { display: block; }
