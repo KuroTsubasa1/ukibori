@@ -2300,8 +2300,10 @@
       reliefField.hidden = !showRelief;
       if (showRelief) {
         var rh = document.getElementById("advReliefHeight");
+        var rab = document.getElementById("reliefAutoBtn");
+        var isAutoOverride = doc.autoLayerHeights && em === "solid";
         if (rh) {
-          if (doc.autoLayerHeights && em === "solid") {
+          if (isAutoOverride) {
             var ov = el.depth.heightOverrideMm;
             rh.value = ov != null ? ov : "";
             var autoH = window.autoSolidHeightMm ? window.autoSolidHeightMm(doc, el) : null;
@@ -2310,6 +2312,10 @@
             rh.placeholder = "";
             rh.value = (el.depth && el.depth.heightMm != null) ? el.depth.heightMm : 1;
           }
+        }
+        if (rab) {
+          rab.hidden = !isAutoOverride;                                  // only meaningful in Höhe-je-Farbe mode
+          rab.disabled = isAutoOverride && el.depth.heightOverrideMm == null; // nothing to reset
         }
       }
     }
@@ -2649,6 +2655,20 @@
     e.preventDefault();
     duplicateSelected();
   });
+  // ---- Relief-Höhe: "Auto" entfernt den manuellen Override ----
+  (function () {
+    var b = document.getElementById("reliefAutoBtn");
+    if (b) b.addEventListener("click", function () {
+      var el = selectedEl();
+      if (!el || !el.depth) return;
+      el.depth.heightOverrideMm = null;
+      refreshAdvancedForSelection();
+      renderLayers();
+      render2D();
+      scheduleRebuild3D();
+    });
+  }());
+
   // ---- Bühnen-Hero: Klick öffnet den Bild-Dialog, Drops landen direkt ----
   (function () {
     var hero = document.getElementById("stageHero");
