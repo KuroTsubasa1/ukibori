@@ -600,9 +600,15 @@
       : (ams ? (deckShiftE ? [deckHexE].concat(ams) : ams.slice())
              : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []));
     // Auto layer heights (Höhe je Farbe): engraved Einfarbig elements split the plate
-    // the same way — the whole workpiece becomes solid single-color layers, band k
-    // matching the color at carve rank k (band 1 = shallowest = topmost). Only when
-    // no colorLayers-bands element is in the build (those keep the AMS palette above),
+    // the same way — the whole workpiece becomes solid single-color layers. The FACE
+    // of the plate is band 1 and stays the BASE color: base-colored elements are
+    // flush with it, so the surface prints as ONE solid base-colored layer; rank-k
+    // colors band one step further down, where their carve floors actually sit.
+    // (Without the base band, the rank-0 color capped the plate while flush elements
+    // stayed base-colored — a two-color top layer, and a base-colored Deckschicht
+    // seemed to "vanish".) A valid (non-base) Deckschicht replaces the face — it
+    // already leads the order, so no base band is prepended then. Only when no
+    // colorLayers-bands element is in the build (those keep the AMS palette above),
     // and only if at least one auto-ranked engraved solid element actually prints
     // (a manual heightOverrideMm opts an element out; its color still holds its rank).
     if (!bandHexes.length && doc.autoLayerHeights && !doc.amsSolidBase && bandsElemCount === 0) {
@@ -613,7 +619,10 @@
         (e.depth.direction || "raised") === "engraved" &&
         e.depth.heightOverrideMm == null &&
         order.indexOf(String(e.color || "").toUpperCase()) !== -1);
-      if (hasParticipant) bandHexes = order;
+      if (hasParticipant) {
+        const deckOn = deckHexE && deckHexE !== baseHex; // deck = face → already leads the order
+        bandHexes = deckOn ? order : [baseHex].concat(order);
+      }
     }
     if (bandHexes.length > 0) {
       const N = bandHexes.length;

@@ -239,13 +239,48 @@
     const bands = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0)
       .map(p => ({ name: p.name, hex: hexOf(p.color), zb: zbounds(p.facets) }))
       .sort((a, b) => b.zb.mn - a.zb.mn); // top first
-    assertEqual(bands.length, 2, "one plate band per color");
-    const bt = Math.min(step, (T - minBase) / 2);
-    assertEqual(bands[0].hex, "#FF0000", "top band = rank-0 color (shallowest carve)");
-    assertClose(bands[0].zb.mx, T, 1e-4, "top band reaches the plate top");
-    assertClose(bands[0].zb.mn, T - bt, 1e-4, "top band is one band step thick");
-    assertEqual(bands[1].hex, "#00FF00", "second band = rank-1 color");
-    assertClose(bands[1].zb.mn, T - 2 * bt, 1e-4, "second band below the first");
+    assertEqual(bands.length, 3, "base face band + one band per color");
+    const bt = Math.min(step, (T - minBase) / 3);
+    assertEqual(bands[0].hex, "#101010", "the FACE stays the base color");
+    assertClose(bands[0].zb.mx, T, 1e-4, "face band reaches the plate top");
+    assertClose(bands[0].zb.mn, T - bt, 1e-4, "face band is one band step thick");
+    assertEqual(bands[1].hex, "#FF0000", "rank-0 color one step below the face");
+    assertEqual(bands[2].hex, "#00FF00", "rank-1 color below that");
+    assertClose(bands[2].zb.mn, T - 3 * bt, 1e-4, "third band bottom");
+  });
+
+  test("auto-heights engraved: base-colored elements + base face = ONE solid top layer (user scenario)", async () => {
+    // 3 engraved motifs: black + two base-blue ones; base = same blue. Blue is flush,
+    // black carves — the workpiece face must be SOLID blue (base band + flush floors
+    // share the color AND the z-range), black bands one step below. A Deckschicht in
+    // the base color changes nothing (it IS the face).
+    const img = await imgSolid(20, 20);
+    const mk = (deck) => {
+      const d = autoDoc();
+      d.body.baseColor = "#2244cc";
+      if (deck) d.topLayerColor = "#2244cc"; // same as base → ignored, face stays base
+      d.elements = [solidEl(img, "#2244CC", 12, "engraved"), solidEl(img, "#000000", 30, "engraved"),
+                    solidEl(img, "#2244CC", 48, "engraved")];
+      return d;
+    };
+    for (const deck of [false, true]) {
+      const parts = buildParts(mk(deck));
+      const bands = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0)
+        .map(p => ({ hex: hexOf(p.color), zb: zbounds(p.facets) }))
+        .sort((a, b) => b.zb.mn - a.zb.mn);
+      assertEqual(bands.length, 2, "face + black band (deck=" + deck + ")");
+      assertEqual(bands[0].hex, "#2244CC", "face band = base blue (deck=" + deck + ")");
+      assertClose(bands[0].zb.mx, T, 1e-4, "face at the top");
+      assertEqual(bands[1].hex, "#000000", "black one step below the face");
+      // flush blue floors sit exactly IN the face band's z-range → the top layer is one color
+      const flushFloors = parts.filter(p => p.name.indexOf("farbe-") === 0 && hexOf(p.color) === "#2244CC");
+      assert(flushFloors.length >= 1, "flush blue floors present");
+      for (const f of flushFloors) {
+        const zb = zbounds(f.facets);
+        assertClose(zb.mx, T, 1e-4, "flush floor tops at the plate face");
+        assert(zb.mn >= bands[0].zb.mn - 1e-4 || zb.mn >= T - floor - 1e-4, "flush floor inside the face zone");
+      }
+    }
   });
 
   test("auto-heights engraved: no plate bands when off, raised-only, or all overridden", async () => {
@@ -270,7 +305,7 @@
     d.elements = [solidEl(img, "#FF0000", 15, "engraved"), solidEl(img, "#00FF00", 45, "engraved")];
     const parts = buildParts(d);
     const bands = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0);
-    assertEqual(bands.length, 2, "plate bands present");
+    assertEqual(bands.length, 3, "plate bands present (base face + 2 colors)");
     let x0 = Infinity, x1 = -Infinity;
     for (const p of bands) for (const t of p.facets) for (const pt of t) { if (pt[0] < x0) x0 = pt[0]; if (pt[0] > x1) x1 = pt[0]; }
     assert(x0 <= 1 && x1 >= 59, "bands span the whole plate incl. the border ring: x∈[" + x0.toFixed(1) + "," + x1.toFixed(1) + "]");
