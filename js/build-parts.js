@@ -384,7 +384,18 @@
     }
     const baseHex = String(doc.body.baseColor || "").toUpperCase();
     const hex = String(el.color || "").toUpperCase();
-    if (hex === baseHex) return 0; // same color as the plate → same height as the plate
+    if (hex === baseHex) {
+      // Flush with the plate FACE. On engraved plates a valid Deckschicht IS the
+      // face — base-colored elements then carve through it and rest one band down,
+      // level with the base band under the deck. (Raised decks need no depth: the
+      // punch-through hole already exposes the plate one band below the deck.)
+      const top = doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null;
+      if (!(top && top !== baseHex) || (el.depth.direction || "raised") !== "engraved") return 0;
+      const ord = __autoSolidOrder(doc, "engraved");
+      let s = Math.max(1, doc.colorStepLayers || 2) * layerH;
+      if (maxRecessMm != null && ord.length > 0) s = Math.min(s, maxRecessMm / ord.length);
+      return s;
+    }
     const order = __autoSolidOrder(doc, el.depth.direction || "raised");
     const rank = order.indexOf(hex);
     if (rank < 0) return null; // element itself prints nothing (hidden/cutout/undecoded)
@@ -613,15 +624,20 @@
     // (a manual heightOverrideMm opts an element out; its color still holds its rank).
     if (!bandHexes.length && doc.autoLayerHeights && !doc.amsSolidBase && bandsElemCount === 0) {
       const order = __autoSolidOrder(doc, "engraved");
-      const hasParticipant = order.length && doc.elements.some((e) =>
-        e && e.depth && e.depth.mode === "solid" && !e._hidden && !e.cutout &&
-        !(e.type === "image" && !e._img) &&
-        (e.depth.direction || "raised") === "engraved" &&
-        e.depth.heightOverrideMm == null &&
-        order.indexOf(String(e.color || "").toUpperCase()) !== -1);
+      const deckValidE = !!(deckHexE && deckHexE !== baseHex);
+      const hasParticipant = order.length && doc.elements.some((e) => {
+        if (!e || !e.depth || e.depth.mode !== "solid" || e._hidden || e.cutout) return false;
+        if (e.type === "image" && !e._img) return false;
+        if ((e.depth.direction || "raised") !== "engraved") return false;
+        if (e.depth.heightOverrideMm != null) return false;
+        const h = String(e.color || "").toUpperCase();
+        // base-colored elements participate when a deck exists (they carve through it)
+        return order.indexOf(h) !== -1 || (deckValidE && h === baseHex);
+      });
       if (hasParticipant) {
-        const deckOn = deckHexE && deckHexE !== baseHex; // deck = face → already leads the order
-        bandHexes = deckOn ? order : [baseHex].concat(order);
+        // Valid deck = band 1 (the face); the BASE band sits directly below it —
+        // base-colored elements carve through the deck and level with that band.
+        bandHexes = deckValidE ? [order[0], baseHex].concat(order.slice(1)) : [baseHex].concat(order);
       }
     }
     if (bandHexes.length > 0) {

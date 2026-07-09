@@ -346,10 +346,11 @@
     const parts = buildParts(d);
     const pb = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0)
       .map(p => ({ hex: hexOf(p.color), zb: zbounds(p.facets) })).sort((a, b) => b.zb.mn - a.zb.mn);
-    assertEqual(pb.length, 3, "deck + one band per color");
+    assertEqual(pb.length, 4, "deck + base band + one band per color");
     assertEqual(pb[0].hex, "#FFFFFF", "top band = Deckschicht");
+    assertEqual(pb[1].hex, "#101010", "base band directly below the deck");
     assertClose(pb[0].zb.mx, T, 1e-4, "deck band at the plate top");
-    assertClose(pb[0].zb.mn, T - Math.min(step, (T - 2.4) / 3), 1e-4, "band thickness compressed to the budget");
+    assertClose(pb[0].zb.mn, T - Math.min(step, (T - 2.4) / 4), 1e-4, "band thickness compressed to the budget");
     const mr = 0.2, s = Math.min(step, mr / 3); // deck occupies rank 0 → divisor is 3, NOT 2
     const bu2 = (dd) => T - Math.min(dd, mr) - floor;
     const byColor = {}; parts.filter(p => p.name.indexOf("farbe-") === 0).forEach(p => { byColor[hexOf(p.color)] = zbounds(p.facets).mn; });
@@ -416,6 +417,32 @@
     const byColor = {}; parts.filter(p => p.name.indexOf("farbe-") === 0).forEach(p => { byColor[hexOf(p.color)] = zbounds(p.facets).mn; });
     assertClose(byColor["#000000"], bu2(2 * s), 1e-4, "palette layer 1 carves through the deck");
     assertClose(byColor["#F0F0F0"], bu2(3 * s), 1e-4, "palette layer 2 one compressed step deeper — distinct");
+  });
+
+  test("auto-heights engraved: deck ≠ base → deck ONE band on top, flush level one band down (user scenario)", async () => {
+    // base blue, deck yellow, black motif + blue (base-colored) motifs: expected
+    // stack top-down = yellow (deck) · blue (base + flush floors) · black.
+    const img = await imgSolid(20, 20);
+    const d = autoDoc();
+    d.body.baseColor = "#2244cc";
+    d.topLayerColor = "#FFCC00";
+    d.elements = [solidEl(img, "#2244CC", 12, "engraved"), solidEl(img, "#000000", 30, "engraved"),
+                  solidEl(img, "#2244CC", 48, "engraved")];
+    const parts = buildParts(d);
+    const pb = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0)
+      .map(p => ({ hex: hexOf(p.color), zb: zbounds(p.facets) })).sort((a, b) => b.zb.mn - a.zb.mn);
+    assertEqual(pb.length, 3, "deck + base + black bands");
+    assertEqual(pb[0].hex, "#FFCC00", "deck is the topmost band");
+    assertEqual(pb[1].hex, "#2244CC", "base band directly below the deck");
+    assertEqual(pb[2].hex, "#000000", "black below the base level");
+    // blue flush floors carve through the deck: tops at T - 1*step', inside the base band zone
+    const sD = Math.min(step, maxRecess / 2); // order = [deck, black] → divisor 2
+    const blueFloors = parts.filter(p => p.name.indexOf("farbe-") === 0 && hexOf(p.color) === "#2244CC");
+    assert(blueFloors.length >= 1, "flush blue floors present");
+    for (const f of blueFloors) assertClose(zbounds(f.facets).mx, T - sD, 1e-4, "flush floor one band below the deck");
+    // black carves one step deeper than the flush level
+    const black = parts.filter(p => p.name.indexOf("farbe-") === 0 && hexOf(p.color) === "#000000")[0];
+    assertClose(zbounds(black.facets).mx, T - 2 * sD, 1e-4, "black floor below the flush level");
   });
 
   test("auto-heights Deckschicht: engraved-direction heightmap keeps its z-space (no deck overlap)", async () => {
