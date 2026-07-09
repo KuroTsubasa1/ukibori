@@ -16,7 +16,6 @@
     });
   }
 
-  const VIEW_KEY = "ukibori.view";
   const SNAP_KEY = "ukibori.snap";
   const doc = window.defaultDoc();
   const cv = document.getElementById("canvas2d");
@@ -51,16 +50,6 @@
   let defaultDirection = "raised";
 
   // ---- View toggle (Task 1, preserved) ----
-  function getView() { return document.body.classList.contains("mode-advanced") ? "advanced" : "simple"; }
-  function setView(v) {
-    const adv = v === "advanced";
-    document.body.classList.toggle("mode-advanced", adv);
-    document.getElementById("viewSimple").classList.toggle("seg-active", !adv);
-    document.getElementById("viewAdvanced").classList.toggle("seg-active", adv);
-    document.getElementById("sidebarSimple").hidden = adv;
-    document.getElementById("sidebarAdvanced").hidden = !adv;
-    try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
-  }
 
   // ---- visibleDoc: filter _hidden elements for 3D preview + export ----
   function visibleDoc() {
@@ -70,10 +59,72 @@
   // ---- 3D rebuild (debounced, 120 ms) ----
   let _rebuild3DTimer = null;
   function scheduleRebuild3D() {
+    noteDocChanged();
     if (!window.preview3d || !window.preview3d.isActive()) return;
     clearTimeout(_rebuild3DTimer);
     _rebuild3DTimer = setTimeout(function () { window.preview3d.rebuild(); }, 120);
   }
+
+  // ---- Undo/Redo (Cmd/Ctrl+Z, +Shift = Wiederholen) ------------------------
+  // Snapshot stack over the doc (serializeProject strips runtime fields). No
+  // per-handler wiring: render2D/scheduleRebuild3D — the universal post-mutation
+  // calls — poke noteDocChanged, which debounces and pushes only when the
+  // serialized doc actually differs (selection-only renders and drag frames
+  // collapse into one entry). Restore rides the Open path (resetDocTo), which
+  // re-decodes images and re-inits the panels.
+  var _undo = { stack: [], redo: [], cap: 30, timer: null, muted: false };
+  function noteDocChanged() {
+    if (_undo.muted) return;
+    clearTimeout(_undo.timer);
+    _undo.timer = setTimeout(function () {
+      var snap;
+      try { snap = window.serializeProject(doc); } catch (e) { return; }
+      if (snap !== _undo.stack[_undo.stack.length - 1]) {
+        _undo.stack.push(snap);
+        if (_undo.stack.length > _undo.cap) _undo.stack.shift();
+        _undo.redo = [];
+        // The doc really changed → any Dünne-Stellen overlay is stale now.
+        if (state.thinOverlay) {
+          state.thinOverlay = null;
+          var ts = document.getElementById("thinCheckStatus");
+          if (ts) ts.textContent = "";
+          render2D();
+        }
+      }
+    }, 500);
+  }
+  function _undoRestore(json) {
+    _undo.muted = true;
+    try {
+      resetDocTo(window.migrateProject(window.deserializeProject(json)));
+    } finally {
+      // Outlive the debounce + async image decodes; a stray late compare is
+      // harmless anyway (restored doc serializes identical to the stack top).
+      setTimeout(function () { _undo.muted = false; }, 700);
+    }
+  }
+  function undoAction() {
+    clearTimeout(_undo.timer);
+    var cur;
+    try { cur = window.serializeProject(doc); } catch (e) { return; }
+    if (cur !== _undo.stack[_undo.stack.length - 1]) _undo.stack.push(cur); // pending edit → redo can return here
+    if (_undo.stack.length < 2) return;
+    _undo.redo.push(_undo.stack.pop());
+    _undoRestore(_undo.stack[_undo.stack.length - 1]);
+  }
+  function redoAction() {
+    if (!_undo.redo.length) return;
+    var snap = _undo.redo.pop();
+    _undo.stack.push(snap);
+    _undoRestore(snap);
+  }
+  window.addEventListener("keydown", function (e) {
+    if (!(e.metaKey || e.ctrlKey) || String(e.key).toLowerCase() !== "z") return;
+    var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable)) return; // native text undo
+    e.preventDefault();
+    if (e.shiftKey) redoAction(); else undoAction();
+  });
 
   // ---- Element-field helpers (DRY refactor) ----
 
@@ -113,7 +164,7 @@
   // Fits the full domain (plate ∪ washer bbox) into the preview element.
   // Also updates state.viewX0/viewY0 from docDomain so all conversions stay in sync.
   function fitScale() {
-    const pad = 24;
+    const pad = 12; // slim stage padding — the isolated 2D view should fill like 3D
     const preview = document.getElementById("preview");
     // In split mode the 2D canvas occupies half the preview width. The canvas is now
     // aspect-preserving (flex:0 1 auto), so cv.clientWidth follows the buffer — using it
@@ -461,7 +512,7 @@
   }
 
   function wireAmsPalette() {
-    var cont = document.getElementById('advPaletteSwatch');
+    var cont = document.getElementById('amsPaletteHost');
     if (!cont) return;
     var refresh = function () { renderAmsPalette(cont); render2D(); scheduleRebuild3D(); };
     // Recolor a layer in place (preserve order). Do NOT rebuild the swatch DOM — that would
@@ -528,11 +579,13 @@
     var colorStyleField = document.getElementById('colorStyleField');
     if (colorStyleField) colorStyleField.hidden = !isColorLayers;
     if (!isColorLayers) { cont.innerHTML = ''; return; }
-    // AMS shared palette active for a bands element → show the doc-level filament-layer editor
-    // (add / recolor / drag-reorder / remove) in place of the per-element swatches.
+    // AMS shared palette active for a bands element → the doc-level filament-layer
+    // editor lives in the Ebenen group (renderAmsPaletteField); hide the per-element
+    // swatches, they would only duplicate it.
     var styleNow = (el.depth && el.depth.colorLayerStyle) || ((el.depth && el.depth.flush) ? 'bands' : 'stepped');
     if (styleNow === 'bands' && Array.isArray(doc.amsPalette) && doc.amsPalette.length) {
-      renderAmsPalette(cont);
+      field.hidden = true;
+      cont.innerHTML = '';
       return;
     }
     // Use the v1 shim to call __orderedNaturalHexes.
@@ -719,6 +772,7 @@
 
   // ---- Main render (exported as render2D) ----
   function render2D() {
+    noteDocChanged();
     if (!cv) return;
     // B3: fitScale is NOT called here; it is called on initial load, window resize,
     // and when body size (sizeW/sizeH) changes. This prevents re-zoom on every control change.
@@ -846,6 +900,33 @@
       ctx.setLineDash([]);
       ctx.restore();
     }
+
+    drawThinOverlay(ctx);
+  }
+
+  // ---- Dünne-Stellen-Overlay (red cells from the last thinFeatureMask run) ----
+  // The probe grid covers the body box [0..W, 0..H] mm; it is rasterized once
+  // into an offscreen canvas and blitted over the design at the current zoom.
+  function drawThinOverlay(ctx) {
+    var ov = state.thinOverlay;
+    if (!ov) return;
+    if (!ov._canvas) {
+      var oc = document.createElement("canvas");
+      oc.width = ov.cols; oc.height = ov.rows;
+      var octx = oc.getContext("2d");
+      var od = octx.createImageData(ov.cols, ov.rows);
+      for (var i = 0; i < ov.thin.length; i++) {
+        if (!ov.thin[i]) continue;
+        od.data[i * 4] = 224; od.data[i * 4 + 1] = 32; od.data[i * 4 + 2] = 32; od.data[i * 4 + 3] = 190;
+      }
+      octx.putImageData(od, 0, 0);
+      ov._canvas = oc;
+    }
+    var w = ov.cols * ov.pitch, h = ov.rows * ov.pitch; // mm covered by the probe grid
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(ov._canvas, mmX(0), mmY(0), w * state.scale, h * state.scale);
+    ctx.restore();
   }
 
   // ---- Hit test: pointer canvas-px → element/handle ----
@@ -1085,10 +1166,18 @@
       const ang = Math.atan2(py - mmY(el.cyMm), px - mmX(el.cxMm)) * 180 / Math.PI + 90;
       el.rotationDeg = Math.round(ang);
     } else {
-      // Corner handle: scale width/height symmetrically.
+      // Corner handle: scale width/height symmetrically. Shift = proportional —
+      // keep the aspect ratio from the drag start, following the dominant axis.
       const [lx, ly] = elemToLocal(el, px, py, s);
-      el.wMm = Math.max(2, Math.abs(lx) * 2 / s);
-      el.hMm = Math.max(2, Math.abs(ly) * 2 / s);
+      if (e.shiftKey && drag.start.w > 0 && drag.start.h > 0) {
+        let k = Math.max((Math.abs(lx) * 2 / s) / drag.start.w, (Math.abs(ly) * 2 / s) / drag.start.h);
+        k = Math.max(k, 2 / drag.start.w, 2 / drag.start.h); // 2mm floor on both axes, ratio intact
+        el.wMm = drag.start.w * k;
+        el.hMm = drag.start.h * k;
+      } else {
+        el.wMm = Math.max(2, Math.abs(lx) * 2 / s);
+        el.hMm = Math.max(2, Math.abs(ly) * 2 / s);
+      }
     }
     render2D();
   });
@@ -1126,7 +1215,7 @@
   });
 
   // ---- Add image from data URL ----
-  function addImageFromDataURL(dataURL) {
+  function addImageFromDataURL(dataURL, fileName) {
     const img = new Image();
     img.onload = function () {
       const body = doc.body;
@@ -1138,6 +1227,8 @@
         src: dataURL, _img: img,
         cxMm: body.widthMm / 2, cyMm: body.heightMm / 2,
         wMm, hMm,
+        // Dateiname (ohne Endung) — beschriftet die Ebene und liefert den Export-Namen.
+        name: fileName ? String(fileName).replace(/\.[^.]+$/, "") : undefined,
       });
       el.depth.direction = defaultDirection;
       doc.elements.push(el);
@@ -1157,7 +1248,7 @@
     const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
     if (!file || !file.type.startsWith("image/")) return;
     const rd = new FileReader();
-    rd.onload = function () { addImageFromDataURL(rd.result); };
+    rd.onload = function () { addImageFromDataURL(rd.result, file.name); };
     rd.readAsDataURL(file);
   }
   function handleDragOver(e) { e.preventDefault(); }
@@ -1215,6 +1306,11 @@
       return;
     }
 
+    if (e.key === "Delete" || e.key === "Backspace") { // remove the selected element
+      if (state.selectedId != null) { e.preventDefault(); deleteSelected(); }
+      return;
+    }
+
     // --- Arrow nudge of the selected element ---
     var dx = 0, dy = 0;
     if (e.key === "ArrowLeft") dx = -1;
@@ -1246,7 +1342,7 @@
       const f = e.target.files && e.target.files[0];
       if (!f) return;
       const rd = new FileReader();
-      rd.onload = function () { addImageFromDataURL(rd.result); };
+      rd.onload = function () { addImageFromDataURL(rd.result, f.name); };
       rd.readAsDataURL(f);
       addImageInput.value = "";
     });
@@ -1282,6 +1378,8 @@
     }
     canvas2d.hidden = (mode === "3d");
     canvas3d.hidden = (mode === "2d");
+    var lsw = document.getElementById("layerSliderWrap");
+    if (lsw) lsw.hidden = (mode === "2d"); // Schicht-Vorschau only makes sense with 3D visible
 
     // 2. Button active state.
     document.getElementById("view2dBtn").classList.toggle("seg-active", mode === "2d");
@@ -1336,6 +1434,13 @@
   }
 
   document.getElementById("exportBtn").addEventListener("click", function () {
+    // Default the file name from the first imported element (its source file name);
+    // a user-typed name is never overwritten (only the shipped default/empty is).
+    var nameEl = document.getElementById("exportName");
+    if (nameEl && (!nameEl.value.trim() || nameEl.value === "ukibori")) {
+      var named = doc.elements.find(function (e) { return e.name; });
+      if (named) nameEl.value = named.name;
+    }
     document.getElementById("exportModal").removeAttribute("hidden");
     setExportStatus("");
   });
@@ -1560,23 +1665,22 @@
     doc.body.shape = shape;
     var seg = shape === "rect" ? "Rect" : shape === "circle" ? "Circle" : shape === "free" ? "Free" : "Image";
     setSegActive("shapeSeg", "shape" + seg);
-    setSegActive("advShapeSeg", "advShape" + seg);      // Advanced twin
     var isImage = shape === "image";
     // Plate-free "Bild": the image IS the object → hide all plate chrome (border/frame/corner
-    // + plate size). border: free only; frame: rect/circle only; corner: rect only.
-    setHidden("borderField", shape !== "free");   setHidden("advBorderField", shape !== "free");
-    setHidden("frameField", shape === "free" || isImage);  setHidden("advFrameField", shape === "free" || isImage);
-    setHidden("cornerField", shape !== "rect");   setHidden("advCornerField", shape !== "rect");
-    setHidden("simpleSizeSection", isImage);      setHidden("advSizeRow", isImage);
+    // + plate size). border: free only; frame: rect/circle/free; corner: rect only.
+    setHidden("borderField", shape !== "free");
+    setHidden("frameField", isImage); // rect/circle/free all support the Rand-Rahmen
+    setHidden("cornerField", shape !== "rect");
+    setHidden("simpleSizeSection", isImage);
     // A Bild object has no plate → mount (Befestigung) and plate-centered "Ausrichten" are
     // meaningless. Force mount off (so 2D marker, hit-test, and 3D geometry all agree) and hide
     // both control groups. Non-image shapes leave the mount untouched.
     if (isImage && doc.mount && doc.mount.type !== "none") {
       doc.mount.type = "none";
-      setSegActive("mountSeg", "mountNone"); setSegActive("advMountSeg", "advMountNone");
+      setSegActive("mountSeg", "mountNone");
     }
-    setHidden("simpleMountSection", isImage);     setHidden("advMountField", isImage);
-    setHidden("simpleCenterSection", isImage);    setHidden("advCenterField", isImage);
+    setHidden("simpleMountSection", isImage);
+    setHidden("simpleCenterSection", isImage);
     render2D();
     scheduleRebuild3D();
   }
@@ -1584,67 +1688,48 @@
   document.getElementById("shapeCircle").addEventListener("click", function () { applyShape("circle"); });
   document.getElementById("shapeFree").addEventListener("click", function () { applyShape("free"); });
   document.getElementById("shapeImage").addEventListener("click", function () { applyShape("image"); });
-  document.getElementById("advShapeRect").addEventListener("click", function () { applyShape("rect"); });
-  document.getElementById("advShapeCircle").addEventListener("click", function () { applyShape("circle"); });
-  document.getElementById("advShapeFree").addEventListener("click", function () { applyShape("free"); });
-  document.getElementById("advShapeImage").addEventListener("click", function () { applyShape("image"); });
 
-  // Wire a Simple+Advanced number-input pair to one apply(v); each mirrors the other's value
-  // so the two sidebars stay in sync (only the twin is written, never self → no cursor jumps).
-  function bindTwinNum(idA, idB, min, apply) {
-    [[idA, idB], [idB, idA]].forEach(function (p) {
-      var node = document.getElementById(p[0]);
-      if (!node) return;
-      node.addEventListener("input", function () {
-        var v = parseFloat(node.value);
-        if (isNaN(v) || v < min) return;
-        apply(v);
-        var twin = document.getElementById(p[1]);
-        if (twin) twin.value = node.value;
-      });
+  // Wire a number/color input to apply(v).
+  function bindNum(id, min, apply) {
+    var node = document.getElementById(id);
+    if (!node) return;
+    node.addEventListener("input", function () {
+      var v = parseFloat(node.value);
+      if (isNaN(v) || v < min) return;
+      apply(v);
     });
   }
-  function bindTwinColor(idA, idB, apply) {
-    [[idA, idB], [idB, idA]].forEach(function (p) {
-      var node = document.getElementById(p[0]);
-      if (!node) return;
-      node.addEventListener("input", function () {
-        apply(node.value);
-        var twin = document.getElementById(p[1]);
-        if (twin) twin.value = node.value;
-      });
-    });
+  function bindColor(id, apply) {
+    var node = document.getElementById(id);
+    if (!node) return;
+    node.addEventListener("input", function () { apply(node.value); });
   }
 
   // Eckenradius (shown only for Rechteck)
-  bindTwinNum("cornerMm", "advCornerMm", 0, function (v) {
+  bindNum("cornerMm", 0, function (v) {
     doc.body.cornerRadiusMm = v; render2D(); scheduleRebuild3D();
   });
 
   // Border (shown only for Free)
-  bindTwinNum("borderMm", "advBorderMm", 0, function (v) {
+  bindNum("borderMm", 0, function (v) {
     doc.body.borderMm = v; scheduleRebuild3D();
   });
 
-  // Rand-Rahmen (shown for Rechteck/Kreis; engine ignores it for Frei)
+  // Rand-Rahmen (Rechteck/Kreis/Frei; 'Bild' objects have no plate to frame)
   function ensureFrame() {
     if (!doc.body.frame) doc.body.frame = window.defaultFrame ? window.defaultFrame() : { widthMm: 0, heightMm: 2, color: "#000000" };
     return doc.body.frame;
   }
-  bindTwinNum("frameMm", "advFrameMm", 0, function (v) {
+  bindNum("frameMm", 0, function (v) {
     ensureFrame().widthMm = v; render2D(); scheduleRebuild3D();
   });
-  bindTwinColor("frameColor", "advFrameColor", function (val) {
+  bindColor("frameColor", function (val) {
     ensureFrame().color = val; render2D(); scheduleRebuild3D();
   });
-  // Höhe in the Simple row; kept in sync with the Advanced #advFrameHeight field
-  // (both write body.frame.heightMm).
   document.getElementById("frameHeightMm").addEventListener("input", function () {
     var v = parseFloat(this.value);
     if (!isNaN(v) && v >= 0) {
       ensureFrame().heightMm = v;
-      var adv = document.getElementById("advFrameHeight");
-      if (adv) adv.value = v;
       render2D();
       scheduleRebuild3D();
     }
@@ -1687,7 +1772,6 @@
     }
     var seg = type === "none" ? "None" : type === "hole" ? "Hole" : "Loop";
     setSegActive("mountSeg", "mount" + seg);
-    setSegActive("advMountSeg", "advMount" + seg);      // Advanced twin
     // Re-fit canvas: domain may have expanded/contracted.
     fitScale();
     render2D();
@@ -1696,15 +1780,12 @@
   document.getElementById("mountNone").addEventListener("click", function () { applyMount("none", { snap: true }); });
   document.getElementById("mountHole").addEventListener("click", function () { applyMount("hole", { snap: true }); });
   document.getElementById("mountLoop").addEventListener("click", function () { applyMount("loop", { snap: true }); });
-  document.getElementById("advMountNone").addEventListener("click", function () { applyMount("none", { snap: true }); });
-  document.getElementById("advMountHole").addEventListener("click", function () { applyMount("hole", { snap: true }); });
-  document.getElementById("advMountLoop").addEventListener("click", function () { applyMount("loop", { snap: true }); });
 
-  // Size W/H (Simple sizeW/sizeH ↔ Advanced advSizeW/advSizeH)
-  bindTwinNum("sizeW", "advSizeW", 5, function (v) {
+  // Size W/H
+  bindNum("sizeW", 5, function (v) {
     doc.body.widthMm = v; fitScale(); render2D(); scheduleRebuild3D(); // B3: re-fit on dim change
   });
-  bindTwinNum("sizeH", "advSizeH", 5, function (v) {
+  bindNum("sizeH", 5, function (v) {
     doc.body.heightMm = v; fitScale(); render2D(); scheduleRebuild3D();
   });
 
@@ -1725,7 +1806,7 @@
     render2D();
     scheduleRebuild3D();
     // Auto-focus the visible text input so the user can type immediately.
-    var f = (getView() === "advanced") ? document.getElementById("advText") : document.getElementById("simpleText");
+    var f = document.getElementById("advText");
     if (f) { f.value = selectedEl() && selectedEl().text || ""; f.focus(); if (f.select) f.select(); }
   }
 
@@ -1779,19 +1860,13 @@
 
   // Bind Advanced buttons (guard each getElementById in case markup is missing).
   (function () {
-    var ib = document.getElementById("addImageBtnAdv"); if (ib) ib.addEventListener("click", addImageAction);
-    var tb = document.getElementById("addTextBtnAdv");  if (tb) tb.addEventListener("click", addTextAction);
-    var qb = document.getElementById("addQrBtnAdv");    if (qb) qb.addEventListener("click", addQrAction);
   }());
 
   // ---- Remove Background (KI) ----
-  // Advanced twin forwards to the Simple handler (which updates both sidebars via the proxies).
-  document.getElementById("removeBgBtnAdv").addEventListener("click", function () { document.getElementById("removeBgBtn").click(); });
   document.getElementById("removeBgBtn").addEventListener("click", function () {
-    // Proxies so btn.disabled / statusEl.textContent update BOTH sidebars' controls,
-    // keeping the (special-char) body below untouched.
-    var btn = { set disabled(v) { ["removeBgBtn", "removeBgBtnAdv"].forEach(function (id) { var n = document.getElementById(id); if (n) n.disabled = v; }); } };
-    var statusEl = { set textContent(v) { ["bgStatus", "bgStatusAdv"].forEach(function (id) { var n = document.getElementById(id); if (n) n.textContent = v; }); } };
+    // Setter proxies kept so the (special-char) body below stays untouched.
+    var btn = { set disabled(v) { var n = document.getElementById("removeBgBtn"); if (n) n.disabled = v; } };
+    var statusEl = { set textContent(v) { var n = document.getElementById("bgStatus"); if (n) n.textContent = v; } };
 
     var el = doc.elements.find(function (e) { return e.id === state.selectedId; });
     if (!el || el.type !== "image" || !el._img) {
@@ -1909,6 +1984,13 @@
   }
 
   // Build a single layer <li> for element at index i. Clicking triggers renderLayers().
+  // Monochrome inline icons (stroke = currentColor) for dynamic row buttons.
+  var ICONS = {
+    eye: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8 11.9 12.2 8 12.2 1.8 8 1.8 8Z"/><circle cx="8" cy="8" r="1.9"/></svg>',
+    eyeOff: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8 11.9 12.2 8 12.2 1.8 8 1.8 8Z"/><path d="M3 13.5 13 2.5"/></svg>',
+    trash: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.8 4.3h10.4"/><path d="M6.2 4.3V3a.8.8 0 0 1 .8-.8h2a.8.8 0 0 1 .8.8v1.3"/><path d="M4.3 4.3l.6 8.6a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.6"/></svg>'
+  };
+
   function buildLayerRow(i) {
     var el = doc.elements[i];
     var li = document.createElement("li");
@@ -1923,12 +2005,18 @@
     var isQR = el.type === "qr" || (el.type === "image" && el.qrData);
     var typeLabel = el.type === "text" ? "Text" : isQR ? "QR" : "Bild";
     nameSpan.textContent = typeLabel + " " + (i + 1);
+    if (el.name) nameSpan.textContent = el.name;                       // imported file name
     if (el.type === 'text' && el.text) nameSpan.textContent = '„' + el.text + '“';
 
     var vis = document.createElement("button");
     vis.className = "adv-lbtn";
-    vis.textContent = el._hidden ? "🙈" : "👁";
+    vis.innerHTML = el._hidden ? ICONS.eyeOff : ICONS.eye;
     vis.title = el._hidden ? "Einblenden" : "Ausblenden";
+
+    var dup = document.createElement("button");
+    dup.className = "adv-lbtn";
+    dup.textContent = "⧉";
+    dup.title = "Ebene duplizieren";
 
     var up = document.createElement("button");
     up.className = "adv-lbtn";
@@ -1942,10 +2030,75 @@
 
     var del = document.createElement("button");
     del.className = "adv-lbtn";
-    del.textContent = "🗑";
+    del.innerHTML = ICONS.trash;
     del.title = "Löschen";
 
-    li.append(nameSpan, vis, up, dn, del);
+    // Print-info badge: at what height/mode this layer prints. Solid rows also
+    // get a color dot (the thumb shows the source image, not the print color).
+    var d = el.depth || {};
+    var dirArrow = (d.direction === "engraved") ? "↓" : "↑";
+    var badge = document.createElement("span");
+    badge.className = "layer-badge";
+    var pinned = false;
+    if (d.mode === "heightmap") {
+      badge.textContent = dirArrow + " Relief";
+      badge.title = "Höhenrelief aus Bildhelligkeit";
+    } else if (d.mode === "colorLayers") {
+      var st = colorStyleOf(el);
+      badge.textContent = dirArrow + " " + (st === "bands" ? "AMS" : st === "flush" ? "Fläche" : "Gestuft");
+      badge.title = "Farbebenen (" + badge.textContent.slice(2) + ")";
+    } else {
+      var hmm = null;
+      if (doc.autoLayerHeights) {
+        if (d.heightOverrideMm != null) { hmm = d.heightOverrideMm; pinned = true; }
+        else if (window.autoSolidHeightMm) hmm = window.autoSolidHeightMm(doc, el);
+      }
+      if (hmm == null) hmm = (d.heightMm != null ? d.heightMm : 1);
+      badge.textContent = hmm <= 0 ? "bündig" : dirArrow + " " + (Math.round(hmm * 100) / 100) + (pinned ? " ✎" : "");
+      badge.title = hmm <= 0
+        ? "Bündig mit der Platte (Grundfarbe oder Höhe 0)"
+        : "Druckhöhe " + (Math.round(hmm * 100) / 100) + " mm" + (pinned ? " — manuell fixiert" : d.direction === "engraved" ? " vertieft" : " erhaben");
+    }
+    if ((d.mode || "solid") === "solid" && el.color) {
+      var dot = document.createElement("span");
+      dot.className = "layer-dot";
+      dot.style.background = el.color;
+      dot.title = "Druckfarbe " + el.color;
+      li.append(nameSpan, dot, badge, vis, dup, up, dn, del);
+    } else {
+      li.append(nameSpan, badge, vis, dup, up, dn, del);
+    }
+
+    // Drag to reorder (same pattern as the AMS palette rows). Ids as strings —
+    // loaded docs may carry non-numeric ids.
+    li.draggable = true;
+    li.addEventListener("dragstart", function (e) {
+      e.dataTransfer.setData("text/plain", String(el.id));
+      e.dataTransfer.effectAllowed = "move";
+      li.classList.add("dragging");
+    });
+    li.addEventListener("dragend", function () { li.classList.remove("dragging"); });
+    li.addEventListener("dragover", function (e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      li.classList.add("drag-over");
+    });
+    li.addEventListener("dragleave", function () { li.classList.remove("drag-over"); });
+    li.addEventListener("drop", function (e) {
+      e.preventDefault();
+      e.stopPropagation(); // never bubble into the file-drop chain
+      li.classList.remove("drag-over");
+      var fromId = e.dataTransfer.getData("text/plain");
+      if (!fromId || fromId === String(el.id)) return;
+      var from = doc.elements.findIndex(function (x) { return String(x.id) === fromId; });
+      var to = doc.elements.findIndex(function (x) { return x.id === el.id; });
+      if (from === -1 || to === -1) return;
+      var moved = doc.elements.splice(from, 1)[0];
+      doc.elements.splice(to, 0, moved); // take the drop target's position
+      renderLayers();
+      render2D();
+      scheduleRebuild3D();
+    });
 
     li.addEventListener("click", function (e) {
       if (e.target.classList.contains("adv-lbtn")) return;
@@ -1953,6 +2106,11 @@
       refreshAdvancedForSelection();
       renderLayers();
       render2D();
+    });
+
+    dup.addEventListener("click", function (e) {
+      e.stopPropagation();
+      duplicateElement(el);
     });
 
     vis.addEventListener("click", function (e) {
@@ -2012,16 +2170,15 @@
     }
   }
 
-  // Shared entry point: refresh both the Advanced and Simple layer lists.
+  // Refresh the (single) layer list. Also drives the stage hero: a big
+  // drop-invitation while the project is empty.
   function renderLayers() {
     populateLayersList(
       document.getElementById("advLayers"),
       document.getElementById("advLayersEmpty")
     );
-    populateLayersList(
-      document.getElementById("simpleLayers"),
-      document.getElementById("simpleLayersEmpty")
-    );
+    var hero = document.getElementById("stageHero");
+    if (hero) hero.hidden = doc.elements.length > 0;
   }
 
   // Backward-compat alias so existing call sites (and window.editor export) still work.
@@ -2032,6 +2189,17 @@
     var adv = document.getElementById("sidebarAdvanced");
     var el = doc.elements.find(function (e) { return e.id === state.selectedId; }) || null;
     var disabled = !el;
+    // Inspector empty state: dim the panel + show the hint when nothing is selected.
+    var insp = document.getElementById("sidebarElement");
+    if (insp) insp.classList.toggle("no-selection", disabled);
+    // Umwandlung (Bild → Relief) applies to image elements only.
+    var conv = document.getElementById("convGroup");
+    if (conv) conv.hidden = !(el && el.type === "image");
+    // Floating selection toolbar on the stage follows the selection.
+    var selTb = document.getElementById("selToolbar");
+    if (selTb) selTb.hidden = disabled;
+    // Layer badges mirror color/height/mode — keep them fresh with the panel.
+    renderLayers();
 
     var threshold = document.getElementById("advThreshold");
     var thresholdVal = document.getElementById("advThresholdVal");
@@ -2105,16 +2273,12 @@
       if (advDirEngraved) advDirEngraved.classList.remove("seg-active");
     }
 
-    // Text content fields: show only for text elements; seed from el.text.
+    // Text content field: show only for text elements; seed from el.text.
     var advTextField = document.getElementById("advTextField");
-    var simpleTextSection = document.getElementById("simpleTextSection");
     var isText = el && el.type === "text";
     if (advTextField) advTextField.hidden = !isText;
-    if (simpleTextSection) simpleTextSection.hidden = !isText;
     var advTextNode = document.getElementById("advText");
-    var simpleTextNode = document.getElementById("simpleText");
     if (advTextNode) advTextNode.value = isText ? (el.text || "") : "";
-    if (simpleTextNode) simpleTextNode.value = isText ? (el.text || "") : "";
 
     // Font controls (Schriftart + Fett + Upload): text elements only.
     var advFontField = document.getElementById("advFontField");
@@ -2150,26 +2314,35 @@
         }
       }
     }
-    // "Höhe je Farbe" toggle (doc-level; surfaced here because Einfarbig heights are edited here).
-    var autoField = document.getElementById("advAutoHeightsField");
-    var showAuto = !!(el && (el.type === "text" || el.type === "image") && em === "solid");
-    if (autoField) {
-      autoField.hidden = !showAuto;
-      var ah = document.getElementById("advAutoHeights");
-      if (ah) ah.checked = !!doc.autoLayerHeights;
-    }
-    // Deckschicht (doc-level cover color) rides on the auto-heights mode.
-    var tlField = document.getElementById("advTopLayerField");
-    if (tlField) {
-      tlField.hidden = !(showAuto && doc.autoLayerHeights);
-      var tl = document.getElementById("advTopLayer");
-      var tlc = document.getElementById("advTopLayerColor");
-      if (tl) tl.checked = doc.topLayerColor != null;
-      if (tlc && doc.topLayerColor != null) tlc.value = doc.topLayerColor;
-    }
+    // "Höhe je Farbe" + Deckschicht live in the Ebenen group (doc scope, always
+    // visible) — only the state is synced here.
+    var ah = document.getElementById("advAutoHeights");
+    if (ah) ah.checked = !!doc.autoLayerHeights;
+    var tl = document.getElementById("advTopLayer");
+    var tlc = document.getElementById("advTopLayerColor");
+    if (tl) tl.checked = doc.topLayerColor != null;
+    if (tlc && doc.topLayerColor != null) tlc.value = doc.topLayerColor;
 
     // Palette swatches: show only for image elements in colorLayers mode.
     renderPaletteSwatches(el);
+    // Doc-level AMS filament palette (Ebenen group).
+    renderAmsPaletteField();
+  }
+
+  // AMS-Filament-Palette (Ebenen group, doc scope): visible whenever the shared
+  // palette is in use — i.e. it has colors AND some element prints in the AMS style —
+  // regardless of which element is selected.
+  function renderAmsPaletteField() {
+    var field = document.getElementById("amsPaletteField");
+    var host = document.getElementById("amsPaletteHost");
+    if (!field || !host) return;
+    var hasPal = Array.isArray(doc.amsPalette) && doc.amsPalette.length > 0;
+    var hasBandsEl = doc.elements.some(function (e) {
+      return e && e.type === "image" && e.depth && e.depth.mode === "colorLayers" && colorStyleOf(e) === "bands";
+    });
+    var show = hasPal && hasBandsEl;
+    field.hidden = !show;
+    if (show) renderAmsPalette(host); else host.innerHTML = "";
   }
 
   // -- Depth mode buttons --
@@ -2267,22 +2440,10 @@
     el.cutout = node.checked;
   });
 
-  // -- Text content fields (advText + simpleText, kept in sync) --
+  // -- Text content field --
   bindElementField("advText", "input", function (el, node) {
     if (el.type !== "text") return false;
     el.text = node.value;
-    // Keep Simple field in sync.
-    var simple = document.getElementById("simpleText");
-    if (simple) simple.value = node.value;
-    renderLayers();
-  });
-
-  bindElementField("simpleText", "input", function (el, node) {
-    if (el.type !== "text") return false;
-    el.text = node.value;
-    // Keep Advanced field in sync.
-    var adv = document.getElementById("advText");
-    if (adv) adv.value = node.value;
     renderLayers();
   });
 
@@ -2308,15 +2469,17 @@
     // doesn't silently drop the override.
     if (node.validity && node.validity.badInput) return false;
     if (doc.autoLayerHeights && el.depth.mode === "solid") {
-      if (String(node.value).trim() === "") { el.depth.heightOverrideMm = null; return; }
+      if (String(node.value).trim() === "") { el.depth.heightOverrideMm = null; renderLayers(); return; }
       var ov = parseFloat(node.value);
       if (isNaN(ov) || ov < 0) return false; // 0 allowed = flush with the plate
       el.depth.heightOverrideMm = ov;
+      renderLayers(); // badge shows the pinned height
       return;
     }
     var v = parseFloat(node.value);
     if (isNaN(v) || v < 0) return false; // 0 allowed = no relief (off)
     el.depth.heightMm = v;
+    renderLayers();
   });
 
   // -- Custom font upload (.ttf/.otf/.woff) → FontFace + doc.fonts --
@@ -2372,16 +2535,6 @@
   document.getElementById("advColorStep").addEventListener("input", function () {
     var v = Number(this.value);
     if (!isNaN(v) && v >= 1) { doc.colorStepLayers = v; scheduleRebuild3D(); }
-  });
-
-  document.getElementById("advFrameHeight").addEventListener("input", function () {
-    var v = parseFloat(this.value);
-    if (!isNaN(v) && v >= 0) {
-      ensureFrame().heightMm = v;
-      var simple = document.getElementById("frameHeightMm");
-      if (simple) simple.value = v; // keep the Simple row in sync
-      scheduleRebuild3D();
-    }
   });
 
   // Base color (Grundfarbe) for the base plate.
@@ -2458,6 +2611,112 @@
     }
   }());
 
+  // ---- Löschen (Toolbar + Entf/Backspace auf der Arbeitsfläche) ----
+  function deleteSelected() {
+    var el = selectedEl();
+    if (!el) return;
+    var i = doc.elements.indexOf(el);
+    if (i !== -1) doc.elements.splice(i, 1);
+    state.selectedId = null;
+    refreshAdvancedForSelection();
+    renderLayers();
+    render2D();
+    scheduleRebuild3D();
+  }
+
+  // ---- Duplizieren (Ebenen-Zeile, Strg/Cmd+D, Bühnen-Toolbar) ----
+  function duplicateElement(el) {
+    if (!el) return;
+    // Deep-copy the persisted fields; runtime caches are dropped and makeElementV2
+    // mints a fresh id (the stripped id keeps props from overriding it).
+    var drop = { _img: 1, _display: 1, _displayKey: 1, _hidden: 1, id: 1 };
+    var props = JSON.parse(JSON.stringify(el, function (k, v) { return drop[k] ? undefined : v; }));
+    var copy = window.makeElementV2(el.type, props);
+    copy._img = el._img || null; // share the decoded bitmap (read-only)
+    copy.cxMm = el.cxMm + 4; copy.cyMm = el.cyMm + 4; // nudge so the copy is visible
+    doc.elements.splice(doc.elements.indexOf(el) + 1, 0, copy); // directly above the original
+    state.selectedId = copy.id;
+    refreshAdvancedForSelection();
+    renderLayers();
+    render2D();
+    scheduleRebuild3D();
+  }
+  function duplicateSelected() { duplicateElement(selectedEl()); }
+  window.addEventListener("keydown", function (e) {
+    if (!(e.metaKey || e.ctrlKey) || e.shiftKey || String(e.key).toLowerCase() !== "d") return;
+    var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable)) return;
+    if (!selectedEl()) return; // nothing selected → leave Cmd+D to the browser
+    e.preventDefault();
+    duplicateSelected();
+  });
+  // ---- Bühnen-Hero: Klick öffnet den Bild-Dialog, Drops landen direkt ----
+  (function () {
+    var hero = document.getElementById("stageHero");
+    if (!hero) return;
+    var card = hero.querySelector(".hero-card") || hero;
+    card.addEventListener("click", function () { addImageAction(); });
+    card.addEventListener("dragover", handleDragOver);
+    card.addEventListener("drop", handleDrop);
+  }());
+
+  // ---- Einrasten popover (topbar lock button) ----
+  (function () {
+    var btn = document.getElementById("snapBtn");
+    var pop = document.getElementById("snapPopover");
+    if (!btn || !pop) return;
+    function close() { pop.hidden = true; btn.setAttribute("aria-expanded", "false"); btn.classList.remove("open"); }
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      var show = pop.hidden;
+      pop.hidden = !show;
+      btn.setAttribute("aria-expanded", String(show));
+      btn.classList.toggle("open", show);
+    });
+    pop.addEventListener("click", function (e) { e.stopPropagation(); }); // clicks inside stay inside
+    document.addEventListener("click", function () { if (!pop.hidden) close(); });
+    window.addEventListener("keydown", function (e) { if (e.key === "Escape" && !pop.hidden) close(); });
+  }());
+
+  // ---- Floating selection toolbar on the stage ----
+  (function () {
+    var wire = function (id, fn) { var n = document.getElementById(id); if (n) n.addEventListener("click", fn); };
+    wire("selDupBtn", duplicateSelected);
+    wire("selCenterHBtn", function () { centerH(); });
+    wire("selCenterVBtn", function () { centerV(); });
+    wire("selDelBtn", deleteSelected);
+  }());
+
+  // ---- Dünne-Stellen prüfen (nozzle-width check) ----
+  (function () {
+    var btn = document.getElementById("thinCheckBtn");
+    var status = document.getElementById("thinCheckStatus");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      var res;
+      try { res = window.thinFeatureMask(visibleDoc(), 0.4); }
+      catch (e) {
+        if (status) status.textContent = "Prüfung fehlgeschlagen: " + (e && e.message || e);
+        return;
+      }
+      state.thinOverlay = res.count ? res : null;
+      if (status) status.textContent = res.count
+        ? "~" + res.areaMm2.toFixed(1) + " mm² schmaler als 0,4 mm — im 2D rot markiert"
+        : "✓ Keine dünnen Stellen gefunden";
+      render2D();
+    });
+  }());
+
+  // ---- Schicht-Vorschau (3D layer scrubber) ----
+  (function () {
+    var s = document.getElementById("layerSlider");
+    if (s) s.addEventListener("input", function () {
+      if (window.preview3d && window.preview3d.setClipRatio) {
+        window.preview3d.setClipRatio(parseFloat(this.value) / 100);
+      }
+    });
+  }());
+
   // ---- Center buttons ----
   function centerH() {
     withSelected(function (el) { el.cxMm = doc.body.widthMm / 2; });
@@ -2471,8 +2730,6 @@
   (function () {
     var ch = document.getElementById("centerH"); if (ch) ch.addEventListener("click", centerH);
     var cv2 = document.getElementById("centerV"); if (cv2) cv2.addEventListener("click", centerV);
-    var chA = document.getElementById("centerHAdv"); if (chA) chA.addEventListener("click", centerH);
-    var cvA = document.getElementById("centerVAdv"); if (cvA) cvA.addEventListener("click", centerV);
   }());
 
   // -- Init Advanced panel doc-level values (also called by resetDocTo) --
@@ -2487,20 +2744,10 @@
     if (res) res.value = doc.resolution != null ? doc.resolution : 1024;
     var cs = document.getElementById("advColorStep");
     if (cs) cs.value = doc.colorStepLayers != null ? doc.colorStepLayers : 2;
-    var fh = document.getElementById("advFrameHeight");
-    if (fh) fh.value = (doc.body.frame && doc.body.frame.heightMm != null) ? doc.body.frame.heightMm : 2;
     var bc = document.getElementById("advBaseColor");
     if (bc) bc.value = doc.body.baseColor || "#000000";
-    // Objekt section (twins of the Simple plate controls). Seg-active states + field
-    // visibility are set by applyShape/applyMount (called from initSimpleUI).
-    var fr = doc.body.frame || {};
-    var setVal = function (id, v) { var n = document.getElementById(id); if (n) n.value = v; };
-    setVal("advSizeW", doc.body.widthMm);
-    setVal("advSizeH", doc.body.heightMm);
-    setVal("advCornerMm", doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 4);
-    setVal("advBorderMm", doc.body.borderMm != null ? doc.body.borderMm : 2);
-    setVal("advFrameMm", fr.widthMm != null ? fr.widthMm : 0);
-    setVal("advFrameColor", fr.color || "#000000");
+    // Plate controls (canonical ids; seg states + field visibility come from
+    // applyShape/applyMount, called from initSimpleUI).
     refreshAdvancedForSelection();
     renderAdvancedLayers();
   }
@@ -2573,22 +2820,21 @@
     });
   }());
 
-  // ---- View toggle wiring (Task 1, preserved) ----
-  document.getElementById("viewSimple").addEventListener("click", function () { setView("simple"); renderLayers(); });
-  document.getElementById("viewAdvanced").addEventListener("click", function () {
-    setView("advanced");
-    refreshAdvancedForSelection();
-    renderAdvancedLayers();
-  });
-  setView((function () { try { return localStorage.getItem(VIEW_KEY) || "simple"; } catch (e) { return "simple"; } })());
-
   // Initial render: fit scale first (B3: fitScale not in render2D anymore).
   // Restore persisted preview mode; default 'split' (2D + 3D side by side) per user request.
   setPreviewMode((function () { try { return localStorage.getItem(PREVIEW_MODE_KEY) || "split"; } catch (e) { return "split"; } })());
   renderLayers();
 
+  // Undo baseline: the pristine doc is the floor of the stack.
+  try { _undo.stack = [window.serializeProject(doc)]; } catch (e) {}
+  (function () {
+    var ub = document.getElementById("undoBtn"), rb = document.getElementById("redoBtn");
+    if (ub) ub.addEventListener("click", undoAction);
+    if (rb) rb.addEventListener("click", redoAction);
+  }());
+
   // Public interface. Expose state so tests can inspect/mutate selection.
-  window.editor = { doc, setView, getView, render2D, refreshAdvancedForSelection, renderAdvancedLayers, renderLayers, resetDocTo, buildDesignSVG, exportDesignCanvas };
+  window.editor = { doc, render2D, refreshAdvancedForSelection, renderAdvancedLayers, renderLayers, resetDocTo, buildDesignSVG, exportDesignCanvas };
   // Expose for Playwright smoke tests.
   window.__editorState = state;
   window.__editorHitTest = hitTest;

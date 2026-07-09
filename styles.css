@@ -1,34 +1,38 @@
   /* ============================================================
-     Ukibori — design system (T12 modern redesign)
-     Refined light theme. Full-width shell, cohesive tokens,
-     card-style sidebar, framed preview panes, modern controls.
+     Ukibori — design system "Werkstatt"
+     Warm paper chrome, ink text, ai-indigo accent, vermillion
+     brand mark, stage-like preview. Pure restyle: every selector,
+     layout contract and id hook from the previous system is kept.
      ============================================================ */
   :root {
-    /* Surfaces */
-    --bg: #f2f3f7;            /* app canvas (cool light grey) */
-    --panel: #ffffff;         /* cards / sidebar / dialog */
-    --surface: #f7f8fc;       /* subtle inset surface */
-    --surface2: #eef0f6;      /* inputs on tinted bg / thumbs */
+    /* Surfaces — warm paper */
+    --bg: #f1efe8;            /* app canvas (washi) */
+    --panel: #fffefb;         /* cards / sidebar / dialog */
+    --surface: #f7f5ef;       /* subtle inset surface */
+    --surface2: #eeebe1;      /* inputs on tinted bg / thumbs */
+    --stage: #e7e4da;         /* preview stage (recessed) */
 
     /* Ink */
-    --ink: #191b22;           /* primary text */
-    --muted: #6a6f7e;         /* secondary text / labels */
-    --faint: #9aa0b0;         /* tertiary / placeholders */
+    --ink: #23211b;           /* primary text (warm near-black) */
+    --fg: #23211b;            /* alias — some chips read --fg */
+    --muted: #6f6a5c;         /* secondary text / labels */
+    --faint: #a49d8c;         /* tertiary / placeholders */
 
     /* Lines */
-    --line: #e5e7ef;          /* default hairline */
-    --line-strong: #d5d8e4;   /* stronger divider / control border */
+    --line: #e6e2d6;          /* default hairline */
+    --line-strong: #d4cebd;   /* stronger divider / control border */
 
-    /* Accent */
-    --accent: #4f46e5;        /* indigo */
-    --accent-hover: #4338ca;
-    --accent-weak: #eef0fe;   /* accent tint bg */
-    --accent-ring: rgba(79,70,229,.28);
-    --danger: #d0392b;
+    /* Accent — ai-iro indigo + shu vermillion mark */
+    --accent: #35568f;
+    --accent-hover: #2a4675;
+    --accent-weak: #e9eef7;
+    --accent-ring: rgba(53,86,143,.26);
+    --shu: #c8502e;           /* vermillion — brand mark / tiny highlights */
+    --danger: #b23222;
 
     /* Radii */
-    --radius: 12px;           /* cards / panels */
-    --radius-sm: 8px;         /* controls / inputs */
+    --radius: 14px;           /* cards / panels */
+    --radius-sm: 9px;         /* controls / inputs */
     --radius-pill: 999px;
 
     /* Spacing rhythm (8 / 12 / 16 / 20) */
@@ -37,12 +41,13 @@
     --sp-3: 16px;
     --sp-4: 20px;
 
-    /* Depth */
-    --shadow-sm: 0 1px 2px rgba(16,22,40,.05);
-    --shadow: 0 1px 2px rgba(16,22,40,.04), 0 4px 16px rgba(16,22,40,.06);
-    --shadow-lg: 0 12px 40px rgba(16,22,40,.18);
+    /* Depth — warm-tinted shadows */
+    --shadow-sm: 0 1px 2px rgba(58,50,30,.06);
+    --shadow: 0 1px 2px rgba(58,50,30,.05), 0 5px 18px rgba(58,50,30,.08);
+    --shadow-lg: 0 14px 44px rgba(45,38,22,.22);
 
     /* Type */
+    --font-display: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", Georgia, serif;
     --fs-label: 11px;
     --fs-input: 13px;
     --fs-body: 13.5px;
@@ -54,7 +59,9 @@
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     color: var(--ink);
-    background: var(--bg);
+    background:
+      radial-gradient(1200px 500px at 85% -10%, rgba(53,86,143,.05), transparent 60%),
+      var(--bg);
     line-height: 1.45;
     display: flex;
     flex-direction: column;
@@ -71,12 +78,13 @@
     align-items: center;
     gap: var(--sp-3);
     padding: 0 var(--sp-4);
-    height: 56px;
+    height: 54px;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
     box-shadow: var(--shadow-sm);
     z-index: 5;
   }
+  /* The classic wordmark, unchanged. */
   #topbar .brand {
     font-weight: 700;
     font-size: 16px;
@@ -89,11 +97,9 @@
     letter-spacing: .01em;
     white-space: nowrap;
   }
-  /* View toggle (Einfach/Erweitert) sits centred-ish between brand and actions */
-  #topbar #viewToggle { margin-left: var(--sp-2); }
-  #topbar .topbar-actions { margin-left: auto; display: flex; gap: var(--sp-1); }
+  #topbar .topbar-actions { margin-left: auto; display: flex; gap: var(--sp-1); align-items: center; }
 
-  /* Top-bar action buttons (Öffnen/Speichern/Exportieren/?) */
+  /* Top-bar action buttons */
   .topbar-actions button {
     font: inherit; font-size: var(--fs-input); font-weight: 600;
     padding: 8px 14px;
@@ -106,21 +112,48 @@
   }
   .topbar-actions button:hover { background: var(--surface); border-color: var(--faint); }
   .topbar-actions button:active { background: var(--surface2); }
+  /* Undo/Redo: joined pair; Help: ghost square */
+  .topbar-actions #undoBtn, .topbar-actions #redoBtn, .topbar-actions #tourBtn {
+    width: 36px; padding: 0; display: grid; place-items: center;
+    font-weight: 700; color: var(--muted);
+    font-size: 15px;
+  }
+  .topbar-actions #undoBtn { border-radius: var(--radius-sm) 0 0 var(--radius-sm); border-right: 0; margin-right: -8px; }
+  .topbar-actions #redoBtn { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+  .topbar-actions #undoBtn:hover, .topbar-actions #redoBtn:hover { color: var(--ink); }
+  .topbar-actions #tourBtn { border-color: transparent; background: transparent; }
+  .topbar-actions #tourBtn:hover { color: var(--ink); background: var(--surface2); border-color: transparent; }
+  /* Einrasten: lock button + popover */
+  #snapWrap { position: relative; display: flex; }
+  .topbar-actions button svg, #selToolbar button svg, .adv-lbtn svg { display: block; }
+  .topbar-actions #snapBtn {
+    width: 36px; padding: 0; display: grid; place-items: center;
+    font-size: 14px; color: var(--muted);
+    border-color: transparent; background: transparent;
+  }
+  .topbar-actions #snapBtn:hover, .topbar-actions #snapBtn.open {
+    color: var(--ink); background: var(--surface2); border-color: transparent;
+  }
+  #snapPopover {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
+    width: 232px;
+    display: flex; flex-direction: column; gap: var(--sp-2);
+    background: var(--panel);
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg);
+    padding: var(--sp-2) var(--sp-3);
+  }
+  /* small breathing gap between the undo pair and the file actions */
+  .topbar-actions #openBtn { margin-left: 6px; }
   /* Exportieren = primary accent action */
   .topbar-actions #exportBtn {
     background: var(--accent); border-color: var(--accent); color: #fff;
-    box-shadow: 0 1px 2px var(--accent-ring);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 1px 2px var(--accent-ring);
   }
   .topbar-actions #exportBtn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
-  /* Help (?) = compact round-ish */
-  .topbar-actions #tourBtn {
-    width: 34px; padding: 0; display: grid; place-items: center;
-    font-weight: 700; color: var(--muted);
-  }
-  .topbar-actions #tourBtn:hover { color: var(--ink); }
 
   /* ============================================================
-     Editor shell — FULL WIDTH (no 1280px gutter)
+     Editor shell — FULL WIDTH
      ============================================================ */
   #editor {
     flex: 1;
@@ -131,10 +164,12 @@
     flex-direction: row;
     align-items: stretch;
     gap: var(--sp-3);
-    padding: var(--sp-3) var(--sp-4);
+    padding: var(--sp-3) var(--sp-4) var(--sp-4);
   }
 
-  /* Sidebar as a clean card */
+  /* Sidebars as clean cards. Editor layout: document panel LEFT (Werkstück /
+     Ebenen / Druck), stage CENTER, element inspector RIGHT — create & edit
+     happen next to the canvas where elements are selected. */
   .sidebar {
     flex: 0 0 312px;
     display: flex;
@@ -146,19 +181,139 @@
     box-shadow: var(--shadow);
     overflow: hidden;
   }
+  #sidebarAdvanced { flex-basis: 288px; }
+  /* Right column: Element inspector on top, docked Ebenen panel below —
+     each with its OWN scroll (Photoshop-style layers dock). */
+  #rightCol {
+    flex: 0 0 300px;
+    display: flex; flex-direction: column;
+    gap: var(--sp-3);
+    min-height: 0; min-width: 0;
+  }
+  #rightCol .sidebar { flex-basis: auto; }
+  #sidebarElement { flex: 1 1 auto; min-height: 0; }
+  /* FIXED height: adding layers never reflows the column — the list scrolls inside.
+     (#rightCol prefix out-ranks the #rightCol .sidebar basis reset above.) */
+  #rightCol #sidebarEbenen { flex: 0 0 42%; min-height: 235px; }
+  #sidebarEbenen .adv-scroll { padding-top: var(--sp-2); }
 
-  /* Preview area takes the rest */
+  /* Slim identity header per panel */
+  .panel-head {
+    flex-shrink: 0;
+    padding: 11px var(--sp-3) 10px;
+    font-size: 11.5px; font-weight: 700;
+    letter-spacing: .09em; text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  /* Inspector: sticky add dock at the top of the scroll area */
+  #sidebarElement .add-dock {
+    position: sticky; top: calc(-1 * var(--sp-2)); z-index: 2;
+    margin: calc(-1 * var(--sp-2)) calc(-1 * var(--sp-3)) 0;
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+
+  /* Inspector groups: labeled sections; a group with only hidden fields vanishes */
+  .insp-group {
+    display: flex; flex-direction: column; gap: var(--sp-2);
+    border-top: 1px solid var(--line); padding-top: var(--sp-2);
+  }
+  .insp-group:first-of-type { border-top: 0; padding-top: 0; }
+  .insp-group:not(:has(> :not(.group-label):not([hidden]))) { display: none; }
+  .group-label {
+    font-size: 10.5px; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase;
+    color: var(--faint);
+  }
+
+  /* Inspector empty state: hint on, controls dimmed & inert until a selection exists */
+  #sidebarElement .element-empty { display: none; padding: 2px 0 4px; }
+  #sidebarElement.no-selection .element-empty { display: block; }
+  #sidebarElement.no-selection #accElement .acc-body > *:not(.element-empty) {
+    opacity: .38; pointer-events: none; filter: saturate(.6);
+    transition: opacity .15s;
+  }
+  @media (max-width: 1150px) {
+    #sidebarAdvanced { flex-basis: 252px; }
+    #rightCol { flex-basis: 264px; }
+  }
+
+  /* Preview area = recessed stage the canvases float on */
   #editor #preview {
     flex: 1;
     position: relative;
     min-height: 0;
     min-width: 0;
     overflow: hidden;
+    background:
+      radial-gradient(900px 420px at 50% 0%, rgba(255,254,251,.5), transparent 70%),
+      radial-gradient(rgba(35,33,27,.075) 1px, transparent 1.3px),
+      var(--stage);
+    background-size: auto, 20px 20px, auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: inset 0 1px 4px rgba(58,50,30,.07);
   }
   #editor #preview .view-toggle { position: absolute; top: var(--sp-2); right: var(--sp-2); z-index: 3; }
+  /* Schicht-Vorschau slider under the 2D/3D toggle (3D + split modes only) */
+  #layerSliderWrap {
+    position: absolute; top: 56px; right: var(--sp-2); z-index: 3;
+    background: rgba(255,254,251,.88);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    box-shadow: var(--shadow); padding: 7px 10px;
+  }
+  #layerSliderWrap input[type=range] { width: 160px; display: block; }
+
+  /* Floating selection toolbar — bottom-center of the stage */
+  #selToolbar {
+    position: absolute; bottom: var(--sp-2); left: 50%; transform: translateX(-50%);
+    z-index: 3;
+    display: flex; gap: 2px; padding: 3px;
+    background: rgba(255,254,251,.92);
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+  }
+  #selToolbar button {
+    font: inherit; font-size: 15px; line-height: 1;
+    width: 36px; height: 32px;
+    display: grid; place-items: center;
+    border: 0; border-radius: 6px;
+    background: transparent; color: var(--muted);
+    cursor: pointer;
+    transition: background .12s, color .12s;
+  }
+  #selToolbar button:hover { background: var(--surface2); color: var(--ink); }
+  #selToolbar #selDelBtn:hover { background: var(--danger); color: #fff; }
+
+  /* Empty-project hero: invitation on the stage; clicks/drops pass through */
+  #stageHero {
+    position: absolute; inset: 0; z-index: 2;
+    display: flex; align-items: center; justify-content: center;
+    pointer-events: none;
+  }
+  #stageHero .hero-card {
+    text-align: center;
+    padding: 34px 44px;
+    border: 2px dashed var(--line-strong);
+    border-radius: var(--radius);
+    background: rgba(255,254,251,.6);
+    -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+    pointer-events: auto; cursor: pointer;
+    transition: border-color .12s, background .12s;
+  }
+  #stageHero .hero-card:hover { border-color: var(--accent); background: rgba(255,254,251,.85); }
+  #stageHero .hero-icon { font-size: 34px; color: var(--faint); line-height: 1; margin-bottom: 10px; }
+  #stageHero .hero-title { margin: 0 0 4px; font-size: 16px; font-weight: 700; color: var(--ink); }
+  #stageHero .hero-sub { margin: 0; font-size: 12.5px; color: var(--muted); }
 
   /* ============================================================
-     Segmented controls (.seg-group / .seg / seg-active)
+     Segmented controls — "stamped" active state
      ============================================================ */
   .seg-group {
     display: inline-flex;
@@ -179,15 +334,18 @@
   }
   .seg:hover { color: var(--ink); }
   .seg.seg-active {
-    background: var(--panel);
-    color: var(--ink);
-    box-shadow: var(--shadow-sm), 0 0 0 1px rgba(16,22,40,.04);
+    background: var(--ink);
+    color: var(--panel);
+    box-shadow: var(--shadow-sm);
   }
-  .seg-group.seg-sm .seg { padding: 6px 11px; font-size: 12.5px; }
+  .seg-group.seg-sm .seg { padding: 6px 8px; font-size: 12px; min-width: 0; }
+  /* Inline flex:1 forces equal widths and clips long labels (Rechteck) in narrow
+     panels — content-based sizing wins. */
+  .seg-group.seg-sm .seg { flex: 1 1 auto !important; }
 
-  /* Floating preview view-toggle: give it a surface so it reads on the pane */
+  /* Floating preview view-toggle: give it a surface so it reads on the stage */
   .view-toggle {
-    background: rgba(255,255,255,.85);
+    background: rgba(255,254,251,.88);
     -webkit-backdrop-filter: blur(6px);
     backdrop-filter: blur(6px);
     border: 1px solid var(--line);
@@ -198,7 +356,7 @@
     gap: 2px;
   }
   .view-toggle .seg { padding: 6px 12px; font-size: 12.5px; border-radius: 6px; }
-  .view-toggle .seg.seg-active { background: var(--panel); }
+  .view-toggle .seg.seg-active { background: var(--ink); color: var(--panel); }
 
   /* ============================================================
      Buttons (.btn / .btn-primary)
@@ -210,6 +368,7 @@
     border: 1px solid var(--line-strong);
     background: var(--panel); color: var(--ink);
     cursor: pointer;
+    box-shadow: 0 1px 0 rgba(58,50,30,.04);
     transition: background .12s, border-color .12s, box-shadow .12s, transform .04s;
   }
   .btn:hover { background: var(--surface); border-color: var(--faint); }
@@ -218,7 +377,7 @@
   .btn:disabled { opacity: .45; cursor: not-allowed; }
   .btn-primary {
     background: var(--accent); border-color: var(--accent); color: #fff;
-    box-shadow: 0 1px 2px var(--accent-ring);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 1px 2px var(--accent-ring);
   }
   .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
@@ -247,11 +406,35 @@
   }
   .text-input::placeholder, .sp-num::placeholder { color: var(--faint); }
 
+  /* Ranges: slim track + round accent thumb */
   input[type=range] {
     width: 100%;
-    accent-color: var(--accent);
     cursor: pointer;
     height: 20px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    accent-color: var(--accent);
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 999px;
+    background: var(--line-strong);
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 15px; height: 15px; margin-top: -5.5px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2.5px solid var(--panel);
+    box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-sm);
+    transition: transform .1s;
+  }
+  input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.12); }
+  input[type=range]::-moz-range-track { height: 4px; border-radius: 999px; background: var(--line-strong); }
+  input[type=range]::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); border: 2.5px solid var(--panel);
+    box-shadow: 0 0 0 1px var(--line-strong);
   }
 
   .badge {
@@ -276,55 +459,25 @@
     background: var(--panel); cursor: pointer;
   }
   input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
-  input[type=color]::-webkit-color-swatch { border: none; border-radius: 5px; }
+  input[type=color]::-webkit-color-swatch { border: none; border-radius: 6px; }
 
   .hint { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
   .status { margin: 0; font-size: var(--fs-input); color: var(--muted); }
   .status.error { color: var(--danger); font-weight: 600; }
   .link { color: var(--accent); cursor: pointer; font-weight: 600; }
 
-  /* ============================================================
-     Simple sidebar — card sections
-     ============================================================ */
-  /* Scroll the Simple sidebar when its sections exceed the viewport (.sidebar is
-     overflow:hidden; without this the lower controls are unreachable). */
-  #sidebarSimple { overflow-y: auto; }
-  .sp-section {
-    padding: var(--sp-2) var(--sp-3);
-    border-bottom: 1px solid var(--line);
-    display: flex; flex-direction: column; gap: var(--sp-1);
-  }
-  .sp-section:last-child { border-bottom: 0; }
-  .sp-label {
-    font-size: var(--fs-label); font-weight: 700; color: var(--muted);
-    text-transform: uppercase; letter-spacing: .06em;
-  }
   .sp-add-row { display: flex; gap: var(--sp-1); }
   .sp-add-row .btn { flex: 1; text-align: center; padding: 9px 6px; }
-  .sp-inline-field { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
-  .sp-inline-label {
-    font-size: 12.5px; color: var(--muted); font-weight: 600; white-space: nowrap;
-  }
-  /* Frame field packs a wide label + two numbers + a colour chip; stack the
-     label above so the three inputs sit tidily on one row instead of wrapping. */
-  #frameField { flex-wrap: wrap; }
-  #frameField .sp-inline-label { flex-basis: 100%; }
-  #frameField .sp-num { flex: 1; width: auto; min-width: 0; }
-  #frameField input[type=color] { flex: 0 0 auto; }
-  .sp-size-row { display: flex; gap: var(--sp-2); }
-  .sp-size-field { display: flex; align-items: center; gap: var(--sp-1); }
-  .sp-size-field .sp-num { width: 100%; min-width: 0; }
-  .sp-size-field { flex: 1; }
 
   /* ============================================================
-     Advanced sidebar — scroll + accordions
+     Sidebar — scroll + accordions
      ============================================================ */
-  #sidebarAdvanced {
+  #sidebarAdvanced, #sidebarElement {
     display: flex; flex-direction: column; min-height: 0; overflow: hidden;
   }
   .adv-scroll {
-    overflow-y: auto; flex: 1; min-height: 0;
-    padding: 4px var(--sp-3) var(--sp-3);
+    overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0;
+    padding: var(--sp-2) var(--sp-3) var(--sp-3);
   }
   .adv-scroll::-webkit-scrollbar { width: 10px; }
   .adv-scroll::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 999px; border: 3px solid var(--panel); }
@@ -349,7 +502,7 @@
   .adv-field:has(> input[type=range]) > input[type=range] { grid-area: range; }
   .adv-field:has(> input[type=range]) > .badge { grid-area: badge; }
 
-  /* Accordions (.acc) — modern summary rows */
+  /* Accordions (.acc) — quiet small-caps group headers with a shu tick */
   .acc { border-bottom: 1px solid var(--line); }
   .acc:last-of-type { border-bottom: 0; }
   .acc > summary {
@@ -358,19 +511,31 @@
     user-select: none;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 8px;
     padding: 13px 4px;
-    font-size: 12.5px;
+    font-size: 11.5px;
     font-weight: 700;
-    letter-spacing: .02em;
-    color: var(--ink);
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--muted);
     border-radius: var(--radius-sm);
     transition: color .12s;
   }
-  .acc > summary:hover { color: var(--accent); }
+  .acc > summary::before {
+    content: "";
+    width: 4px; height: 14px;
+    border-radius: 2px;
+    background: var(--line-strong);
+    transition: background .12s;
+    flex-shrink: 0;
+  }
+  .acc[open] > summary { color: var(--ink); }
+  .acc[open] > summary::before { background: var(--shu); }
+  .acc > summary:hover { color: var(--ink); }
   .acc > summary::-webkit-details-marker { display: none; }
   .acc > summary::after {
     content: "\25b8";
+    margin-left: auto;
     color: var(--faint);
     font-size: 11px;
     transition: transform .15s, color .12s;
@@ -389,7 +554,7 @@
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     background: var(--panel);
-    cursor: pointer;
+    cursor: grab;
     font-size: 12.5px;
     transition: background .12s, border-color .12s, box-shadow .12s;
   }
@@ -397,23 +562,44 @@
   .adv-layers-list li.adv-sel {
     border-color: var(--accent);
     background: var(--accent-weak);
-    box-shadow: 0 0 0 1px var(--accent);
+    box-shadow: inset 3px 0 0 var(--accent);
   }
   .adv-layers-list li.adv-hidden { opacity: 0.45; }
+  .adv-layers-list li.dragging { opacity: 0.5; cursor: grabbing; }
+  .adv-layers-list li.drag-over { outline: 2px solid var(--accent); outline-offset: -2px; }
   .adv-layers-list .adv-lname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  /* Print-info badge + solid-color dot per row */
+  .adv-layers-list .layer-badge {
+    flex-shrink: 0;
+    font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums;
+    color: var(--muted); background: var(--surface2);
+    border-radius: var(--radius-pill); padding: 2px 7px;
+    white-space: nowrap;
+  }
+  .adv-layers-list li.adv-sel .layer-badge { background: #fff; color: var(--accent); }
+  .adv-layers-list .layer-dot {
+    flex-shrink: 0;
+    width: 11px; height: 11px; border-radius: 50%;
+    border: 1px solid rgba(35,33,27,.22);
+  }
   .adv-layers-list .adv-lbtn {
     background: none; border: none; color: var(--muted); cursor: pointer;
     opacity: .7; padding: 2px 4px; font-size: 13px; line-height: 1;
     border-radius: 5px; transition: opacity .12s, background .12s, color .12s;
+    display: none; /* rows rest as thumb·name·dot·badge; actions appear on hover */
   }
+  .adv-layers-list li:hover .adv-lbtn,
+  .adv-layers-list li:focus-within .adv-lbtn { display: block; }
+  .adv-layers-list li:hover .layer-badge,
+  .adv-layers-list li:focus-within .layer-badge { display: none; } /* swap badge ↔ actions */
   .adv-layers-list .adv-lbtn:hover { opacity: 1; color: var(--ink); background: var(--surface2); }
   .adv-layers-list .layer-thumb {
-    width: 30px; height: 30px; border-radius: 6px; flex-shrink: 0;
+    width: 30px; height: 30px; border-radius: 7px; flex-shrink: 0;
     background: var(--surface2); display: block; border: 1px solid var(--line);
     object-fit: cover;
   }
   .adv-layers-list .layer-thumb-text {
-    width: 30px; height: 30px; border-radius: 6px; flex-shrink: 0;
+    width: 30px; height: 30px; border-radius: 7px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
     font-size: 14px; font-weight: 700; color: var(--muted);
     background: var(--surface2); border: 1px solid var(--line);
@@ -424,7 +610,7 @@
   .pal-entry {
     display: flex; align-items: center; gap: 4px;
     background: var(--surface); border: 1px solid var(--line);
-    border-radius: 7px; padding: 4px 6px; cursor: grab; user-select: none;
+    border-radius: 8px; padding: 4px 6px; cursor: grab; user-select: none;
     transition: border-color .12s, box-shadow .12s;
   }
   .pal-entry:hover { border-color: var(--line-strong); }
@@ -438,7 +624,7 @@
   /* Slot / print-layer number badge (palette reads as an ordered slot list). */
   .pal-slot {
     min-width: 16px; height: 16px; padding: 0 2px; border-radius: 4px; font-size: 10px;
-    line-height: 16px; text-align: center; background: var(--line); color: var(--fg);
+    line-height: 16px; text-align: center; background: var(--ink); color: var(--panel);
     font-weight: 600; font-variant-numeric: tabular-nums;
   }
   /* Merge count badge + fold-into menu (Farbe zusammenführen). */
@@ -457,50 +643,57 @@
     width: 18px; height: 18px; padding: 0; border: none; border-radius: 4px; cursor: pointer;
     background: transparent; color: var(--faint); font-size: 11px; line-height: 1;
   }
-  .ams-del:hover { background: var(--danger, #e5484d); color: #fff; }
+  .ams-del:hover { background: var(--danger); color: #fff; }
   .ams-add { padding: 4px 10px; font-size: 12px; align-self: center; }
   .ams-solid-toggle { display: flex; align-items: center; gap: 6px; width: 100%; font-size: 12px; color: var(--fg); margin-top: 2px; cursor: pointer; }
 
   /* ============================================================
-     Preview panes — framed cards
+     Preview panes — canvases float on the stage
      ============================================================ */
-  /* Non-split: single centred canvas */
-  #preview:not(.split) { display: flex; align-items: center; justify-content: center; }
+  /* Panes: STATIC layout containers — the canvases live inside and can change
+     size (fitScale re-buffers on domain growth) without moving the pane boundary. */
+  #preview { display: flex; }
+  #preview .pane { display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
+  #preview .pane:has(> canvas[hidden]) { display: none; }
+  /* Isolated views: the visible pane takes the whole stage (2D and 3D alike). */
+  #preview:not(.split) .pane { flex: 1 1 auto; }
 
-  /* Base look for both canvases (framed card, light checker for 2D plate room). */
+  /* Base look for both canvases */
   #canvas2d, #preview3dCanvas {
     max-width: 100%;
     max-height: 100%;
-    height: auto;
     border-radius: var(--radius);
     border: 1px solid var(--line);
     box-shadow: var(--shadow);
   }
+  #canvas2d { width: auto; height: auto; }
+  /* 2D: warm paper checker — design on the workbench */
   #canvas2d {
     background-color: var(--panel);
     background-image:
-      linear-gradient(45deg, #eef0f6 25%, transparent 25%),
-      linear-gradient(-45deg, #eef0f6 25%, transparent 25%),
-      linear-gradient(45deg, transparent 75%, #eef0f6 75%),
-      linear-gradient(-45deg, transparent 75%, #eef0f6 75%);
+      linear-gradient(45deg, #efece3 25%, transparent 25%),
+      linear-gradient(-45deg, #efece3 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #efece3 75%),
+      linear-gradient(-45deg, transparent 75%, #efece3 75%);
     background-size: 22px 22px;
     background-position: 0 0, 0 11px, 11px -11px, -11px 0;
   }
+  /* 3D: dark stage (matches the three.js scene background) so the model pops */
   #preview3dCanvas {
-    width: 100%; height: 100%; min-height: 360px; display: block; touch-action: none;
-    background: linear-gradient(180deg, #fbfcff 0%, #eef0f6 100%);
+    width: 100%; height: 100%; display: block; touch-action: none;
+    background: linear-gradient(180deg, #34322c 0%, #232119 100%);
+    border-color: #3d3a32;
   }
 
-  /* === Split view (T8) — 8px inter-pane gap is contractual (fitScale hardcodes 8) === */
-  #preview.split { display: flex; flex-direction: row; gap: 8px; align-items: center; justify-content: center; }
-  /* 2D: preserve aspect — do NOT force-stretch width (flex-grow), or the bitmap
-     squishes when max-height caps a portrait plate. fitScale sizes the buffer to
-     fit half-width × full-height, so let it display at that intrinsic size. */
-  #preview.split #canvas2d { flex: 0 1 auto; min-width: 0; max-width: 50%; max-height: 100%; width: auto; height: auto; }
-  #preview.split #preview3dCanvas { flex: 1 1 0; min-width: 0; max-width: 50%; align-self: stretch; min-height: 360px; }
+  /* === Split view (T8) — 8px inter-pane gap is contractual (fitScale hardcodes 8).
+     Each pane is EXACTLY half: the boundary never moves when the 2D buffer
+     grows (off-plate elements expanding the domain used to nudge the 3D pane). === */
+  #preview.split { flex-direction: row; gap: 8px; }
+  #preview.split .pane { flex: 0 0 calc(50% - 4px); }
+  #preview.split .pane-3d { align-self: stretch; min-height: 360px; }
   @media (max-width: 900px) {
     #preview.split { flex-direction: column; }
-    #preview.split #canvas2d, #preview.split #preview3dCanvas { max-width: 100%; }
+    #preview.split .pane { flex: 0 0 calc(50% - 4px); width: 100%; }
   }
 
   /* ============================================================
@@ -510,6 +703,8 @@
     body { overflow: auto; }
     #editor { flex-direction: column; padding: var(--sp-2) var(--sp-2); }
     .sidebar { flex: 0 0 auto; width: 100%; max-height: none; }
+    #rightCol { flex: 0 0 auto; width: 100%; }
+    #rightCol #sidebarEbenen { flex: 0 0 auto; height: 340px; }
     #sidebarAdvanced { max-height: none; }
     #editor #preview { min-height: 420px; }
     #topbar { flex-wrap: wrap; height: auto; padding: var(--sp-2) var(--sp-2); gap: var(--sp-2); }
@@ -522,7 +717,7 @@
      ============================================================ */
   .modal-overlay {
     position: fixed; inset: 0; z-index: 50;
-    background: rgba(16,20,36,.42);
+    background: rgba(35,33,27,.45);
     -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
     display: flex; align-items: center; justify-content: center; padding: var(--sp-4);
   }
@@ -573,8 +768,8 @@
     position: absolute;
     border-radius: var(--radius-sm);
     box-shadow:
-      0 0 0 4000px rgba(16,20,36,.55),
-      0 0 0 3px var(--accent);
+      0 0 0 4000px rgba(35,33,27,.55),
+      0 0 0 3px var(--shu);
     pointer-events: none;
     transition: top .18s ease, left .18s ease, width .18s ease, height .18s ease;
   }

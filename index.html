@@ -15,309 +15,13 @@
 <header id="topbar">
   <span class="brand">ukibori</span>
   <span class="tagline">Lesezeichen · Untersetzer · Schlüsselanhänger</span>
-  <div id="viewToggle" class="seg-group" role="tablist" aria-label="Ansicht">
-    <button type="button" id="viewSimple" class="seg seg-active" title="Einfache Ansicht">Einfach</button>
-    <button type="button" id="viewAdvanced" class="seg" title="Alle Optionen">Erweitert</button>
-  </div>
   <div class="topbar-actions">
-    <button type="button" id="openBtn" title="Projekt öffnen (.json)">Öffnen</button>
-    <button type="button" id="saveBtn" title="Projekt speichern (.json)">Speichern</button>
-    <button type="button" id="exportBtn" title="3D-Modell exportieren (3MF/STL/PNG)">Exportieren</button>
-    <button type="button" id="tourBtn" aria-label="Tour" title="Kurze Einführung">?</button>
-  </div>
-</header>
-<main id="editor">
-  <aside id="sidebarSimple" class="sidebar">
-    <!-- Simple controls (Task 4a) -->
-    <div class="sp-section">
-      <div class="sp-label">Hinzufügen</div>
-      <div class="sp-add-row">
-        <button type="button" id="addImageBtn" class="btn" title="Bild hinzufügen">Bild</button>
-        <button type="button" id="addTextBtn" class="btn" title="Text hinzufügen">Text</button>
-        <button type="button" id="addQrBtn" class="btn" title="QR-Code hinzufügen">QR</button>
-      </div>
-    </div>
-    <div class="sp-section" id="simpleTextSection" hidden>
-      <div class="sp-label">Text</div>
-      <input type="text" id="simpleText" class="text-input" style="width:100%" placeholder="Text eingeben…" title="Textinhalt">
-    </div>
-    <!-- KI-Freistellung — vorübergehend ausgeblendet (Button/Status bleiben verdrahtet). -->
-    <div class="sp-section" id="simpleBildSection" hidden>
-      <div class="sp-label">Bild</div>
-      <button type="button" id="removeBgBtn" class="btn" style="width:100%" title="Hintergrund per KI entfernen">Hintergrund entfernen (KI)</button>
-      <div id="bgStatus" class="hint" aria-live="polite"></div>
-    </div>
-    <div class="sp-section">
-      <div class="sp-label">Tiefe</div>
-      <div id="depthSeg" class="seg-group seg-sm" style="width:100%">
-        <button type="button" id="depthRaised" class="seg seg-active" style="flex:1" title="Erhaben (steht hervor)">Erhaben</button>
-        <button type="button" id="depthEngraved" class="seg" style="flex:1" title="Vertieft (eingraviert)">Vertieft</button>
-      </div>
-    </div>
-    <div class="sp-section">
-      <div class="sp-label">Form</div>
-      <div id="shapeSeg" class="seg-group seg-sm" style="width:100%">
-        <button type="button" id="shapeRect" class="seg seg-active" style="flex:1" title="Rechteckige Form">Rechteck</button>
-        <button type="button" id="shapeCircle" class="seg" style="flex:1" title="Kreisförmige Form">Kreis</button>
-        <button type="button" id="shapeFree" class="seg" style="flex:1" title="Freie Form (Bildkontur)">Frei</button>
-        <button type="button" id="shapeImage" class="seg" style="flex:1" title="Bild-Objekt: das Bild selbst ist das Werkstück (keine Platte)">Bild</button>
-      </div>
-      <div id="borderField" class="sp-inline-field" hidden>
-        <label for="borderMm" class="sp-inline-label">Rand (mm)</label>
-        <input type="number" id="borderMm" class="sp-num" min="0" max="50" step="0.5" value="2" title="Randbreite in mm (Freiform)">
-      </div>
-      <div id="cornerField" class="sp-inline-field" hidden>
-        <label for="cornerMm" class="sp-inline-label">Ecken (mm)</label>
-        <input type="number" id="cornerMm" class="sp-num" min="0" max="40" step="0.5" value="4" title="Eckenradius des Rechtecks in mm (0 = scharfe Ecken)">
-      </div>
-      <div id="frameField" class="sp-inline-field" hidden>
-        <label for="frameMm" class="sp-inline-label">Rahmen B·H (mm)</label>
-        <input type="number" id="frameMm" class="sp-num" min="0" max="20" step="0.5" value="0" title="Breite des erhabenen Rahmens am Plattenrand (0 = aus)" aria-label="Rahmenbreite in mm">
-        <input type="number" id="frameHeightMm" class="sp-num" min="0" max="12" step="0.2" value="2" title="Höhe des Rahmens über der Platte in mm" aria-label="Rahmenhöhe in mm">
-        <input type="color" id="frameColor" value="#000000" title="Farbe des Rahmens">
-      </div>
-    </div>
-    <div class="sp-section" id="simpleCenterSection">
-      <div class="sp-label">Ausrichten</div>
-      <div class="sp-add-row">
-        <button type="button" id="centerH" class="btn" title="Element horizontal zentrieren (Mitte der Platte)">↔ Zentrieren</button>
-        <button type="button" id="centerV" class="btn" title="Element vertikal zentrieren (Mitte der Platte)">↕ Zentrieren</button>
-      </div>
-    </div>
-    <div class="sp-section" id="simpleMountSection">
-      <div class="sp-label">Befestigung</div>
-      <div id="mountSeg" class="seg-group seg-sm" style="width:100%">
-        <button type="button" id="mountNone" class="seg seg-active" style="flex:1" title="Keine Befestigung">Keine</button>
-        <button type="button" id="mountHole" class="seg" style="flex:1" title="Loch zum Aufhängen">Loch</button>
-        <button type="button" id="mountLoop" class="seg" style="flex:1" title="Öse (Lasche mit Loch zum Aufhängen)">Öse</button>
-      </div>
-    </div>
-    <div class="sp-section">
-      <div class="sp-label">Ebenen</div>
-      <ul id="simpleLayers" class="adv-layers-list"></ul>
-      <p id="simpleLayersEmpty" class="hint">Keine Elemente vorhanden.</p>
-    </div>
-    <div class="sp-section" id="simpleSizeSection">
-      <div class="sp-label">Größe (mm)</div>
-      <div class="sp-size-row">
-        <div class="sp-size-field">
-          <label for="sizeW" class="sp-inline-label">B</label>
-          <input type="number" id="sizeW" class="sp-num" min="5" max="500" step="1" value="50" title="Breite in mm">
-        </div>
-        <div class="sp-size-field">
-          <label for="sizeH" class="sp-inline-label">H</label>
-          <input type="number" id="sizeH" class="sp-num" min="5" max="500" step="1" value="150" title="Höhe in mm">
-        </div>
-      </div>
-    </div>
-  </aside>
-  <aside id="sidebarAdvanced" class="sidebar" hidden>
-    <!-- Advanced controls (Task 4b) -->
-    <div class="adv-scroll">
-
-      <!-- 0. Hinzufügen (Add row — mirrors Simple sidebar) -->
-      <div class="adv-section"><div class="sp-add-row"><button type="button" id="addImageBtnAdv" class="btn" title="Bild hinzufügen">Bild</button><button type="button" id="addTextBtnAdv" class="btn" title="Text hinzufügen">Text</button><button type="button" id="addQrBtnAdv" class="btn" title="QR-Code hinzufügen">QR</button></div></div>
-
-      <!-- 0b. Objekt (Body/plate setup — mirrors Simple: shape, size, corners, border, frame, mount) -->
-      <details class="acc" id="accObjekt" open>
-        <summary>Objekt</summary>
-        <div class="acc-body adv-section">
-          <div class="adv-field">
-            <label class="adv-label">Form</label>
-            <div id="advShapeSeg" class="seg-group seg-sm" style="width:100%">
-              <button type="button" id="advShapeRect" class="seg seg-active" style="flex:1" title="Rechteckige Form">Rechteck</button>
-              <button type="button" id="advShapeCircle" class="seg" style="flex:1" title="Kreisförmige Form">Kreis</button>
-              <button type="button" id="advShapeFree" class="seg" style="flex:1" title="Freie Form (Bildkontur)">Frei</button>
-              <button type="button" id="advShapeImage" class="seg" style="flex:1" title="Bild-Objekt: das Bild selbst ist das Werkstück (keine Platte)">Bild</button>
-            </div>
-          </div>
-          <div class="adv-two-col" id="advSizeRow">
-            <div class="adv-field">
-              <label for="advSizeW" class="adv-label">Breite (mm)</label>
-              <input type="number" id="advSizeW" class="sp-num adv-num-full" min="5" max="500" step="1" value="50" title="Breite der Platte in mm">
-            </div>
-            <div class="adv-field">
-              <label for="advSizeH" class="adv-label">Höhe (mm)</label>
-              <input type="number" id="advSizeH" class="sp-num adv-num-full" min="5" max="500" step="1" value="150" title="Höhe der Platte in mm">
-            </div>
-          </div>
-          <div class="adv-field" id="advCornerField">
-            <label for="advCornerMm" class="adv-label">Ecken (mm)</label>
-            <input type="number" id="advCornerMm" class="sp-num adv-num-full" min="0" max="40" step="0.5" value="4" title="Eckenradius des Rechtecks in mm (0 = scharfe Ecken)">
-          </div>
-          <div class="adv-field" id="advBorderField" hidden>
-            <label for="advBorderMm" class="adv-label">Rand (mm)</label>
-            <input type="number" id="advBorderMm" class="sp-num adv-num-full" min="0" max="50" step="0.5" value="2" title="Randbreite in mm (Freiform)">
-          </div>
-          <div class="adv-field" id="advFrameField">
-            <label class="adv-label">Rahmen (Breite · Farbe)</label>
-            <div style="display:flex;gap:6px;align-items:center">
-              <input type="number" id="advFrameMm" class="sp-num" style="flex:1" min="0" max="20" step="0.5" value="0" title="Breite des erhabenen Rahmens am Plattenrand (0 = aus). Höhe unter 3D/Export." aria-label="Rahmenbreite in mm">
-              <input type="color" id="advFrameColor" value="#000000" title="Farbe des Rahmens">
-            </div>
-          </div>
-          <div class="adv-field" id="advMountField">
-            <label class="adv-label">Befestigung</label>
-            <div id="advMountSeg" class="seg-group seg-sm" style="width:100%">
-              <button type="button" id="advMountNone" class="seg seg-active" style="flex:1" title="Keine Befestigung">Keine</button>
-              <button type="button" id="advMountHole" class="seg" style="flex:1" title="Loch zum Aufhängen">Loch</button>
-              <button type="button" id="advMountLoop" class="seg" style="flex:1" title="Öse (Lasche mit Loch zum Aufhängen)">Öse</button>
-            </div>
-          </div>
-        </div>
-      </details>
-
-      <!-- 1. Umwandlung (Convert — image threshold/invert/numColors) -->
-      <details class="acc" id="accUmwandlung" open>
-        <summary>Umwandlung</summary>
-        <div class="acc-body adv-section">
-          <!-- KI-Freistellung — vorübergehend ausgeblendet (Button/Status bleiben verdrahtet). -->
-          <div class="adv-field" id="advBildField" hidden>
-            <button type="button" id="removeBgBtnAdv" class="btn" style="width:100%" title="Hintergrund per KI entfernen">Hintergrund entfernen (KI)</button>
-            <div id="bgStatusAdv" class="hint" aria-live="polite"></div>
-          </div>
-          <div class="adv-field">
-            <label for="advThreshold" class="adv-label">Schwellwert (0–255)</label>
-            <input type="range" id="advThreshold" min="0" max="255" step="1" value="128" title="Schwellwert für Schwarz/Weiß-Umwandlung (0–255)">
-            <span class="badge" id="advThresholdVal">128</span>
-          </div>
-          <div class="adv-field">
-            <label class="adv-label toggle">
-              <input type="checkbox" id="advInvert" title="Hell/Dunkel tauschen"> Invertieren
-            </label>
-          </div>
-          <div class="adv-field">
-            <label for="advNumColors" class="adv-label">Anzahl Farben</label>
-            <input type="number" id="advNumColors" class="sp-num" min="2" max="16" step="1" value="8" title="Anzahl reduzierter Farben (2–16)">
-          </div>
-          <!-- Inseln entfernen (island removal; hidden for heightmap and non-image) -->
-          <div class="adv-field" id="advMinIslandField" hidden>
-            <label for="advMinIsland" class="adv-label">Inseln entfernen</label>
-            <input type="range" id="advMinIsland" min="0" max="2000" step="1" value="0" title="Entfernt kleine Pixel-Inseln/Sprenkel unterhalb dieser Größe (0 = aus)">
-            <span class="badge" id="advMinIslandVal">0</span> px
-          </div>
-          <!-- Palette swatches (visible only in colorLayers mode) -->
-          <div class="adv-field" id="advPaletteField" hidden>
-            <label class="adv-label">Palette (Farbe ändern / Reihenfolge ziehen)</label>
-            <div id="advPaletteSwatch" class="adv-swatches"></div>
-          </div>
-          <!-- Farb-Stapelung (color-layer stacking style); visible only in colorLayers mode -->
-          <div class="adv-field" id="colorStyleField" hidden>
-            <label class="adv-label">Farb-Stapelung</label>
-            <div id="colorStyleSeg" class="seg-group seg-sm" style="width:100%">
-              <button type="button" id="colorStepped" class="seg seg-active" style="flex:1" title="Gestuftes Relief (jede Farbe eigene Höhe)">Gestuft</button>
-              <button type="button" id="colorFlush" class="seg" style="flex:1" title="Alle Farben auf gleicher Höhe — eine ebene Fläche">Eine Fläche</button>
-              <button type="button" id="colorBands" class="seg" style="flex:1" title="Farbschichten: eine Farbe pro Druckschicht (AMS, &gt;4 Farben)">AMS</button>
-            </div>
-          </div>
-        </div>
-      </details>
-
-      <!-- 2. Tiefenmodus (Depth mode — per element) -->
-      <details class="acc" id="accTiefenmodus" open>
-        <summary>Tiefenmodus</summary>
-        <div class="acc-body adv-section">
-          <div id="modeSeg" class="seg-group seg-sm adv-seg-full">
-            <button type="button" id="modeSolid" class="seg seg-active" style="flex:1" title="Einfarbig (eine Tiefe)">Einfarbig</button>
-            <button type="button" id="modeColorLayers" class="seg" style="flex:1" title="Mehrfarbig: jede Farbe auf eigener Schicht">Farbebenen</button>
-            <button type="button" id="modeHeightmap" class="seg" style="flex:1" title="Helligkeit als Höhe (Graustufenrelief)">Höhenrelief</button>
-          </div>
-        </div>
-      </details>
-
-      <!-- 3. Ebenen (Layers list) -->
-      <details class="acc" id="accEbenen" open>
-        <summary>Ebenen</summary>
-        <div class="acc-body adv-section">
-          <ul id="advLayers" class="adv-layers-list"></ul>
-          <p id="advLayersEmpty" class="hint">Keine Elemente vorhanden.</p>
-        </div>
-      </details>
-
-      <!-- 4. Element (Selected-element position/size/color/cutout) -->
-      <details class="acc" id="accElement" open>
-        <summary>Element</summary>
-        <div class="acc-body adv-section">
-          <div class="adv-field" id="advTextField" hidden><label for="advText" class="adv-label">Text</label><input type="text" id="advText" class="text-input" value="" title="Textinhalt des Elements"></div>
-          <div class="adv-field" id="advFontField" hidden>
-            <label for="advFontFamily" class="adv-label">Schriftart</label>
-            <select id="advFontFamily" class="text-input" title="Schriftart des Textes"></select>
-            <div class="adv-font-row">
-              <label class="adv-label toggle"><input type="checkbox" id="advFontBold" title="Fett"> Fett</label>
-              <button type="button" id="fontUploadBtn" class="btn" title="Eigene Schrift laden (.ttf/.otf/.woff)">Schrift laden…</button>
-            </div>
-          </div>
-          <div class="adv-field">
-            <label for="advColor" class="adv-label">Farbe</label>
-            <input type="color" id="advColor" value="#ffffff" title="Farbe des ausgewählten Elements">
-          </div>
-          <div class="adv-two-col">
-            <div class="adv-field">
-              <label for="advCx" class="adv-label">X (mm)</label>
-              <input type="number" id="advCx" class="sp-num adv-num-full" step="0.5" value="25" title="Horizontale Position des Elements (Mitte, mm)">
-            </div>
-            <div class="adv-field">
-              <label for="advCy" class="adv-label">Y (mm)</label>
-              <input type="number" id="advCy" class="sp-num adv-num-full" step="0.5" value="75" title="Vertikale Position des Elements (Mitte, mm)">
-            </div>
-          </div>
-          <div class="adv-two-col">
-            <div class="adv-field">
-              <label for="advW" class="adv-label">Breite (mm)</label>
-              <input type="number" id="advW" class="sp-num adv-num-full" step="0.5" min="0.5" value="30" title="Breite des Elements in mm">
-            </div>
-            <div class="adv-field">
-              <label for="advH" class="adv-label">Höhe (mm)</label>
-              <input type="number" id="advH" class="sp-num adv-num-full" step="0.5" min="0.5" value="30" title="Höhe des Elements in mm">
-            </div>
-          </div>
-          <div class="adv-field">
-            <label for="advRot" class="adv-label">Drehung (°)</label>
-            <input type="range" id="advRot" min="-180" max="180" step="1" value="0" title="Drehung des Elements in Grad (−180 bis 180)">
-            <span class="badge" id="advRotVal">0°</span>
-          </div>
-          <div class="adv-field">
-            <label class="adv-label">Richtung</label>
-            <div id="advDirSeg" class="seg-group seg-sm" style="width:100%">
-              <button type="button" id="advDirRaised" class="seg seg-active" style="flex:1" title="Element steht hervor">Erhaben</button>
-              <button type="button" id="advDirEngraved" class="seg" style="flex:1" title="Element ist eingraviert">Vertieft</button>
-            </div>
-          </div>
-          <div class="adv-field" id="advAutoHeightsField" hidden>
-            <label class="adv-label toggle">
-              <input type="checkbox" id="advAutoHeights" title="Einfarbige Elemente drucken als gemeinsamer Ebenen-Stapel (wie AMS): jede Ebene ist eine massive einfarbige Schicht, untere Farben laufen unter höheren durch. Gleiche Farbe = gleiche Ebene; Elemente in der Grundfarbe bleiben auf Plattenhöhe. Relief-Höhe wirkt dann als manueller Override (leer = automatisch)."> Höhe je Farbe (AMS-Ebenen)
-            </label>
-          </div>
-          <div class="adv-field" id="advTopLayerField" hidden>
-            <label class="adv-label toggle" style="flex:1">
-              <input type="checkbox" id="advTopLayer" title="Deckschicht: eine eigene Farbe als oberste Ebene des Werkstücks (Ebene 1). Erhaben: durchgehende Fläche über der ganzen Platte, die Motive stapeln darauf. Vertieft: oberstes Plattenband; die Motive gravieren hindurch. Elemente in der Grundfarbe stanzen weiterhin durch. Eine Deckschicht in der Grundfarbe wird ignoriert (die Plattenoberseite hat diese Farbe bereits)."> Deckschicht
-            </label>
-            <input type="color" id="advTopLayerColor" value="#ffffff" title="Farbe der Deckschicht">
-          </div>
-          <div class="adv-field" id="advReliefHeightField" hidden>
-            <label for="advReliefHeight" class="adv-label">Relief-Höhe (mm)</label>
-            <input type="number" id="advReliefHeight" class="sp-num adv-num-full" step="0.2" min="0" value="1" title="Wie weit das Element hervorsteht bzw. vertieft ist (0 = kein Relief; Gestuft: die oberste Farbe erreicht diese Höhe; bei „Höhe je Farbe“: manueller Override, leer = automatisch)">
-          </div>
-          <div class="adv-field">
-            <label class="adv-label toggle">
-              <input type="checkbox" id="advCutout" title="Element als Aussparung (Loch) aus dem Objekt herausschneiden"> Als Loch ausschneiden
-            </label>
-          </div>
-          <div class="adv-field" id="advCenterField">
-            <label class="adv-label">Ausrichten</label>
-            <div style="display:flex;gap:6px">
-              <button type="button" id="centerHAdv" class="btn" style="flex:1" title="Element horizontal zentrieren (Mitte der Platte)">↔ Zentrieren</button>
-              <button type="button" id="centerVAdv" class="btn" style="flex:1" title="Element vertikal zentrieren (Mitte der Platte)">↕ Zentrieren</button>
-            </div>
-          </div>
-        </div>
-      </details>
-
-      <!-- 4b. Ausrichten (snap settings — editor-only, not stored in doc) -->
-      <details class="acc" open>
-        <summary>Einrasten</summary>
-        <div class="acc-body adv-section">
-          <div class="adv-field">
+    <button type="button" id="undoBtn" title="Rückgängig (Strg/Cmd+Z)" aria-label="Rückgängig"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5 3 7l3.5 3.5"/><path d="M3 7h6.2a3.6 3.6 0 1 1 0 7.2H7.5"/></svg></button>
+    <button type="button" id="redoBtn" title="Wiederholen (Strg/Cmd+Umschalt+Z)" aria-label="Wiederholen"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 3.5 13 7l-3.5 3.5"/><path d="M13 7H6.8a3.6 3.6 0 1 0 0 7.2H8.5"/></svg></button>
+    <div id="snapWrap">
+      <button type="button" id="snapBtn" title="Einrasten-Optionen" aria-label="Einrasten-Optionen" aria-haspopup="true" aria-expanded="false"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.3" rx="1.4"/><path d="M5.5 7V5.4a2.5 2.5 0 0 1 5 0V7"/></svg></button>
+      <div id="snapPopover" hidden>
+        <div class="adv-field">
             <label class="adv-label toggle">
               <input type="checkbox" id="snapPlate" title="Beim Ziehen an Plattenrändern und Plattenmitte einrasten"> An Platte (Kanten/Mitte)
             </label>
@@ -331,17 +35,114 @@
             <label for="snapGrid" class="adv-label">Raster (mm, 0 = aus)</label>
             <input type="number" id="snapGrid" class="sp-num adv-num-full" min="0" max="50" step="0.5" value="0" title="Beim Ziehen am Raster einrasten (0 = kein Raster)">
           </div>
-        </div>
-      </details>
+      </div>
+    </div>
+    <button type="button" id="openBtn" title="Projekt öffnen (.json)">Öffnen</button>
+    <button type="button" id="saveBtn" title="Projekt speichern (.json)">Speichern</button>
+    <button type="button" id="exportBtn" title="3D-Modell exportieren (3MF/STL/PNG)">Exportieren</button>
+    <button type="button" id="tourBtn" aria-label="Tour" title="Kurze Einführung">?</button>
+  </div>
+</header>
+<main id="editor">
+  <aside id="sidebarAdvanced" class="sidebar">
+    <div class="panel-head">Dokument</div>
+    <div class="adv-scroll">
 
-      <!-- 5. 3D / Export (doc-level detail params) -->
-      <details class="acc" id="acc3d" open>
-        <summary>3D / Export</summary>
+      <!-- 1. Werkstueck: alles, was die Platte/das Objekt selbst beschreibt -->
+      <details class="acc" id="accWerkstueck" open>
+        <summary>Werkstück</summary>
         <div class="acc-body adv-section">
+          <div class="adv-field">
+            <label class="adv-label">Form</label>
+            <div id="shapeSeg" class="seg-group seg-sm" style="width:100%">
+              <button type="button" id="shapeRect" class="seg seg-active" style="flex:1" title="Rechteckige Form">Rechteck</button>
+              <button type="button" id="shapeCircle" class="seg" style="flex:1" title="Kreisförmige Form">Kreis</button>
+              <button type="button" id="shapeFree" class="seg" style="flex:1" title="Freie Form (Bildkontur)">Frei</button>
+              <button type="button" id="shapeImage" class="seg" style="flex:1" title="Bild-Objekt: das Bild selbst ist das Werkstück (keine Platte)">Bild</button>
+            </div>
+          </div>
+          <div class="adv-two-col" id="simpleSizeSection">
+            <div class="adv-field">
+              <label for="sizeW" class="adv-label">Breite (mm)</label>
+              <input type="number" id="sizeW" class="sp-num adv-num-full" min="5" max="500" step="1" value="50" title="Breite der Platte in mm">
+            </div>
+            <div class="adv-field">
+              <label for="sizeH" class="adv-label">Höhe (mm)</label>
+              <input type="number" id="sizeH" class="sp-num adv-num-full" min="5" max="500" step="1" value="150" title="Höhe der Platte in mm">
+            </div>
+          </div>
           <div class="adv-field">
             <label for="advThickness" class="adv-label">Dicke (mm)</label>
             <input type="number" id="advThickness" class="sp-num adv-num-full" step="0.5" min="0.5" value="3" title="Gesamtdicke des Objekts in mm">
           </div>
+          <div class="adv-field" id="cornerField">
+            <label for="cornerMm" class="adv-label">Ecken (mm)</label>
+            <input type="number" id="cornerMm" class="sp-num adv-num-full" min="0" max="40" step="0.5" value="4" title="Eckenradius des Rechtecks in mm (0 = scharfe Ecken)">
+          </div>
+          <div class="adv-field" id="borderField" hidden>
+            <label for="borderMm" class="adv-label">Rand (mm)</label>
+            <input type="number" id="borderMm" class="sp-num adv-num-full" min="0" max="50" step="0.5" value="2" title="Randbreite in mm (Freiform)">
+          </div>
+          <div class="adv-field">
+            <label for="advBaseColor" class="adv-label">Grundfarbe</label>
+            <input type="color" id="advBaseColor" value="#ffffff" title="Farbe der Grundplatte">
+          </div>
+          <div class="adv-field" id="frameField">
+            <label class="adv-label">Rahmen (Breite · Höhe · Farbe)</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input type="number" id="frameMm" class="sp-num" style="flex:1" min="0" max="20" step="0.5" value="0" title="Breite des erhabenen Rahmens am Plattenrand (0 = aus)" aria-label="Rahmenbreite in mm">
+              <input type="number" id="frameHeightMm" class="sp-num" style="flex:1" min="0" max="12" step="0.2" value="2" title="Höhe des Rahmens über der Platte in mm" aria-label="Rahmenhöhe in mm">
+              <input type="color" id="frameColor" value="#000000" title="Farbe des Rahmens">
+            </div>
+          </div>
+          <div class="adv-field" id="simpleMountSection">
+            <label class="adv-label">Befestigung</label>
+            <div id="mountSeg" class="seg-group seg-sm" style="width:100%">
+              <button type="button" id="mountNone" class="seg seg-active" style="flex:1" title="Keine Befestigung">Keine</button>
+              <button type="button" id="mountHole" class="seg" style="flex:1" title="Loch zum Aufhängen">Loch</button>
+              <button type="button" id="mountLoop" class="seg" style="flex:1" title="Öse (Lasche mit Loch zum Aufhängen)">Öse</button>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- Stapelung: doc-weite Farb-/Höhen-Politik des Ebenen-Stapels -->
+      <details class="acc" id="accStapelung" open>
+        <summary>Stapelung</summary>
+        <div class="acc-body adv-section">
+          <div class="adv-field">
+            <label class="adv-label">Tiefe (alle Ebenen)</label>
+            <div id="depthSeg" class="seg-group seg-sm" style="width:100%">
+              <button type="button" id="depthRaised" class="seg seg-active" style="flex:1" title="Alle Ebenen erhaben (stehen hervor); gilt auch für neue Elemente">Erhaben</button>
+              <button type="button" id="depthEngraved" class="seg" style="flex:1" title="Alle Ebenen vertieft (eingraviert); gilt auch für neue Elemente">Vertieft</button>
+            </div>
+          </div>
+          <div class="adv-field" id="advAutoHeightsField">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="advAutoHeights" title="Einfarbige Elemente drucken als gemeinsamer Ebenen-Stapel (wie AMS): jede Ebene ist eine massive einfarbige Schicht, untere Farben laufen unter höheren durch. Gleiche Farbe = gleiche Ebene; Elemente in der Grundfarbe bleiben auf Plattenhöhe. Relief-Höhe wirkt dann als manueller Override (leer = automatisch)."> Höhe je Farbe (AMS-Ebenen)
+            </label>
+          </div>
+          <div class="adv-field" id="advTopLayerField">
+            <label class="adv-label toggle" style="flex:1">
+              <input type="checkbox" id="advTopLayer" title="Deckschicht: eine eigene Farbe als oberste Ebene des Werkstücks (Ebene 1). Erhaben: durchgehende Fläche über der ganzen Platte, die Motive stapeln darauf. Vertieft: oberstes Plattenband; die Motive gravieren hindurch. Gilt auch für Farbebenen im AMS-Stil: die Palette rückt eine Ebene tiefer bzw. höher. Elemente in der Grundfarbe stanzen weiterhin durch. Eine Deckschicht in der Grundfarbe wird ignoriert (die Plattenoberseite hat diese Farbe bereits)."> Deckschicht
+            </label>
+            <input type="color" id="advTopLayerColor" value="#ffffff" title="Farbe der Deckschicht">
+          </div>
+          <div class="adv-field">
+            <label for="advColorStep" class="adv-label">Farbschichten</label>
+            <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="2" title="Höhenunterschied zwischen Farbschichten in Druck-Schichten">
+          </div>
+          <div class="adv-field" id="amsPaletteField" hidden>
+            <label class="adv-label">AMS-Filament-Palette (1 = unterste Schicht)</label>
+            <div id="amsPaletteHost" class="adv-swatches"></div>
+          </div>
+        </div>
+      </details>
+
+      <!-- 4. Druck & Export (nur Erweitert) -->
+      <details class="acc" id="accDruck" open>
+        <summary>Druck &amp; Export</summary>
+        <div class="acc-body adv-section">
           <div class="adv-field">
             <label for="advBaseThickness" class="adv-label">Basis-Dicke (mm)</label>
             <input type="number" id="advBaseThickness" class="sp-num adv-num-full" step="0.2" min="0" value="0" title="Dicke der massiven Grundplatte unter dem vertieften Relief (0 = automatisch)">
@@ -355,16 +156,8 @@
             <input type="number" id="advResolution" class="sp-num adv-num-full" step="64" min="64" value="1024" title="Bildauflösung für die Umwandlung (Pixel, höher = genauer/langsamer)">
           </div>
           <div class="adv-field">
-            <label for="advColorStep" class="adv-label">Farbschichten</label>
-            <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="2" title="Höhenunterschied zwischen Farbschichten in Schichten">
-          </div>
-          <div class="adv-field">
-            <label for="advFrameHeight" class="adv-label">Rahmenhöhe (mm)</label>
-            <input type="number" id="advFrameHeight" class="sp-num adv-num-full" step="0.2" min="0" max="12" value="2" title="Höhe des erhabenen Rahmens über der Platte in mm">
-          </div>
-          <div class="adv-field">
-            <label for="advBaseColor" class="adv-label">Grundfarbe</label>
-            <input type="color" id="advBaseColor" value="#ffffff" title="Farbe der Grundplatte">
+            <button type="button" id="thinCheckBtn" class="btn" style="width:100%" title="Markiert gedruckte Bereiche, die schmaler als die Düse (0,4 mm) sind — sie verschwinden im Druck oder werden unsauber.">Dünne Stellen prüfen</button>
+            <div id="thinCheckStatus" class="hint" aria-live="polite"></div>
           </div>
         </div>
       </details>
@@ -373,9 +166,167 @@
   </aside>
   <section id="preview">
     <div class="view-toggle"><button id="view2dBtn" class="seg seg-active" title="2D-Vorschau">2D</button><button id="view3dBtn" class="seg" title="3D-Vorschau (rotierbar)">3D</button><button id="viewSplitBtn" class="seg" title="2D und 3D nebeneinander">Geteilt</button></div>
-    <canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf."></canvas>
-    <canvas id="preview3dCanvas" width="800" height="1000" hidden></canvas>
+    <div id="layerSliderWrap" hidden>
+      <input type="range" id="layerSlider" min="2" max="100" step="1" value="100" title="Schicht-Vorschau: Modell nur bis zu dieser Höhe anzeigen (100 % = alles)" aria-label="Schicht-Vorschau">
+    </div>
+    <div id="selToolbar" role="toolbar" aria-label="Element-Aktionen" hidden>
+      <button type="button" id="selDupBtn" title="Duplizieren (Strg/Cmd+D)">⧉</button>
+      <button type="button" id="selCenterHBtn" title="Horizontal zentrieren">↔</button>
+      <button type="button" id="selCenterVBtn" title="Vertikal zentrieren">↕</button>
+      <button type="button" id="selDelBtn" title="Löschen (Entf)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.8 4.3h10.4"/><path d="M6.2 4.3V3a.8.8 0 0 1 .8-.8h2a.8.8 0 0 1 .8.8v1.3"/><path d="M4.3 4.3l.6 8.6a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.6"/></svg></button>
+    </div>
+    <div id="stageHero" hidden>
+      <div class="hero-card">
+        <div class="hero-icon">⬚</div>
+        <p class="hero-title">Zieh ein Bild hierher</p>
+        <p class="hero-sub">… oder starte rechts mit <strong>+ Bild</strong>, <strong>+ Text</strong> oder <strong>+ QR</strong>.</p>
+      </div>
+    </div>
+    <div class="pane pane-2d"><canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf. Beim Skalieren an den Ecken hält Umschalt das Seitenverhältnis."></canvas></div>
+    <div class="pane pane-3d"><canvas id="preview3dCanvas" width="800" height="1000" hidden></canvas></div>
   </section>
+  <div id="rightCol">
+  <aside id="sidebarElement" class="sidebar">
+    <div class="panel-head">Element</div>
+    <div class="adv-scroll">
+      <!-- Hinzufuegen: neue Elemente entstehen dort, wo sie bearbeitet werden -->
+      <div class="adv-section add-dock"><div class="sp-add-row"><button type="button" id="addImageBtn" class="btn" title="Bild hinzufügen">+ Bild</button><button type="button" id="addTextBtn" class="btn" title="Text hinzufügen">+ Text</button><button type="button" id="addQrBtn" class="btn" title="QR-Code hinzufügen">+ QR</button></div></div>
+      <!-- 3. Element: alles am ausgewählten Element -->
+      <div id="accElement">
+        <div class="acc-body adv-section">
+          <p class="element-empty hint">Kein Element ausgewählt.<br>Füge oben eines hinzu oder klicke ein Element auf der Arbeitsfläche an.</p>
+          <div class="insp-group">
+            <div class="group-label">Inhalt</div>
+            <div class="adv-field" id="advTextField" hidden><label for="advText" class="adv-label">Text</label><input type="text" id="advText" class="text-input" value="" title="Textinhalt des Elements"></div>
+            <div class="adv-field" id="advFontField" hidden>
+            <label for="advFontFamily" class="adv-label">Schriftart</label>
+            <select id="advFontFamily" class="text-input" title="Schriftart des Textes"></select>
+            <div class="adv-font-row">
+              <label class="adv-label toggle"><input type="checkbox" id="advFontBold" title="Fett"> Fett</label>
+              <button type="button" id="fontUploadBtn" class="btn" title="Eigene Schrift laden (.ttf/.otf/.woff)">Schrift laden…</button>
+            </div>
+          </div>
+            <div class="adv-field" id="simpleBildSection" hidden>
+            <button type="button" id="removeBgBtn" class="btn" style="width:100%" title="Hintergrund per KI entfernen">Hintergrund entfernen (KI)</button>
+            <div id="bgStatus" class="hint" aria-live="polite"></div>
+          </div>
+          </div>
+          <div class="insp-group">
+            <div class="group-label">Relief</div>
+            <div class="adv-field">
+            <label for="advColor" class="adv-label">Farbe</label>
+            <input type="color" id="advColor" value="#ffffff" title="Farbe des ausgewählten Elements">
+          </div>
+            <div class="adv-field">
+            <label class="adv-label">Tiefenmodus</label>
+            <div id="modeSeg" class="seg-group seg-sm adv-seg-full">
+              <button type="button" id="modeSolid" class="seg seg-active" style="flex:1" title="Einfarbig (eine Tiefe)">Einfarbig</button>
+              <button type="button" id="modeColorLayers" class="seg" style="flex:1" title="Mehrfarbig: jede Farbe auf eigener Schicht">Farbebenen</button>
+              <button type="button" id="modeHeightmap" class="seg" style="flex:1" title="Helligkeit als Höhe (Graustufenrelief)">Höhenrelief</button>
+            </div>
+          </div>
+            <div class="adv-field">
+            <label class="adv-label">Richtung</label>
+            <div id="advDirSeg" class="seg-group seg-sm" style="width:100%">
+              <button type="button" id="advDirRaised" class="seg seg-active" style="flex:1" title="Element steht hervor">Erhaben</button>
+              <button type="button" id="advDirEngraved" class="seg" style="flex:1" title="Element ist eingraviert">Vertieft</button>
+            </div>
+          </div>
+            <div class="adv-field" id="advReliefHeightField" hidden>
+            <label for="advReliefHeight" class="adv-label">Relief-Höhe (mm)</label>
+            <input type="number" id="advReliefHeight" class="sp-num adv-num-full" step="0.2" min="0" value="1" title="Wie weit das Element hervorsteht bzw. vertieft ist (0 = kein Relief; Gestuft: die oberste Farbe erreicht diese Höhe; bei „Höhe je Farbe“: manueller Override, leer = automatisch)">
+          </div>
+            <div class="adv-field">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="advCutout" title="Element als Aussparung (Loch) aus dem Objekt herausschneiden"> Als Loch ausschneiden
+            </label>
+          </div>
+          </div>
+          <div class="insp-group" id="convGroup">
+            <div class="group-label">Umwandlung</div>
+            <div class="adv-field">
+              <label for="advThreshold" class="adv-label">Schwellwert (0–255)</label>
+              <input type="range" id="advThreshold" min="0" max="255" step="1" value="128" title="Schwellwert für Schwarz/Weiß-Umwandlung (0–255)">
+              <span class="badge" id="advThresholdVal">128</span>
+            </div>
+            <div class="adv-field">
+              <label class="adv-label toggle">
+                <input type="checkbox" id="advInvert" title="Hell/Dunkel tauschen"> Invertieren
+              </label>
+            </div>
+            <div class="adv-field">
+              <label for="advNumColors" class="adv-label">Anzahl Farben</label>
+              <input type="number" id="advNumColors" class="sp-num" min="2" max="16" step="1" value="8" title="Anzahl reduzierter Farben (2–16)">
+            </div>
+            <div class="adv-field" id="advMinIslandField" hidden>
+              <label for="advMinIsland" class="adv-label">Inseln entfernen (px)</label>
+              <input type="range" id="advMinIsland" min="0" max="2000" step="1" value="0" title="Entfernt kleine Pixel-Inseln/Sprenkel unterhalb dieser Größe (0 = aus)">
+              <span class="badge" id="advMinIslandVal">0</span>
+            </div>
+            <div class="adv-field" id="colorStyleField" hidden>
+              <label class="adv-label">Farb-Stapelung</label>
+              <div id="colorStyleSeg" class="seg-group seg-sm" style="width:100%">
+                <button type="button" id="colorStepped" class="seg seg-active" style="flex:1" title="Gestuftes Relief (jede Farbe eigene Höhe)">Gestuft</button>
+                <button type="button" id="colorFlush" class="seg" style="flex:1" title="Alle Farben auf gleicher Höhe — eine ebene Fläche">Eine Fläche</button>
+                <button type="button" id="colorBands" class="seg" style="flex:1" title="Farbschichten: eine Farbe pro Druckschicht (AMS, &gt;4 Farben)">AMS</button>
+              </div>
+            </div>
+            <div class="adv-field" id="advPaletteField" hidden>
+              <label class="adv-label">Palette (Farbe ändern / Reihenfolge ziehen)</label>
+              <div id="advPaletteSwatch" class="adv-swatches"></div>
+            </div>
+          
+          </div>
+          <div class="insp-group">
+            <div class="group-label">Anordnung</div>
+            <div class="adv-two-col">
+            <div class="adv-field">
+              <label for="advCx" class="adv-label">X (mm)</label>
+              <input type="number" id="advCx" class="sp-num adv-num-full" step="0.5" value="25" title="Horizontale Position des Elements (Mitte, mm)">
+            </div>
+            <div class="adv-field">
+              <label for="advCy" class="adv-label">Y (mm)</label>
+              <input type="number" id="advCy" class="sp-num adv-num-full" step="0.5" value="75" title="Vertikale Position des Elements (Mitte, mm)">
+            </div>
+          </div>
+            <div class="adv-two-col">
+            <div class="adv-field">
+              <label for="advW" class="adv-label">Breite (mm)</label>
+              <input type="number" id="advW" class="sp-num adv-num-full" step="0.5" min="0.5" value="30" title="Breite des Elements in mm">
+            </div>
+            <div class="adv-field">
+              <label for="advH" class="adv-label">Höhe (mm)</label>
+              <input type="number" id="advH" class="sp-num adv-num-full" step="0.5" min="0.5" value="30" title="Höhe des Elements in mm">
+            </div>
+          </div>
+            <div class="adv-field">
+            <label for="advRot" class="adv-label">Drehung (°)</label>
+            <input type="range" id="advRot" min="-180" max="180" step="1" value="0" title="Drehung des Elements in Grad (−180 bis 180)">
+            <span class="badge" id="advRotVal">0°</span>
+          </div>
+            <div class="adv-field" id="simpleCenterSection">
+            <label class="adv-label">Ausrichten</label>
+            <div style="display:flex;gap:6px">
+              <button type="button" id="centerH" class="btn" style="flex:1" title="Element horizontal zentrieren (Mitte der Platte)">↔ Zentrieren</button>
+              <button type="button" id="centerV" class="btn" style="flex:1" title="Element vertikal zentrieren (Mitte der Platte)">↕ Zentrieren</button>
+            </div>
+          </div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /adv-scroll -->
+  </aside>
+  <aside id="sidebarEbenen" class="sidebar">
+    <div class="panel-head">Ebenen</div>
+    <div class="adv-scroll">
+      <div class="acc-body adv-section">
+          <ul id="advLayers" class="adv-layers-list"></ul>
+          <p id="advLayersEmpty" class="hint">Keine Elemente vorhanden.</p>
+          
+        </div>
+    </div>
+  </aside>
+  </div><!-- /rightCol -->
 </main>
 
 <!-- Export dialog (kept for Task 3 rework) -->

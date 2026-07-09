@@ -28,7 +28,7 @@
 
   api.buildPreviewScene = function (parts) {
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xcccccc); // P1: lighter grey for better model contrast.
+    scene.background = new THREE.Color(0x2b2922); // Werkstatt stage: warm charcoal — the model pops like in a slicer.
     let meshCount = 0;
     for (const part of parts) {
       if (!part.facets || !part.facets.length) continue;
@@ -42,10 +42,13 @@
       scene.add(new THREE.Mesh(geo, mat));
       meshCount++;
     }
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7)); // more fill on the dark stage
     const dir = new THREE.DirectionalLight(0xffffff, 0.9);
     dir.position.set(0.4, -0.7, 1.0);
     scene.add(dir);
+    const rim = new THREE.DirectionalLight(0xfff4e0, 0.25); // warm rim from behind-left
+    rim.position.set(-0.6, 0.8, 0.5);
+    scene.add(rim);
     const box = new THREE.Box3().setFromObject(scene);
     const c = new THREE.Vector3(), s = new THREE.Vector3();
     if (box.isEmpty()) { c.set(0, 0, 0); s.set(0, 0, 0); }
@@ -67,7 +70,28 @@
 
   let renderer = null, camera = null, current = null, raf = 0, active = false;
   let getPartsFn = null, canvasEl = null;
-  const orbit = { theta: 0.9, phi: 1.0, radius: 100, center: null }; // center set in fitCamera (after THREE loads)
+  let clipRatio = 1; // Schicht-Vorschau: 1 = full model, <1 clips above zMin + t*range
+  // Start view: from the FRONT (south, theta -90°) with a slight 3/4 offset — the
+  // design reads upright immediately. (theta 0.9 viewed from the east: everything
+  // started ~90° rotated.) phi ~0.95 tilts the plate back for depth.
+  const orbit = { theta: -Math.PI / 2 + 0.28, phi: 0.95, radius: 100, center: null }; // center set in fitCamera (after THREE loads)
+
+  // Schicht-Vorschau: clip the model above a height fraction, like a slicer's
+  // layer scrubber. Model space is z-up mm, so one global renderer clipping
+  // plane (normal -z) keeps everything below the cut — no per-material setup.
+  function applyClip() {
+    if (!renderer || !window.THREE) return;
+    if (!current || clipRatio >= 1) { renderer.clippingPlanes = []; return; }
+    const zMin = current.center[2] - current.size[2] / 2;
+    const zMax = current.center[2] + current.size[2] / 2;
+    const cut = zMin + Math.max(0.02, clipRatio) * (zMax - zMin);
+    renderer.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 0, -1), cut)];
+  }
+  api.setClipRatio = function (t) {
+    clipRatio = Math.max(0, Math.min(1, t));
+    applyClip();
+    renderOnce();
+  };
 
   function renderOnce() {
     if (renderer && current) renderer.render(current.scene, camera);
@@ -105,6 +129,7 @@
     api.disposeScene(current);              // free the previous scene before replacing it
     current = api.buildPreviewScene(parts);
     if (!orbit.center) fitCamera(current); else api.orbitCamera(camera, orbit.center, orbit.radius, orbit.theta, orbit.phi);
+    applyClip();                            // re-derive the cut from the new z-range
     renderOnce();
   };
 
@@ -132,6 +157,7 @@
     api.disposeScene(current);              // free a prior scene if show() runs again
     current = api.buildPreviewScene(parts);
     fitCamera(current);
+    applyClip();
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
     loop();

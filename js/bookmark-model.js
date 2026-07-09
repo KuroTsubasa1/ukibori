@@ -82,7 +82,7 @@ function defaultDepth(type) {
   };
 }
 
-// Rand-Rahmen (raised ring frame) default for rect/circle bodies.
+// Rand-Rahmen (raised ring frame) default for rect/circle/free bodies.
 // widthMm 0 = OFF (parity); heightMm = extrusion above the base top face.
 function defaultFrame() {
   return { widthMm: 0, heightMm: 2, color: "#000000" };

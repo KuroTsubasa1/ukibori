@@ -341,25 +341,26 @@
   // bands). Derived heights carry NO layerH floor so a compressed stack keeps
   // DISTINCT floors (uncompressed step is >= layerH anyway). Returns null when
   // the feature is off / not applicable → classic depth.heightMm behavior.
-  // Ordered distinct auto-layer colors for one direction: doc.amsPalette colors
-  // first (palette order = filament order), then the rest in element stacking
-  // order (doc.elements[0] lowest). Base-colored and non-printing (hidden /
-  // cutout / undecoded-image) elements take no slot. UPPERCASE hexes.
+  // Ordered auto-layer colors for one direction: the FULL doc.amsPalette leads
+  // the order — used or not — so a palette color sits at its ABSOLUTE slot,
+  // identical to its layer in AMS Farbebenen images (unused slots print as
+  // under-layers, exactly like the AMS image stack does for skipped layers).
+  // Non-palette colors follow in element stacking order (doc.elements[0]
+  // lowest). Base-colored and non-printing (hidden / cutout / undecoded-image)
+  // elements take no extra slot. UPPERCASE hexes.
   function __autoSolidOrder(doc, dir) {
     const baseHex = String(doc.body.baseColor || "").toUpperCase();
     const ams = Array.isArray(doc.amsPalette) ? doc.amsPalette : [];
-    const inPal = [], rest = [];
+    const rest = [];
     for (const e of doc.elements) {
       if (!e || !e.depth || e.depth.mode !== "solid" || e._hidden || e.cutout) continue;
       if (e.type === "image" && !e._img) continue; // undecoded image prints nothing
       if ((e.depth.direction || "raised") !== dir) continue;
       const h = String(e.color || "").toUpperCase();
       if (!h || h === baseHex) continue;
-      if (ams.indexOf(h) !== -1) { if (inPal.indexOf(h) === -1) inPal.push(h); }
-      else if (rest.indexOf(h) === -1) rest.push(h);
+      if (ams.indexOf(h) === -1 && rest.indexOf(h) === -1) rest.push(h);
     }
-    inPal.sort((a, b) => ams.indexOf(a) - ams.indexOf(b));
-    const order = inPal.concat(rest);
+    const order = ams.concat(rest);
     // Deckschicht (top layer): the doc-level cover color always takes rank 0 — the
     // workpiece's face (engraved: topmost plate band; raised: full-face slab) — and
     // pushes element colors one step further. Ignored when it matches the base color
@@ -503,9 +504,15 @@
     // global palette, so the same color lands at the same depth across every element.
     const ams = (Array.isArray(doc.amsPalette) && doc.amsPalette.length) ? doc.amsPalette : null;
     const amsRank = ams ? ((hex) => { const i = ams.indexOf(hex); return i < 0 ? ams.length - 1 : i; }) : null;
+    // Deckschicht on the shared palette: the deck color becomes the topmost plate band
+    // and every palette layer carves ONE STEP DEEPER (through the deck). The deck also
+    // counts in the carve-budget compression. Motif pixels never quantize to the deck
+    // color — it is the workpiece's face, not a palette slot.
+    const deckHexE = doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null;
+    const deckShiftE = (deckHexE && deckHexE !== baseHex && ams) ? 1 : 0;
     // Compress the per-layer step so the whole palette fits the plate's carve budget — deep
     // palettes then keep DISTINCT floors instead of clamping several layers onto one depth.
-    const amsStep = ams ? Math.min(step, maxRecess / ams.length) : step;
+    const amsStep = ams ? Math.min(step, maxRecess / (ams.length + deckShiftE)) : step;
     for (const ei of special) {
       const el = doc.elements[ei];
       const style = colorStyleOf(el);
@@ -544,7 +551,8 @@
         const N = sorted.length;
         const n = cols * rows;
         // depth of the color at sorted position k: global (amsRank+1)*step, else per-element (k+1)*step.
-        const depthOfPos = (k) => ams ? (amsRank(sorted[k]) + 1) * amsStep : (k + 1) * step;
+        // deckShiftE: with a Deckschicht, every palette layer carves one step deeper (through the deck).
+        const depthOfPos = (k) => ams ? (amsRank(sorted[k]) + 1 + deckShiftE) * amsStep : (k + 1) * step;
         // cumUpTo[k] = union of pixels of the colors at sorted positions 0..k (layer index <= this).
         const cumUpTo = new Array(N);
         cumUpTo[0] = presentSets.get(sorted[0]);
@@ -589,7 +597,8 @@
     // amsSolidBase keeps the surrounding plate one solid base color (only the inlay is multicolor).
     let bandHexes = (doc.amsSolidBase || bandsElemCount === 0)
       ? []
-      : (ams ? ams.slice() : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []));
+      : (ams ? (deckShiftE ? [deckHexE].concat(ams) : ams.slice())
+             : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []));
     // Auto layer heights (Höhe je Farbe): engraved Einfarbig elements split the plate
     // the same way — the whole workpiece becomes solid single-color layers, band k
     // matching the color at carve rank k (band 1 = shallowest = topmost). Only when
@@ -765,15 +774,47 @@
   // band(c,r) = footprint(c,r) > 0 && plateSdfMm(x,y) <= frame.widthMm && !cutout.
   function __frameBand(doc, grid, footprint, comp, domainExpanded) {
     const frame = doc.body.frame;
-    if (doc.body.shape === "free" || doc.body.shape === "image" || !frame || !((frame.widthMm || 0) > 0)) return null;
+    if (doc.body.shape === "image" || !frame || !((frame.widthMm || 0) > 0)) return null;
     // heightMm <= 0 emits no "rand" part, so the frame must be FULLY off (no band
     // either) — otherwise content in the band is silently swallowed with nothing
     // added (review finding).
     if (!((frame.heightMm || 0) > 0)) return null;
     const { cols, rows, pitch } = grid;
-    const plateSdfMm = window.bodySdfMm(doc.body);
     const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
     const band = new Uint8Array(cols * rows);
+
+    if (doc.body.shape === "free") {
+      // Free outline: no analytic SDF — measure the depth inside the plate with a
+      // chamfer DT seeded on the OUTSIDE cells; band = within frame.widthMm of the
+      // outer edge. (The border-capped footprint field can't be used directly: its
+      // values saturate at borderMm, so widthMm >= borderMm would swallow the whole
+      // silhouette.) The mount hole counts as INSIDE for the distance — like the
+      // rect/circle analytic SDF, the frame hugs the outer rim only and never rings
+      // the hole; band cells still require footprint>0, so the hole itself is clear.
+      const m = doc.mount || { type: "none" };
+      const hasHole = m.type === "hole" || m.type === "loop";
+      const holeR = hasHole ? (m.diameterMm || 0) / 2 : 0;
+      const outside = new Uint8Array(cols * rows);
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        if (footprint(c, r) > 0) continue;
+        if (hasHole) {
+          const x = domainExpanded ? grid.x0 + (c + 0.5) * pitch : (c + 0.5) / sx;
+          const y = domainExpanded ? grid.y0 + (r + 0.5) * pitch : (r + 0.5) / sy;
+          if (Math.hypot(x - m.xMm, y - m.yMm) <= holeR + pitch) continue; // hole ≠ outside
+        }
+        outside[r * cols + c] = 1;
+      }
+      const depth = __chamferDT(outside, cols, rows); // cells to the outer edge
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        const i = r * cols + c;
+        if (comp && comp.cutout[i]) continue;        // cutout holes win over the ring
+        if (!(footprint(c, r) > 0)) continue;
+        if (depth[i] * pitch <= frame.widthMm) band[i] = 1;
+      }
+      return band;
+    }
+
+    const plateSdfMm = window.bodySdfMm(doc.body);
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const i = r * cols + c;
       if (comp && comp.cutout[i]) continue;        // cutout holes win over the ring
@@ -895,25 +936,35 @@
         if (r >= 0) autoRank.set(ei, r);
       });
     }
-    if (autoRank.size) {
+    // --- Deckschicht: the workpiece's face at [T, T+step] --------------------
+    // Independent of the Höhe-je-Farbe flag so it also serves pure Farbebenen-AMS
+    // docs. It carries: the solid auto participants (their ranks already include
+    // the deck at order[0]) and raised AMS-bands elements with a shared palette
+    // (their filament stacks shift one step up). Everything else punches through:
+    // base-colored/overridden solids, engraved motifs (they carve down from T),
+    // stepped/flush colorLayers and heightmap elements (they own [T..] themselves),
+    // cutouts and the frame ring.
+    const baseHexR = String(doc.body.baseColor || "").toUpperCase();
+    const deckHex = (doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null);
+    const deckValid = !!(deckHex && deckHex !== baseHexR);
+    const amsShifted = new Set(); // raised AMS-bands elements riding on the deck
+    if (deckValid && ams) {
+      doc.elements.forEach((el, ei) => {
+        if (el && el.type === "image" && !el._hidden && el._img &&
+            el.depth && el.depth.mode === "colorLayers" && colorStyleOf(el) === "bands" &&
+            (el.depth.direction || "raised") === "raised") amsShifted.add(ei);
+      });
+    }
+    if (autoRank.size || (deckValid && amsShifted.size)) {
       const nn = cols * rows;
-      let maxL = 0; for (const r of autoRank.values()) if (r > maxL) maxL = r;
-      // Deckschicht: when a top-layer color leads the order, level 0 covers the WHOLE
-      // plate face (not just motif pixels) — the motif levels stack on top of it.
-      // Pixels owned by non-participating elements punch through it: base-colored and
-      // overridden solids, engraved motifs (they carve down from T), colorLayers/
-      // heightmap elements (they own [T..] themselves), cutouts and the frame ring.
-      const baseHexR = String(doc.body.baseColor || "").toUpperCase();
-      const deckHex = (doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null);
-      const deckOn = !!(deckHex && deckHex !== baseHexR && autoOrder[0] === deckHex);
-      // Heightmap elements build UP from the plate top regardless of direction, but an
-      // engraved-direction heightmap claims no ownership of its BRIGHT pixels (the
-      // generic mask is luminance-filtered for non-raised), so the owner-based punch-
-      // through below misses them. Exclude their opaque regions explicitly — same
-      // alpha>=128 criterion as buildHeightmapParts — or deck and heightmap floor
-      // would interpenetrate in [T, T+step].
-      let hmExclude = null;
-      if (deckOn) {
+      if (deckValid) {
+        // Heightmap elements build UP from the plate top regardless of direction, but an
+        // engraved-direction heightmap claims no ownership of its BRIGHT pixels (the
+        // generic mask is luminance-filtered for non-raised), so the owner-based punch-
+        // through below misses them. Exclude their opaque regions explicitly — same
+        // alpha>=128 criterion as buildHeightmapParts — or deck and heightmap floor
+        // would interpenetrate in [T, T+step].
+        let hmExclude = null;
         for (const el of doc.elements) {
           if (!el || !el.depth || el.depth.mode !== "heightmap") continue;
           if (el.type === "image" && !el._img) continue;
@@ -921,28 +972,29 @@
           if (!hmExclude) hmExclude = new Uint8Array(cols * rows);
           for (let i = 0; i < cols * rows; i++) if (d[i * 4 + 3] >= 128) hmExclude[i] = 1;
         }
+        const deckMember = (c, r) => {
+          const i = idx(c, r);
+          if (comp.cutout[i] || (band && band[i] === 1)) return false;
+          if (hmExclude && hmExclude[i] === 1) return false;
+          const o = comp.owner[i];
+          return o < 0 || autoRank.has(o) || amsShifted.has(o);
+        };
+        const facets = tracedFacets(deckMember, step, T);
+        if (facets.length) parts.push({ name: "deckschicht", color: window.hexToRgb(deckHex), facets });
       }
-      const deckMember = (c, r) => {
-        const i = idx(c, r);
-        if (comp.cutout[i] || (band && band[i] === 1)) return false;
-        if (hmExclude && hmExclude[i] === 1) return false;
-        const o = comp.owner[i];
-        return o < 0 || autoRank.has(o);
-      };
-      for (let L = 0; L <= maxL; L++) {
-        let member;
-        if (L === 0 && deckOn) {
-          member = deckMember;
-        } else {
+      // Solid participant levels. With a valid deck, autoOrder[0] is the deck color and
+      // element ranks start at 1 — their slabs land on top of the deck automatically.
+      if (autoRank.size) {
+        let maxL = 0; for (const r of autoRank.values()) if (r > maxL) maxL = r;
+        for (let L = (deckValid ? 1 : 0); L <= maxL; L++) {
           const region = new Uint8Array(nn);
           for (const [ei, r] of autoRank) {
             if (r < L) continue;
             for (const g of (byElem.get(ei) || [])) { const s = g.set; for (let i = 0; i < nn; i++) region[i] |= s[i]; }
           }
-          member = (c, r) => region[idx(c, r)] === 1;
+          const facets = tracedFacets((c, r) => region[idx(c, r)] === 1, step, T + L * step);
+          if (facets.length) parts.push({ name: "farbschicht-auto-" + (L + 1), color: window.hexToRgb(autoOrder[L]), facets });
         }
-        const facets = tracedFacets(member, step, T + L * step);
-        if (facets.length) parts.push({ name: "farbschicht-auto-" + (L + 1), color: window.hexToRgb(autoOrder[L]), facets });
       }
     }
 
@@ -959,10 +1011,12 @@
         const nn = cols * rows;
         let maxG = -1;
         colorGroups.forEach((g) => { const rk = amsRankR(g.hex); if (rk > maxG) maxG = rk; });
+        // Deckschicht: the whole filament stack rides one step up on the deck slab.
+        const zOff = amsShifted.has(ei) ? 1 : 0;
         for (let L = 0; L <= maxG; L++) {
           const region = new Uint8Array(nn);
           for (const g of colorGroups) if (amsRankR(g.hex) >= L) { const s = g.set; for (let i = 0; i < nn; i++) region[i] |= s[i]; }
-          const facets = tracedFacets((c, r) => region[idx(c, r)] === 1, step, T + L * step);
+          const facets = tracedFacets((c, r) => region[idx(c, r)] === 1, step, T + (L + zOff) * step);
           if (facets.length) parts.push({ name: "farbschicht-" + (ei + 1) + "-" + (L + 1), color: window.hexToRgb(ams[L]), facets });
         }
       } else if (isBandsColorLayers) {
@@ -1225,6 +1279,36 @@
   window.buildHeightmapParts = buildHeightmapParts;
   window.buildFrameParts = buildFrameParts;
   window.buildParts = buildParts;
+
+  // Dünne-Stellen-Prüfung: flag printed regions narrower than minWidthMm (nozzle
+  // width). Morphological opening via two chamfer DTs: erode the element mask by
+  // r = minWidth/2 (pixels deeper than r survive as the core), dilate the core
+  // back by r — mask pixels NOT recovered belong to features thinner than 2r
+  // (hairlines, thin necks, small islands). Returns the flag mask on a modest
+  // probe grid plus mm² total for a human-readable verdict.
+  function thinFeatureMask(doc, minWidthMm) {
+    // Probe at the doc's OWN resolution — a coarser grid would drop sub-cell
+    // hairlines from the mask and report "clean" for features the build includes.
+    const grid = gridForBody(doc.body, doc.resolution || 1024);
+    const { cols, rows, pitch } = grid;
+    const comp = composeDesignV2(doc, cols, rows);
+    const n = cols * rows;
+    const mask = new Uint8Array(n);
+    for (let i = 0; i < n; i++) mask[i] = (!comp.isBase[i] && !comp.cutout[i] && comp.owner[i] >= 0) ? 1 : 0;
+    const r = ((minWidthMm || 0.4) / 2) / pitch;   // radius in cells
+    const inv = new Uint8Array(n);
+    for (let i = 0; i < n; i++) inv[i] = mask[i] ? 0 : 1;
+    const dIn = __chamferDT(inv, cols, rows);      // depth inside the mask
+    const core = new Uint8Array(n);
+    for (let i = 0; i < n; i++) core[i] = (mask[i] && dIn[i] > r) ? 1 : 0;
+    const dCore = __chamferDT(core, cols, rows);   // distance to the eroded core
+    const thin = new Uint8Array(n);
+    let count = 0;
+    for (let i = 0; i < n; i++) if (mask[i] && !(dCore[i] <= r)) { thin[i] = 1; count++; }
+    return { thin, cols, rows, pitch, count, areaMm2: count * pitch * pitch };
+  }
+  window.thinFeatureMask = thinFeatureMask;
+
   // Editor UI: preview the AUTO height (Höhe je Farbe) an Einfarbig element falls
   // back to — ignores a set override (the input shows that itself) and applies the
   // engraved carve-budget compression so the shown value matches the build.
