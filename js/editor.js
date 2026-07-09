@@ -1437,10 +1437,7 @@
     // Default the file name from the first imported element (its source file name);
     // a user-typed name is never overwritten (only the shipped default/empty is).
     var nameEl = document.getElementById("exportName");
-    if (nameEl && (!nameEl.value.trim() || nameEl.value === "ukibori")) {
-      var named = doc.elements.find(function (e) { return e.name; });
-      if (named) nameEl.value = named.name;
-    }
+    if (nameEl) nameEl.value = defaultExportName();
     document.getElementById("exportModal").removeAttribute("hidden");
     setExportStatus("");
   });
@@ -2179,6 +2176,8 @@
     );
     var hero = document.getElementById("stageHero");
     if (hero) hero.hidden = doc.elements.length > 0;
+    var cnt = document.getElementById("layerCount");
+    if (cnt) { cnt.textContent = doc.elements.length; cnt.hidden = doc.elements.length === 0; }
   }
 
   // Backward-compat alias so existing call sites (and window.editor export) still work.
@@ -2778,11 +2777,21 @@
   }
 
   // ---- Speichern (Save) ----
+  // Default file name: the export field if the user set one, else the first
+  // imported element's file name, else "ukibori". Shared by Speichern + Export.
+  function defaultExportName() {
+    var field = document.getElementById("exportName");
+    var v = field ? field.value.trim() : "";
+    if (v && v !== "ukibori") return v;
+    var named = doc.elements.find(function (e) { return e.name; });
+    return named ? named.name : "ukibori";
+  }
+
   document.getElementById("saveBtn").addEventListener("click", function () {
     try {
       var json = window.serializeProject(doc);
       var blob = new Blob([json], { type: "application/json" });
-      var name = (document.getElementById("exportName") && document.getElementById("exportName").value.trim()) || "ukibori";
+      var name = defaultExportName();
       downloadBlob(blob, name + ".json");
     } catch (e) {
       if (window.__errs) window.__errs.push(String(e && e.message || e));

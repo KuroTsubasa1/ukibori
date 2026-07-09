@@ -229,6 +229,14 @@
     letter-spacing: .08em; text-transform: uppercase;
     color: var(--faint);
   }
+  .panel-count {
+    display: inline-block; margin-left: 4px;
+    min-width: 17px; padding: 0 5px;
+    border-radius: var(--radius-pill);
+    background: var(--surface2); color: var(--muted);
+    font-size: 10px; line-height: 16px; text-align: center;
+    font-variant-numeric: tabular-nums; letter-spacing: 0;
+  }
 
   /* Inspector empty state: hint on, controls dimmed & inert until a selection exists */
   #sidebarElement .element-empty { display: none; padding: 2px 0 4px; }
@@ -333,6 +341,7 @@
     white-space: nowrap;
   }
   .seg:hover { color: var(--ink); }
+  .seg:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-ring); }
   .seg.seg-active {
     background: var(--ink);
     color: var(--panel);
@@ -487,6 +496,9 @@
   .adv-field { display: flex; flex-direction: column; gap: 6px; }
   .adv-label { font-size: 12px; font-weight: 600; color: var(--muted); }
   .adv-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-1); }
+  /* checkbox + trailing control (e.g. Deckschicht color) on ONE row */
+  .adv-field-row { flex-direction: row; align-items: center; gap: var(--sp-1); }
+  .adv-field-row input[type=color] { flex: 0 0 auto; }
   .adv-num-full { width: 100%; }
   .adv-seg-full { width: 100%; }
 
@@ -593,6 +605,7 @@
   .adv-layers-list li:hover .layer-badge,
   .adv-layers-list li:focus-within .layer-badge { display: none; } /* swap badge ↔ actions */
   .adv-layers-list .adv-lbtn:hover { opacity: 1; color: var(--ink); background: var(--surface2); }
+  .adv-layers-list .adv-lbtn:focus-visible { outline: none; opacity: 1; box-shadow: 0 0 0 2px var(--accent-ring); }
   .adv-layers-list .layer-thumb {
     width: 30px; height: 30px; border-radius: 7px; flex-shrink: 0;
     background: var(--surface2); display: block; border: 1px solid var(--line);

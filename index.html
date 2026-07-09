@@ -21,6 +21,7 @@
     <div id="snapWrap">
       <button type="button" id="snapBtn" title="Einrasten-Optionen" aria-label="Einrasten-Optionen" aria-haspopup="true" aria-expanded="false"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.3" rx="1.4"/><path d="M5.5 7V5.4a2.5 2.5 0 0 1 5 0V7"/></svg></button>
       <div id="snapPopover" hidden>
+        <div class="group-label">Einrasten</div>
         <div class="adv-field">
             <label class="adv-label toggle">
               <input type="checkbox" id="snapPlate" title="Beim Ziehen an Plattenrändern und Plattenmitte einrasten"> An Platte (Kanten/Mitte)
@@ -122,7 +123,7 @@
               <input type="checkbox" id="advAutoHeights" title="Einfarbige Elemente drucken als gemeinsamer Ebenen-Stapel (wie AMS): jede Ebene ist eine massive einfarbige Schicht, untere Farben laufen unter höheren durch. Gleiche Farbe = gleiche Ebene; Elemente in der Grundfarbe bleiben auf Plattenhöhe. Relief-Höhe wirkt dann als manueller Override (leer = automatisch)."> Höhe je Farbe (AMS-Ebenen)
             </label>
           </div>
-          <div class="adv-field" id="advTopLayerField">
+          <div class="adv-field adv-field-row" id="advTopLayerField">
             <label class="adv-label toggle" style="flex:1">
               <input type="checkbox" id="advTopLayer" title="Deckschicht: eine eigene Farbe als oberste Ebene des Werkstücks (Ebene 1). Erhaben: durchgehende Fläche über der ganzen Platte, die Motive stapeln darauf. Vertieft: oberstes Plattenband; die Motive gravieren hindurch. Gilt auch für Farbebenen im AMS-Stil: die Palette rückt eine Ebene tiefer bzw. höher. Elemente in der Grundfarbe stanzen weiterhin durch. Eine Deckschicht in der Grundfarbe wird ignoriert (die Plattenoberseite hat diese Farbe bereits)."> Deckschicht
             </label>
@@ -139,9 +140,9 @@
         </div>
       </details>
 
-      <!-- 4. Druck & Export (nur Erweitert) -->
+      <!-- 4. Druck (Parameter; Export sitzt in der Topbar) -->
       <details class="acc" id="accDruck" open>
-        <summary>Druck &amp; Export</summary>
+        <summary>Druck</summary>
         <div class="acc-body adv-section">
           <div class="adv-field">
             <label for="advBaseThickness" class="adv-label">Basis-Dicke (mm)</label>
@@ -256,7 +257,7 @@
             </div>
             <div class="adv-field">
               <label for="advNumColors" class="adv-label">Anzahl Farben</label>
-              <input type="number" id="advNumColors" class="sp-num" min="2" max="16" step="1" value="8" title="Anzahl reduzierter Farben (2–16)">
+              <input type="number" id="advNumColors" class="sp-num adv-num-full" min="2" max="16" step="1" value="8" title="Anzahl reduzierter Farben (2–16)">
             </div>
             <div class="adv-field" id="advMinIslandField" hidden>
               <label for="advMinIsland" class="adv-label">Inseln entfernen (px)</label>
@@ -317,7 +318,7 @@
     </div><!-- /adv-scroll -->
   </aside>
   <aside id="sidebarEbenen" class="sidebar">
-    <div class="panel-head">Ebenen</div>
+    <div class="panel-head">Ebenen <span id="layerCount" class="panel-count" hidden>0</span></div>
     <div class="adv-scroll">
       <div class="acc-body adv-section">
           <ul id="advLayers" class="adv-layers-list"></ul>
@@ -346,7 +347,7 @@
         <div class="export-formats">
           <button id="exportPng" class="btn" type="button" title="Als PNG-Bild exportieren">PNG <span class="hint">Bild</span></button>
           <button id="exportSvg" class="btn" type="button" title="Als SVG-Vektorgrafik exportieren (je Farbe)">SVG <span class="hint">Vektor, je Farbe</span></button>
-          <button id="exportMf" class="btn btn-primary" type="button" title="Als 3MF-Datei exportieren (3D-Druck, Farbe)">3mf <span class="hint">3D · S/W &amp; Farbe</span></button>
+          <button id="exportMf" class="btn btn-primary" type="button" title="Als 3MF-Datei exportieren (3D-Druck, Farbe)">3MF <span class="hint">3D · S/W &amp; Farbe</span></button>
           <button id="exportStl" class="btn" type="button" title="Als STL-Datei exportieren (3D-Geometrie)">STL <span class="hint">3D · Geometrie</span></button>
         </div>
       </div>
