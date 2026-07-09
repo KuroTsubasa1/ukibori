@@ -71,7 +71,10 @@
   let renderer = null, camera = null, current = null, raf = 0, active = false;
   let getPartsFn = null, canvasEl = null;
   let clipRatio = 1; // Schicht-Vorschau: 1 = full model, <1 clips above zMin + t*range
-  const orbit = { theta: 0.9, phi: 1.0, radius: 100, center: null }; // center set in fitCamera (after THREE loads)
+  // Start view: from the FRONT (south, theta -90°) with a slight 3/4 offset — the
+  // design reads upright immediately. (theta 0.9 viewed from the east: everything
+  // started ~90° rotated.) phi ~0.95 tilts the plate back for depth.
+  const orbit = { theta: -Math.PI / 2 + 0.28, phi: 0.95, radius: 100, center: null }; // center set in fitCamera (after THREE loads)
 
   // Schicht-Vorschau: clip the model above a height fraction, like a slicer's
   // layer scrubber. Model space is z-up mm, so one global renderer clipping
