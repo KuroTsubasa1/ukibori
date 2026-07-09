@@ -164,7 +164,7 @@
   // Fits the full domain (plate ∪ washer bbox) into the preview element.
   // Also updates state.viewX0/viewY0 from docDomain so all conversions stay in sync.
   function fitScale() {
-    const pad = 24;
+    const pad = 12; // slim stage padding — the isolated 2D view should fill like 3D
     const preview = document.getElementById("preview");
     // In split mode the 2D canvas occupies half the preview width. The canvas is now
     // aspect-preserving (flex:0 1 auto), so cv.clientWidth follows the buffer — using it
@@ -2647,6 +2647,16 @@
     e.preventDefault();
     duplicateSelected();
   });
+  // ---- Bühnen-Hero: Klick öffnet den Bild-Dialog, Drops landen direkt ----
+  (function () {
+    var hero = document.getElementById("stageHero");
+    if (!hero) return;
+    var card = hero.querySelector(".hero-card") || hero;
+    card.addEventListener("click", function () { addImageAction(); });
+    card.addEventListener("dragover", handleDragOver);
+    card.addEventListener("drop", handleDrop);
+  }());
+
   // ---- Einrasten popover (topbar lock button) ----
   (function () {
     var btn = document.getElementById("snapBtn");
