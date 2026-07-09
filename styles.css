@@ -125,6 +125,7 @@
   .topbar-actions #tourBtn:hover { color: var(--ink); background: var(--surface2); border-color: transparent; }
   /* Einrasten: lock button + popover */
   #snapWrap { position: relative; display: flex; }
+  .topbar-actions button svg, #selToolbar button svg, .adv-lbtn svg { display: block; }
   .topbar-actions #snapBtn {
     width: 36px; padding: 0; display: grid; place-items: center;
     font-size: 14px; color: var(--muted);
@@ -322,6 +323,9 @@
     box-shadow: var(--shadow-sm);
   }
   .seg-group.seg-sm .seg { padding: 6px 8px; font-size: 12px; min-width: 0; }
+  /* Inline flex:1 forces equal widths and clips long labels (Rechteck) in narrow
+     panels — content-based sizing wins. */
+  .seg-group.seg-sm .seg { flex: 1 1 auto !important; }
 
   /* Floating preview view-toggle: give it a surface so it reads on the stage */
   .view-toggle {

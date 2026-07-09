@@ -1215,7 +1215,7 @@
   });
 
   // ---- Add image from data URL ----
-  function addImageFromDataURL(dataURL) {
+  function addImageFromDataURL(dataURL, fileName) {
     const img = new Image();
     img.onload = function () {
       const body = doc.body;
@@ -1227,6 +1227,8 @@
         src: dataURL, _img: img,
         cxMm: body.widthMm / 2, cyMm: body.heightMm / 2,
         wMm, hMm,
+        // Dateiname (ohne Endung) — beschriftet die Ebene und liefert den Export-Namen.
+        name: fileName ? String(fileName).replace(/\.[^.]+$/, "") : undefined,
       });
       el.depth.direction = defaultDirection;
       doc.elements.push(el);
@@ -1246,7 +1248,7 @@
     const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
     if (!file || !file.type.startsWith("image/")) return;
     const rd = new FileReader();
-    rd.onload = function () { addImageFromDataURL(rd.result); };
+    rd.onload = function () { addImageFromDataURL(rd.result, file.name); };
     rd.readAsDataURL(file);
   }
   function handleDragOver(e) { e.preventDefault(); }
@@ -1340,7 +1342,7 @@
       const f = e.target.files && e.target.files[0];
       if (!f) return;
       const rd = new FileReader();
-      rd.onload = function () { addImageFromDataURL(rd.result); };
+      rd.onload = function () { addImageFromDataURL(rd.result, f.name); };
       rd.readAsDataURL(f);
       addImageInput.value = "";
     });
@@ -1432,6 +1434,13 @@
   }
 
   document.getElementById("exportBtn").addEventListener("click", function () {
+    // Default the file name from the first imported element (its source file name);
+    // a user-typed name is never overwritten (only the shipped default/empty is).
+    var nameEl = document.getElementById("exportName");
+    if (nameEl && (!nameEl.value.trim() || nameEl.value === "ukibori")) {
+      var named = doc.elements.find(function (e) { return e.name; });
+      if (named) nameEl.value = named.name;
+    }
     document.getElementById("exportModal").removeAttribute("hidden");
     setExportStatus("");
   });
@@ -1975,6 +1984,13 @@
   }
 
   // Build a single layer <li> for element at index i. Clicking triggers renderLayers().
+  // Monochrome inline icons (stroke = currentColor) for dynamic row buttons.
+  var ICONS = {
+    eye: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8 11.9 12.2 8 12.2 1.8 8 1.8 8Z"/><circle cx="8" cy="8" r="1.9"/></svg>',
+    eyeOff: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 8s2.3-4.2 6.2-4.2S14.2 8 14.2 8 11.9 12.2 8 12.2 1.8 8 1.8 8Z"/><path d="M3 13.5 13 2.5"/></svg>',
+    trash: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.8 4.3h10.4"/><path d="M6.2 4.3V3a.8.8 0 0 1 .8-.8h2a.8.8 0 0 1 .8.8v1.3"/><path d="M4.3 4.3l.6 8.6a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.6"/></svg>'
+  };
+
   function buildLayerRow(i) {
     var el = doc.elements[i];
     var li = document.createElement("li");
@@ -1989,11 +2005,12 @@
     var isQR = el.type === "qr" || (el.type === "image" && el.qrData);
     var typeLabel = el.type === "text" ? "Text" : isQR ? "QR" : "Bild";
     nameSpan.textContent = typeLabel + " " + (i + 1);
+    if (el.name) nameSpan.textContent = el.name;                       // imported file name
     if (el.type === 'text' && el.text) nameSpan.textContent = '„' + el.text + '“';
 
     var vis = document.createElement("button");
     vis.className = "adv-lbtn";
-    vis.textContent = el._hidden ? "🙈" : "👁";
+    vis.innerHTML = el._hidden ? ICONS.eyeOff : ICONS.eye;
     vis.title = el._hidden ? "Einblenden" : "Ausblenden";
 
     var dup = document.createElement("button");
@@ -2013,7 +2030,7 @@
 
     var del = document.createElement("button");
     del.className = "adv-lbtn";
-    del.textContent = "🗑";
+    del.innerHTML = ICONS.trash;
     del.title = "Löschen";
 
     // Print-info badge: at what height/mode this layer prints. Solid rows also
