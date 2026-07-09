@@ -16,6 +16,7 @@ function __renderElement(el, doc, cols, rows) {
   ctx.save();
   ctx.translate(el.cxMm * sx, el.cyMm * sy);
   ctx.rotate((el.rotationDeg || 0) * Math.PI / 180);
+  if (el.flipH || el.flipV) ctx.scale(el.flipH ? -1 : 1, el.flipV ? -1 : 1); // Spiegeln: element-local mirror
   if (el.type === "text") {
     ctx.fillStyle = el.color;
     ctx.textAlign = "center"; ctx.textBaseline = "middle";

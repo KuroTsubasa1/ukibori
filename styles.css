@@ -297,6 +297,9 @@
     transition: background .12s, color .12s;
   }
   #selToolbar button:hover { background: var(--surface2); color: var(--ink); }
+  /* Spiegeln ist ein Zustand, kein Einmal-Befehl: aktive Achse bleibt markiert. */
+  #selToolbar button.tb-on { background: var(--ink); color: var(--panel); }
+  #selToolbar button.tb-on:hover { background: var(--ink); color: var(--panel); }
   #selToolbar #selDelBtn:hover { background: var(--danger); color: #fff; }
 
   /* Empty-project hero: invitation on the stage; clicks/drops pass through */

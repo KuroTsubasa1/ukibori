@@ -147,6 +147,7 @@ function migrateElement(el, doc, layerHmm) {
   const out = {
     id: el.id, type: el.type,
     cxMm: el.cxMm, cyMm: el.cyMm, wMm: el.wMm, hMm: el.hMm, rotationDeg: el.rotationDeg || 0,
+    flipH: false, flipV: false,
     cutout: !!el.cutout, color: el.color, depth,
   };
   if (el.type === "image") { out.src = el.src; out._img = null; }
@@ -170,6 +171,8 @@ function migrateProject(doc) {
     if (doc.topLayerColor === undefined) doc.topLayerColor = null;
     if (doc.body && doc.body.baseThicknessMm == null) doc.body.baseThicknessMm = 0;
     for (const el of doc.elements || []) {
+      if (el.flipH == null) el.flipH = false;
+      if (el.flipV == null) el.flipV = false;
       if (el.depth && el.depth.flush == null) el.depth.flush = false;
       if (el.depth && el.depth.heightOverrideMm === undefined) el.depth.heightOverrideMm = null;
       // colorLayerStyle added in T14: derive from legacy flush when absent
@@ -217,6 +220,7 @@ function makeElementV2(type, props) {
   const e = Object.assign({
     id: __nextId(), type,
     cxMm: 25, cyMm: 75, wMm: 30, hMm: 30, rotationDeg: 0,
+    flipH: false, flipV: false,
     cutout: false, color: "#000000",
     depth: defaultDepth(type),
   }, props);

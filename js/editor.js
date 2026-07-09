@@ -731,6 +731,7 @@
     ctx.save();
     ctx.translate(ax + (el.cxMm - ox) * s, ay + (el.cyMm - oy) * s);
     ctx.rotate((el.rotationDeg || 0) * Math.PI / 180);
+    if (el.flipH || el.flipV) ctx.scale(el.flipH ? -1 : 1, el.flipV ? -1 : 1); // Spiegeln: element-local mirror
     const w = el.wMm * s, h = el.hMm * s;
     if (el.type === "text") {
       ctx.fillStyle = el.color || "#ffffff";
@@ -2197,6 +2198,9 @@
     // Floating selection toolbar on the stage follows the selection.
     var selTb = document.getElementById("selToolbar");
     if (selTb) selTb.hidden = disabled;
+    var flipH = document.getElementById("selFlipHBtn"), flipV = document.getElementById("selFlipVBtn");
+    if (flipH) { flipH.classList.toggle("tb-on", !!(el && el.flipH)); flipH.setAttribute("aria-pressed", String(!!(el && el.flipH))); }
+    if (flipV) { flipV.classList.toggle("tb-on", !!(el && el.flipV)); flipV.setAttribute("aria-pressed", String(!!(el && el.flipV))); }
     // Layer badges mirror color/height/mode — keep them fresh with the panel.
     renderLayers();
 
@@ -2703,6 +2707,8 @@
     wire("selDupBtn", duplicateSelected);
     wire("selCenterHBtn", function () { centerH(); });
     wire("selCenterVBtn", function () { centerV(); });
+    wire("selFlipHBtn", function () { flipSelected("h"); });
+    wire("selFlipVBtn", function () { flipSelected("v"); });
     wire("selDelBtn", deleteSelected);
   }());
 
@@ -2743,6 +2749,12 @@
   }
   function centerV() {
     withSelected(function (el) { el.cyMm = doc.body.heightMm / 2; });
+    refreshAdvancedForSelection();
+  }
+  function flipSelected(axis) {
+    withSelected(function (el) {
+      if (axis === "h") el.flipH = !el.flipH; else el.flipV = !el.flipV;
+    });
     refreshAdvancedForSelection();
   }
 
