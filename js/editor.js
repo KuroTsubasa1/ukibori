@@ -945,6 +945,21 @@
 
   function hitTest(px, py) {
     const s = state.scale;
+    // Priority pass: the current selection's transform handles always win over any
+    // element body, so an overlapping neighbor can't steal a scale/rotate grab.
+    const selId = state.selectedId;
+    if (selId != null) {
+      const sel = doc.elements.find(e => e.id === selId);
+      if (sel && !sel._hidden) {
+        const [lx, ly] = elemToLocal(sel, px, py, s);
+        const w = sel.wMm * s, h = sel.hMm * s;
+        if (Math.hypot(lx, ly + h / 2 + 22) <= 9) return { id: sel.id, handle: "rotate" };
+        const corners = { nw: [-w/2, -h/2], ne: [w/2, -h/2], se: [w/2, h/2], sw: [-w/2, h/2] };
+        for (const k in corners) {
+          if (Math.hypot(lx - corners[k][0], ly - corners[k][1]) <= 9) return { id: sel.id, handle: k };
+        }
+      }
+    }
     // Mount marker hit (checked first — small target on top).
     const mount = doc.mount;
     if (mount && mount.type !== "none") {
