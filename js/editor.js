@@ -924,6 +924,16 @@
       ctx.restore();
     }
 
+    if (drag && drag.handle === "marquee" && drag.rectPx) {
+      ctx.save();
+      ctx.strokeStyle = "#6b4fb0"; ctx.fillStyle = "rgba(107,79,176,0.10)";
+      ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+      const r = drag.rectPx;
+      ctx.fillRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
+      ctx.strokeRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
+      ctx.restore();
+    }
+
     drawThinOverlay(ctx);
   }
 
@@ -1077,7 +1087,15 @@
     const scaleC = cv.width / rect.width;
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
     const hit = hitTest(px, py);
-    if (!hit) { state.selectedId = null; refreshAdvancedForSelection(); renderAdvancedLayers(); render2D(); return; }
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    if (!hit) {
+      // Empty canvas: start a marquee (rubber-band) selection.
+      drag = { handle: "marquee", px, py, additive, base: additive ? state.selectionIds.slice() : [] };
+      if (!additive) clearSelection();
+      cv.setPointerCapture(e.pointerId);
+      refreshAdvancedForSelection(); renderAdvancedLayers(); render2D();
+      return;
+    }
     // Mount drag: distinct path, does not select an element.
     if (hit.handle === "mount") {
       drag = {
@@ -1088,18 +1106,22 @@
       render2D();
       return;
     }
-    setSelection([hit.id]);
+    if (hit.handle === "move") {
+      if (additive) { toggleInSelection(hit.id); refreshAdvancedForSelection(); renderAdvancedLayers(); render2D(); return; }
+      if (!isSelected(hit.id)) setSelection([hit.id]);   // clicking an unselected body selects just it
+      // else: keep the existing multi-selection so a group-move drag can begin
+    } else {
+      setSelection([hit.id]);                            // a handle grab always focuses that element
+    }
     const el = doc.elements.find(el => el.id === hit.id);
     drag = {
-      handle: hit.handle,
-      // Store drag start in canvas px
-      px, py,
+      handle: hit.handle, px, py,
       start: { cx: el.cxMm, cy: el.cyMm, w: el.wMm, h: el.hMm, rot: el.rotationDeg || 0 },
+      // Snapshot every selected member for a group move.
+      starts: selectedEls().map(function (m) { return { id: m.id, cxMm: m.cxMm, cyMm: m.cyMm, wMm: m.wMm, hMm: m.hMm, rotationDeg: m.rotationDeg || 0 }; }),
     };
     cv.setPointerCapture(e.pointerId);
-    refreshAdvancedForSelection();
-    renderAdvancedLayers();
-    render2D();
+    refreshAdvancedForSelection(); renderAdvancedLayers(); render2D();
   });
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -1194,12 +1216,33 @@
       scheduleRebuild3D();
       return;
     }
+    if (drag.handle === "marquee") {
+      const rectMm = {
+        x0: Math.min((drag.px - state.marginPx) / s + state.viewX0, (px - state.marginPx) / s + state.viewX0),
+        x1: Math.max((drag.px - state.marginPx) / s + state.viewX0, (px - state.marginPx) / s + state.viewX0),
+        y0: Math.min((drag.py - state.marginPx) / s + state.viewY0, (py - state.marginPx) / s + state.viewY0),
+        y1: Math.max((drag.py - state.marginPx) / s + state.viewY0, (py - state.marginPx) / s + state.viewY0),
+      };
+      drag.rectPx = { x0: Math.min(drag.px, px), y0: Math.min(drag.py, py), x1: Math.max(drag.px, px), y1: Math.max(drag.py, py) };
+      const hits = window.marqueeHits(doc.elements, rectMm);
+      setSelection(drag.additive ? drag.base.concat(hits.filter(function (id) { return drag.base.indexOf(id) === -1; })) : hits);
+      refreshAdvancedForSelection(); renderAdvancedLayers(); render2D();
+      return;
+    }
     const el = doc.elements.find(el => el.id === state.selectedId);
     if (!el) return;
     if (drag.handle === "move") {
-      el.cxMm = drag.start.cx + (px - drag.px) / s;
-      el.cyMm = drag.start.cy + (py - drag.py) / s;
-      applyMoveSnap(el);
+      const dx = (px - drag.px) / s, dy = (py - drag.py) / s;
+      if (drag.starts && drag.starts.length > 1) {
+        drag.starts.forEach(function (st0) {           // inline (no applyMove dependency yet)
+          const m = doc.elements.find(function (x) { return x.id === st0.id; });
+          if (m) { m.cxMm = st0.cxMm + dx; m.cyMm = st0.cyMm + dy; }
+        });
+      } else {
+        el.cxMm = drag.start.cx + dx;
+        el.cyMm = drag.start.cy + dy;
+        applyMoveSnap(el);
+      }
     } else if (drag.handle === "rotate") {
       const ang = Math.atan2(py - mmY(el.cyMm), px - mmX(el.cxMm)) * 180 / Math.PI + 90;
       el.rotationDeg = Math.round(ang);
@@ -2705,15 +2748,11 @@
 
   // ---- Löschen (Toolbar + Entf/Backspace auf der Arbeitsfläche) ----
   function deleteSelected() {
-    var el = selectedEl();
-    if (!el) return;
-    var i = doc.elements.indexOf(el);
-    if (i !== -1) doc.elements.splice(i, 1);
+    const ids = state.selectionIds.slice();
+    if (!ids.length) return;
+    doc.elements = doc.elements.filter(function (e) { return ids.indexOf(e.id) === -1; });
     clearSelection();
-    refreshAdvancedForSelection();
-    renderLayers();
-    render2D();
-    scheduleRebuild3D();
+    refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D();
   }
 
   // ---- Duplizieren (Ebenen-Zeile, Strg/Cmd+D, Bühnen-Toolbar) ----
@@ -2733,7 +2772,22 @@
     render2D();
     scheduleRebuild3D();
   }
-  function duplicateSelected() { duplicateElement(selectedEl()); }
+  function duplicateSelected() {
+    const els = selectedEls();
+    if (!els.length) return;
+    if (els.length === 1) { duplicateElement(els[0]); return; }
+    const copies = [];
+    els.forEach(function (el) {
+      const drop = { _img: 1, _display: 1, _displayKey: 1, _hidden: 1, id: 1 };
+      const props = JSON.parse(JSON.stringify(el, function (k, v) { return drop[k] ? undefined : v; }));
+      const copy = window.makeElementV2(el.type, props);
+      copy._img = el._img || null; copy.groupId = null;
+      copy.cxMm = el.cxMm + 4; copy.cyMm = el.cyMm + 4;
+      doc.elements.push(copy); copies.push(copy.id);
+    });
+    setSelection(copies);
+    refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D();
+  }
   window.addEventListener("keydown", function (e) {
     if (!(e.metaKey || e.ctrlKey) || e.shiftKey || String(e.key).toLowerCase() !== "d") return;
     var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
