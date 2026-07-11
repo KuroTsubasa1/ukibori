@@ -738,6 +738,12 @@
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = `${el.fontWeight || "normal"} ${Math.max(1, Math.round(h))}px ${el.fontFamily || "system-ui"}`;
       ctx.fillText(el.text || "", 0, 0);
+    } else if (el.type === "shape") {
+      ctx.fillStyle = el.color || "#000000";
+      ctx.beginPath();
+      if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+      else ctx.rect(-w / 2, -h / 2, w, h);
+      ctx.fill();
     } else if (el.type === "image") {
       if (el._img) {
         // Use processed display canvas (threshold/invert/reduce applied) so 2D == print.
@@ -1813,6 +1819,23 @@
     if (inp) inp.click();
   }
 
+  function addShapeAction(kind) {
+    var sz = Math.min(doc.body.widthMm * 0.5, doc.body.heightMm * 0.5, 30);
+    var el = window.makeElementV2("shape", {
+      shape: kind,
+      cxMm: doc.body.widthMm / 2,
+      cyMm: doc.body.heightMm / 2,
+      wMm: sz, hMm: sz,
+    });
+    el.depth.direction = defaultDirection;
+    doc.elements.push(el);
+    state.selectedId = el.id;
+    refreshAdvancedForSelection();
+    renderAdvancedLayers();
+    render2D();
+    scheduleRebuild3D();
+  }
+
   function addQrAction() {
     var data = prompt("QR-Inhalt:");
     if (!data || !data.trim()) return;
@@ -1855,6 +1878,8 @@
   document.getElementById("addTextBtn").addEventListener("click", addTextAction);
   document.getElementById("addImageBtn").addEventListener("click", addImageAction);
   document.getElementById("addQrBtn").addEventListener("click", addQrAction);
+  document.getElementById("addRectBtn").addEventListener("click", function () { addShapeAction("rect"); });
+  document.getElementById("addCircleBtn").addEventListener("click", function () { addShapeAction("circle"); });
 
   // Bind Advanced buttons (guard each getElementById in case markup is missing).
   (function () {
@@ -1973,6 +1998,9 @@
     if (el.type === "text") {
       chip.style.color = el.color || "#333";
       chip.textContent = el.text ? el.text.charAt(0).toUpperCase() : "T";
+    } else if (el.type === "shape") {
+      chip.style.color = el.color || "#333";
+      chip.textContent = el.shape === "circle" ? "●" : "■";
     } else if (el.type === "qr" || el.qrData) {
       chip.textContent = "QR";
     } else {
@@ -2001,7 +2029,8 @@
     var nameSpan = document.createElement("span");
     nameSpan.className = "adv-lname";
     var isQR = el.type === "qr" || (el.type === "image" && el.qrData);
-    var typeLabel = el.type === "text" ? "Text" : isQR ? "QR" : "Bild";
+    var typeLabel = el.type === "text" ? "Text" : isQR ? "QR"
+      : el.type === "shape" ? (el.shape === "circle" ? "Kreis" : "Rechteck") : "Bild";
     nameSpan.textContent = typeLabel + " " + (i + 1);
     if (el.name) nameSpan.textContent = el.name;                       // imported file name
     if (el.type === 'text' && el.text) nameSpan.textContent = '„' + el.text + '“';
@@ -2292,6 +2321,15 @@
       if (boldNode) boldNode.checked = (el.fontWeight === "bold" || el.fontWeight === 700 || el.fontWeight === "700");
     }
 
+    // Shape kind (Rechteck / Kreis): shape elements only.
+    var advShapeField = document.getElementById("advShapeField");
+    var isShape = el && el.type === "shape";
+    if (advShapeField) advShapeField.hidden = !isShape;
+    var shapeRect = document.getElementById("advShapeRect");
+    var shapeCircle = document.getElementById("advShapeCircle");
+    if (shapeRect) shapeRect.classList.toggle("seg-active", !!(isShape && el.shape !== "circle"));
+    if (shapeCircle) shapeCircle.classList.toggle("seg-active", !!(isShape && el.shape === "circle"));
+
     // Relief height (depth.heightMm): shown for Einfarbig (solid/text) and Farbebenen→Gestuft.
     // With "Höhe je Farbe" (doc.autoLayerHeights) on, the field is the per-element OVERRIDE for
     // Einfarbig elements: empty = automatic height from the color (shown as placeholder).
@@ -2299,7 +2337,7 @@
     var em = el && el.depth && el.depth.mode;
     if (reliefField) {
       var estyle = (el && el.depth && el.depth.colorLayerStyle) || ((el && el.depth && el.depth.flush) ? "bands" : "stepped");
-      var showRelief = el && (el.type === "text" || el.type === "image") &&
+      var showRelief = el && (el.type === "text" || el.type === "image" || el.type === "shape") &&
         (em === "solid" || (em === "colorLayers" && estyle === "stepped"));
       reliefField.hidden = !showRelief;
       if (showRelief) {
@@ -2466,6 +2504,19 @@
   bindElementField("advFontBold", "change", function (el, node) {
     if (el.type !== "text") return false;
     el.fontWeight = node.checked ? "bold" : "normal";
+  });
+
+  // -- Shape kind (Rechteck / Kreis, shape elements) --
+  bindElementField("advShapeRect", "click", function (el) {
+    if (el.type !== "shape") return false;
+    el.shape = "rect";
+    refreshAdvancedForSelection(); // seg state + layer label/thumb
+  });
+
+  bindElementField("advShapeCircle", "click", function (el) {
+    if (el.type !== "shape") return false;
+    el.shape = "circle";
+    refreshAdvancedForSelection();
   });
 
   // -- Relief height (Einfarbig + Gestuft): how far the element rises / recesses --

@@ -8,7 +8,7 @@
   var STEPS = [
     {
       id: 'addImageBtn',
-      text: 'Füge ein Bild, Text oder QR hinzu — für Lesezeichen, Untersetzer, Schlüsselanhänger u. v. m.'
+      text: 'Füge ein Bild, Text, QR oder eine Form (Rechteck/Kreis) hinzu — für Lesezeichen, Untersetzer, Schlüsselanhänger u. v. m.'
     },
     {
       id: 'depthRaised',
