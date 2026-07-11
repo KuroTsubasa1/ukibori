@@ -2792,7 +2792,7 @@
     if (!(e.metaKey || e.ctrlKey) || e.shiftKey || String(e.key).toLowerCase() !== "d") return;
     var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
     if (tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable)) return;
-    if (!selectedEl()) return; // nothing selected → leave Cmd+D to the browser
+    if (!state.selectionIds.length) return; // nothing selected → leave Cmd+D to the browser
     e.preventDefault();
     duplicateSelected();
   });
