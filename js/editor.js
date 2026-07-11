@@ -28,7 +28,7 @@
   var _snapDefault = { plate: true, elements: true, gridMm: 0 };
   var _snapLoaded = (function () { try { var v = JSON.parse(localStorage.getItem(SNAP_KEY)); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; } }());
   const state = {
-    selectedId: null, scale: 1, ox: 0, oy: 0, viewX0: 0, viewY0: 0, marginPx: 48,
+    selectedId: null, selectionIds: [], scale: 1, ox: 0, oy: 0, viewX0: 0, viewY0: 0, marginPx: 48,
     snap: {
       plate:    _snapLoaded.plate    !== undefined ? !!_snapLoaded.plate    : _snapDefault.plate,
       elements: _snapLoaded.elements !== undefined ? !!_snapLoaded.elements : _snapDefault.elements,
@@ -149,6 +149,22 @@
     if (opts && opts.invalidate) delete el._display;
     render2D();
     scheduleRebuild3D();
+  }
+
+  // Multiselect: selectionIds is the full set; selectedId stays the PRIMARY (inspector target).
+  function setSelection(ids) {
+    state.selectionIds = (ids || []).slice();
+    state.selectedId = state.selectionIds.length ? state.selectionIds[state.selectionIds.length - 1] : null;
+  }
+  function clearSelection() { setSelection([]); }
+  function isSelected(id) { return state.selectionIds.indexOf(id) !== -1; }
+  function toggleInSelection(id) {
+    const i = state.selectionIds.indexOf(id);
+    if (i === -1) state.selectionIds.push(id); else state.selectionIds.splice(i, 1);
+    state.selectedId = state.selectionIds.length ? state.selectionIds[state.selectionIds.length - 1] : null;
+  }
+  function selectedEls() {
+    return state.selectionIds.map(function (id) { return doc.elements.find(function (e) { return e.id === id; }); }).filter(Boolean);
   }
 
   // Wires a single control: on evt, calls withSelected with apply(el, node).
@@ -1072,7 +1088,7 @@
       render2D();
       return;
     }
-    state.selectedId = hit.id;
+    setSelection([hit.id]);
     const el = doc.elements.find(el => el.id === hit.id);
     drag = {
       handle: hit.handle,
@@ -1254,7 +1270,7 @@
       });
       el.depth.direction = defaultDirection;
       doc.elements.push(el);
-      state.selectedId = el.id;
+      setSelection([el.id]);
       refreshAdvancedForSelection();
       renderAdvancedLayers();
       scheduleRebuild3D();
@@ -1283,7 +1299,7 @@
     var els = doc.elements;
     if (!els.length) return;
     var idx = ((i % els.length) + els.length) % els.length;   // wrap
-    state.selectedId = els[idx].id;
+    setSelection([els[idx].id]);
     refreshAdvancedForSelection();
     renderLayers();
     render2D();
@@ -1303,12 +1319,12 @@
         if (cur === -1) { e.preventDefault(); selectByIndex(0); return; }
         if (cur < els.length - 1) { e.preventDefault(); selectByIndex(cur + 1); return; }
         // at last element → release focus (deselect, allow default Tab) to avoid a keyboard trap
-        state.selectedId = null; refreshAdvancedForSelection(); renderLayers(); render2D();
+        clearSelection(); refreshAdvancedForSelection(); renderLayers(); render2D();
         return; // do NOT preventDefault: focus leaves the canvas
       } else {
         if (cur === -1) { e.preventDefault(); selectByIndex(els.length - 1); return; }
         if (cur > 0) { e.preventDefault(); selectByIndex(cur - 1); return; }
-        state.selectedId = null; refreshAdvancedForSelection(); renderLayers(); render2D();
+        clearSelection(); refreshAdvancedForSelection(); renderLayers(); render2D();
         return; // release focus backward
       }
     }
@@ -1322,7 +1338,7 @@
 
     if (e.key === "Escape") {                         // deselect + release focus
       if (state.selectedId != null) {
-        state.selectedId = null; refreshAdvancedForSelection(); renderLayers(); render2D();
+        clearSelection(); refreshAdvancedForSelection(); renderLayers(); render2D();
       }
       cv.blur();
       return;
@@ -1819,7 +1835,7 @@
     });
     el.depth.direction = defaultDirection;
     doc.elements.push(el);
-    state.selectedId = el.id;
+    setSelection([el.id]);
     refreshAdvancedForSelection();
     renderAdvancedLayers();
     render2D();
@@ -1844,7 +1860,7 @@
     });
     el.depth.direction = defaultDirection;
     doc.elements.push(el);
-    state.selectedId = el.id;
+    setSelection([el.id]);
     refreshAdvancedForSelection();
     renderAdvancedLayers();
     render2D();
@@ -1880,7 +1896,7 @@
       el.depth.direction = defaultDirection;
       el.depth.threshold = 256;
       doc.elements.push(el);
-      state.selectedId = el.id;
+      setSelection([el.id]);
       refreshAdvancedForSelection();
       renderAdvancedLayers();
       render2D();
@@ -2035,7 +2051,7 @@
   function buildLayerRow(i) {
     var el = doc.elements[i];
     var li = document.createElement("li");
-    if (el.id === state.selectedId) li.classList.add("adv-sel");
+    if (isSelected(el.id)) li.classList.add("adv-sel");
     if (el._hidden) li.classList.add("adv-hidden");
 
     var thumb = buildLayerThumb(el);
@@ -2144,7 +2160,8 @@
 
     li.addEventListener("click", function (e) {
       if (e.target.classList.contains("adv-lbtn")) return;
-      state.selectedId = el.id;
+      if (e.shiftKey || e.metaKey || e.ctrlKey) toggleInSelection(el.id);
+      else setSelection([el.id]);
       refreshAdvancedForSelection();
       renderLayers();
       render2D();
@@ -2186,7 +2203,7 @@
     del.addEventListener("click", function (e) {
       e.stopPropagation();
       doc.elements.splice(i, 1);
-      if (state.selectedId === el.id) state.selectedId = null;
+      if (isSelected(el.id)) clearSelection();
       refreshAdvancedForSelection();
       renderLayers();
       render2D();
@@ -2692,7 +2709,7 @@
     if (!el) return;
     var i = doc.elements.indexOf(el);
     if (i !== -1) doc.elements.splice(i, 1);
-    state.selectedId = null;
+    clearSelection();
     refreshAdvancedForSelection();
     renderLayers();
     render2D();
@@ -2710,7 +2727,7 @@
     copy._img = el._img || null; // share the decoded bitmap (read-only)
     copy.cxMm = el.cxMm + 4; copy.cyMm = el.cyMm + 4; // nudge so the copy is visible
     doc.elements.splice(doc.elements.indexOf(el) + 1, 0, copy); // directly above the original
-    state.selectedId = copy.id;
+    setSelection([copy.id]);
     refreshAdvancedForSelection();
     renderLayers();
     render2D();
@@ -2854,7 +2871,7 @@
   function resetDocTo(newDoc) {
     Object.keys(doc).forEach(function (k) { delete doc[k]; });
     Object.assign(doc, newDoc);
-    state.selectedId = null;
+    clearSelection();
     defaultDirection = "raised";
     // Register any embedded custom fonts before rendering, then repaint once ready.
     registerDocFonts(doc).then(function () { render2D(); scheduleRebuild3D(); });
