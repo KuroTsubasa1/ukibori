@@ -2203,7 +2203,7 @@
     del.addEventListener("click", function (e) {
       e.stopPropagation();
       doc.elements.splice(i, 1);
-      if (isSelected(el.id)) clearSelection();
+      if (isSelected(el.id)) toggleInSelection(el.id);
       refreshAdvancedForSelection();
       renderLayers();
       render2D();
