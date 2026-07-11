@@ -180,6 +180,7 @@ function migrateProject(doc) {
       if (el.depth && el.depth.colorLayerStyle == null) {
         el.depth.colorLayerStyle = el.depth.flush ? "bands" : "stepped";
       }
+      if (el.type === "shape" && el.shape == null) el.shape = "rect";
     }
     return doc;
   }
@@ -226,6 +227,7 @@ function makeElementV2(type, props) {
   }, props);
   if (type === "image") { if (e.src == null) e.src = ""; e._img = e._img || null; }
   if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; }
+  if (type === "shape") { if (e.shape == null) e.shape = "rect"; } // 'rect' | 'circle' (ellipse when wMm ≠ hMm)
   return e;
 }
 

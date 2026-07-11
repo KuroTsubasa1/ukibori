@@ -480,6 +480,7 @@
   .link { color: var(--accent); cursor: pointer; font-weight: 600; }
 
   .sp-add-row { display: flex; gap: var(--sp-1); }
+  .sp-add-row + .sp-add-row { margin-top: var(--sp-1); }
   .sp-add-row .btn { flex: 1; text-align: center; padding: 9px 6px; }
 
   /* ============================================================

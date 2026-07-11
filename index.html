@@ -182,7 +182,7 @@
       <div class="hero-card">
         <div class="hero-icon">⬚</div>
         <p class="hero-title">Zieh ein Bild hierher</p>
-        <p class="hero-sub">… oder starte rechts mit <strong>+ Bild</strong>, <strong>+ Text</strong> oder <strong>+ QR</strong>.</p>
+        <p class="hero-sub">… oder starte rechts mit <strong>+ Bild</strong>, <strong>+ Text</strong>, <strong>+ QR</strong>, <strong>+ Rechteck</strong> oder <strong>+ Kreis</strong>.</p>
       </div>
     </div>
     <div class="pane pane-2d"><canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf. Beim Skalieren an den Ecken hält Umschalt das Seitenverhältnis."></canvas></div>
@@ -193,7 +193,7 @@
     <div class="panel-head">Element</div>
     <div class="adv-scroll">
       <!-- Hinzufuegen: neue Elemente entstehen dort, wo sie bearbeitet werden -->
-      <div class="adv-section add-dock"><div class="sp-add-row"><button type="button" id="addImageBtn" class="btn" title="Bild hinzufügen">+ Bild</button><button type="button" id="addTextBtn" class="btn" title="Text hinzufügen">+ Text</button><button type="button" id="addQrBtn" class="btn" title="QR-Code hinzufügen">+ QR</button></div></div>
+      <div class="adv-section add-dock"><div class="sp-add-row"><button type="button" id="addImageBtn" class="btn" title="Bild hinzufügen">+ Bild</button><button type="button" id="addTextBtn" class="btn" title="Text hinzufügen">+ Text</button><button type="button" id="addQrBtn" class="btn" title="QR-Code hinzufügen">+ QR</button></div><div class="sp-add-row"><button type="button" id="addRectBtn" class="btn" title="Rechteck hinzufügen">+ Rechteck</button><button type="button" id="addCircleBtn" class="btn" title="Kreis hinzufügen (frei skalierbar zur Ellipse)">+ Kreis</button></div></div>
       <!-- 3. Element: alles am ausgewählten Element -->
       <div id="accElement">
         <div class="acc-body adv-section">
@@ -207,6 +207,13 @@
             <div class="adv-font-row">
               <label class="adv-label toggle"><input type="checkbox" id="advFontBold" title="Fett"> Fett</label>
               <button type="button" id="fontUploadBtn" class="btn" title="Eigene Schrift laden (.ttf/.otf/.woff)">Schrift laden…</button>
+            </div>
+          </div>
+            <div class="adv-field" id="advShapeField" hidden>
+            <label class="adv-label">Form</label>
+            <div id="advShapeSeg" class="seg-group seg-sm" style="width:100%">
+              <button type="button" id="advShapeRect" class="seg seg-active" style="flex:1" title="Rechteckige Fläche — füllt Breite × Höhe des Elements">Rechteck</button>
+              <button type="button" id="advShapeCircle" class="seg" style="flex:1" title="Kreis — wird zur Ellipse, wenn Breite ≠ Höhe">Kreis</button>
             </div>
           </div>
             <div class="adv-field" id="simpleBildSection" hidden>
