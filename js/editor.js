@@ -2273,7 +2273,9 @@
       var to = doc.elements.findIndex(function (x) { return x.id === el.id; });
       if (from === -1 || to === -1) return;
       var moved = doc.elements.splice(from, 1)[0];
+      moved.groupId = el.groupId != null ? el.groupId : null;  // adopt the target row's group
       doc.elements.splice(to, 0, moved); // take the drop target's position
+      window.reindexContiguous(doc);
       renderLayers();
       render2D();
       scheduleRebuild3D();
@@ -2384,6 +2386,19 @@
     });
 
     li.append(caret, name, vis, del);
+
+    li.addEventListener("dragover", function (e) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; li.classList.add("drag-over"); });
+    li.addEventListener("dragleave", function () { li.classList.remove("drag-over"); });
+    li.addEventListener("drop", function (e) {
+      e.preventDefault(); e.stopPropagation(); li.classList.remove("drag-over");
+      var fromId = e.dataTransfer.getData("text/plain");
+      var el = doc.elements.find(function (x) { return String(x.id) === fromId; });
+      if (!el) return;
+      el.groupId = group.id;                 // join this group
+      window.reindexContiguous(doc);
+      renderLayers(); render2D(); scheduleRebuild3D();
+    });
+
     return li;
   }
 
@@ -2929,6 +2944,11 @@
       doc.elements.push(copy); copies.push(copy.id);
     });
     setSelection(copies);
+    var srcGroups = {}; els.forEach(function (el) { if (el.groupId != null) srcGroups[el.groupId] = 1; });
+    if (Object.keys(srcGroups).length === 1) {
+      var gid = window.groupElements(doc, copies);
+      if (gid) setSelection(window.groupDescendantLeafIds(doc, gid));
+    }
     refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D();
   }
   window.addEventListener("keydown", function (e) {
