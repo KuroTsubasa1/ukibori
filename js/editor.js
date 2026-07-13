@@ -28,7 +28,7 @@
   var _snapDefault = { plate: true, elements: true, gridMm: 0 };
   var _snapLoaded = (function () { try { var v = JSON.parse(localStorage.getItem(SNAP_KEY)); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; } }());
   const state = {
-    selectedId: null, scale: 1, ox: 0, oy: 0, viewX0: 0, viewY0: 0, marginPx: 48,
+    selectedId: null, selectionIds: [], scale: 1, ox: 0, oy: 0, viewX0: 0, viewY0: 0, marginPx: 48,
     snap: {
       plate:    _snapLoaded.plate    !== undefined ? !!_snapLoaded.plate    : _snapDefault.plate,
       elements: _snapLoaded.elements !== undefined ? !!_snapLoaded.elements : _snapDefault.elements,
@@ -37,6 +37,9 @@
     snapGuides: [],
   };
   function persistSnap() { try { localStorage.setItem(SNAP_KEY, JSON.stringify(state.snap)); } catch (e) {} }
+
+  // Streuen (scatter) sub-mode state: null unless the panel is open.
+  var scatter = null; // { sourceId, region:{x0,y0,x1,y1}|null, seed, previewIds:[] }
 
   var MARGIN_PX = 48;
 
@@ -149,6 +152,22 @@
     if (opts && opts.invalidate) delete el._display;
     render2D();
     scheduleRebuild3D();
+  }
+
+  // Multiselect: selectionIds is the full set; selectedId stays the PRIMARY (inspector target).
+  function setSelection(ids) {
+    state.selectionIds = (ids || []).slice();
+    state.selectedId = state.selectionIds.length ? state.selectionIds[state.selectionIds.length - 1] : null;
+  }
+  function clearSelection() { setSelection([]); }
+  function isSelected(id) { return state.selectionIds.indexOf(id) !== -1; }
+  function toggleInSelection(id) {
+    const i = state.selectionIds.indexOf(id);
+    if (i === -1) state.selectionIds.push(id); else state.selectionIds.splice(i, 1);
+    state.selectedId = state.selectionIds.length ? state.selectionIds[state.selectionIds.length - 1] : null;
+  }
+  function selectedEls() {
+    return state.selectionIds.map(function (id) { return doc.elements.find(function (e) { return e.id === id; }); }).filter(Boolean);
   }
 
   // Wires a single control: on evt, calls withSelected with apply(el, node).
@@ -777,6 +796,23 @@
     ctx.restore();
   }
 
+  // Axis-aligned box + handles for a multi-selection (mm bbox -> canvas px).
+  function drawSelectionBox(ctx, bb, s) {
+    if (!bb) return;
+    const x0 = mmX(bb.x0), y0 = mmY(bb.y0), x1 = mmX(bb.x1), y1 = mmY(bb.y1);
+    ctx.save();
+    ctx.strokeStyle = "#6b4fb0"; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.fillStyle = "#6b4fb0";
+    [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].forEach(function (c) {
+      ctx.beginPath(); ctx.rect(c[0] - 5, c[1] - 5, 10, 10); ctx.fill();
+    });
+    const mx = (x0 + x1) / 2;
+    ctx.beginPath(); ctx.moveTo(mx, y0); ctx.lineTo(mx, y0 - 22); ctx.stroke();
+    ctx.beginPath(); ctx.arc(mx, y0 - 22, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
   // ---- Main render (exported as render2D) ----
   function render2D() {
     noteDocChanged();
@@ -883,8 +919,12 @@
     }
 
     // Selection handles on top.
-    const sel = doc.elements.find(e => e.id === state.selectedId) || null;
-    if (sel) drawSelection(ctx, sel, s);
+    const selEls = selectedEls();
+    if (selEls.length === 1) {
+      drawSelection(ctx, selEls[0], s);
+    } else if (selEls.length > 1) {
+      drawSelectionBox(ctx, window.selectionBBox(selEls), s);
+    }
 
     // Snap guide lines (dashed accent; only while a move-drag is active).
     if (drag && state.snapGuides.length) {
@@ -905,6 +945,16 @@
         ctx.stroke();
       }
       ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    if (drag && (drag.handle === "marquee" || drag.handle === "scatterRegion") && drag.rectPx) {
+      ctx.save();
+      ctx.strokeStyle = "#6b4fb0"; ctx.fillStyle = "rgba(107,79,176,0.10)";
+      ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+      const r = drag.rectPx;
+      ctx.fillRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
+      ctx.strokeRect(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0);
       ctx.restore();
     }
 
@@ -945,6 +995,37 @@
 
   function hitTest(px, py) {
     const s = state.scale;
+    // Priority pass: the current selection's transform handles always win over any
+    // element body, so an overlapping neighbor can't steal a scale/rotate grab.
+
+    // Multi-selection: the box's own handles take priority.
+    if (state.selectionIds.length > 1) {
+      const bb = window.selectionBBox(selectedEls());
+      if (bb) {
+        const x0 = mmX(bb.x0), y0 = mmY(bb.y0), x1 = mmX(bb.x1), y1 = mmY(bb.y1);
+        const mx = (x0 + x1) / 2;
+        if (Math.hypot(px - mx, py - (y0 - 22)) <= 9) return { box: true, handle: "rotate" };
+        const corners = { nw: [x0, y0], ne: [x1, y0], se: [x1, y1], sw: [x0, y1] };
+        for (const k in corners) {
+          if (Math.hypot(px - corners[k][0], py - corners[k][1]) <= 9) return { box: true, handle: k };
+        }
+        if (px >= x0 && px <= x1 && py >= y0 && py <= y1) return { box: true, handle: "move" };
+      }
+    }
+
+    const selId = state.selectedId;
+    if (selId != null) {
+      const sel = doc.elements.find(e => e.id === selId);
+      if (sel && !sel._hidden) {
+        const [lx, ly] = elemToLocal(sel, px, py, s);
+        const w = sel.wMm * s, h = sel.hMm * s;
+        if (Math.hypot(lx, ly + h / 2 + 22) <= 9) return { id: sel.id, handle: "rotate" };
+        const corners = { nw: [-w/2, -h/2], ne: [w/2, -h/2], se: [w/2, h/2], sw: [-w/2, h/2] };
+        for (const k in corners) {
+          if (Math.hypot(lx - corners[k][0], ly - corners[k][1]) <= 9) return { id: sel.id, handle: k };
+        }
+      }
+    }
     // Mount marker hit (checked first — small target on top).
     const mount = doc.mount;
     if (mount && mount.type !== "none") {
@@ -1045,8 +1126,35 @@
     const rect = cv.getBoundingClientRect();
     const scaleC = cv.width / rect.width;
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+    // Scatter sub-mode: while the panel is open, a canvas drag defines the placement region.
+    if (scatter) {
+      drag = { handle: "scatterRegion", px, py };
+      cv.setPointerCapture(e.pointerId);
+      return;
+    }
     const hit = hitTest(px, py);
-    if (!hit) { state.selectedId = null; refreshAdvancedForSelection(); renderAdvancedLayers(); render2D(); return; }
+    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    if (hit && hit.box) {
+      const bb = window.selectionBBox(selectedEls());
+      drag = {
+        handle: hit.handle, box: true, px, py, bb: bb,
+        center: { x: (bb.x0 + bb.x1) / 2, y: (bb.y0 + bb.y1) / 2 },
+        pivot: hit.handle === "nw" ? { x: bb.x1, y: bb.y1 } : hit.handle === "ne" ? { x: bb.x0, y: bb.y1 }
+             : hit.handle === "se" ? { x: bb.x0, y: bb.y0 } : { x: bb.x1, y: bb.y0 },
+        starts: selectedEls().map(function (m) { return { id: m.id, cxMm: m.cxMm, cyMm: m.cyMm, wMm: m.wMm, hMm: m.hMm, rotationDeg: m.rotationDeg || 0 }; }),
+      };
+      cv.setPointerCapture(e.pointerId);
+      render2D();
+      return;
+    }
+    if (!hit) {
+      // Empty canvas: start a marquee (rubber-band) selection.
+      drag = { handle: "marquee", px, py, additive, base: additive ? state.selectionIds.slice() : [] };
+      if (!additive) clearSelection();
+      cv.setPointerCapture(e.pointerId);
+      refreshAdvancedForSelection(); renderAdvancedLayers(); render2D();
+      return;
+    }
     // Mount drag: distinct path, does not select an element.
     if (hit.handle === "mount") {
       drag = {
@@ -1057,18 +1165,22 @@
       render2D();
       return;
     }
-    state.selectedId = hit.id;
+    if (hit.handle === "move") {
+      if (additive) { toggleInSelection(hit.id); refreshAdvancedForSelection(); renderAdvancedLayers(); render2D(); return; }
+      if (!isSelected(hit.id)) setSelection([hit.id]);   // clicking an unselected body selects just it
+      // else: keep the existing multi-selection so a group-move drag can begin
+    } else {
+      setSelection([hit.id]);                            // a handle grab always focuses that element
+    }
     const el = doc.elements.find(el => el.id === hit.id);
     drag = {
-      handle: hit.handle,
-      // Store drag start in canvas px
-      px, py,
+      handle: hit.handle, px, py,
       start: { cx: el.cxMm, cy: el.cyMm, w: el.wMm, h: el.hMm, rot: el.rotationDeg || 0 },
+      // Snapshot every selected member for a group move.
+      starts: selectedEls().map(function (m) { return { id: m.id, cxMm: m.cxMm, cyMm: m.cyMm, wMm: m.wMm, hMm: m.hMm, rotationDeg: m.rotationDeg || 0 }; }),
     };
     cv.setPointerCapture(e.pointerId);
-    refreshAdvancedForSelection();
-    renderAdvancedLayers();
-    render2D();
+    refreshAdvancedForSelection(); renderAdvancedLayers(); render2D();
   });
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
@@ -1129,6 +1241,33 @@
     const rect = cv.getBoundingClientRect();
     const scaleC = cv.width / rect.width, s = state.scale;
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+    if (drag && drag.box) {
+      const applyUpdates = function (ups) {
+        ups.forEach(function (u) {
+          const m = doc.elements.find(function (x) { return x.id === u.id; });
+          if (!m) return;
+          m.cxMm = u.cxMm; m.cyMm = u.cyMm;
+          if (u.wMm != null) m.wMm = u.wMm;
+          if (u.hMm != null) m.hMm = u.hMm;
+          if (u.rotationDeg != null) m.rotationDeg = u.rotationDeg;
+        });
+      };
+      if (drag.handle === "move") {
+        applyUpdates(window.applyMove(drag.starts, (px - drag.px) / s, (py - drag.py) / s));
+      } else if (drag.handle === "rotate") {
+        const cxpx = mmX(drag.center.x), cypx = mmY(drag.center.y);
+        const theta = (Math.atan2(py - cypx, px - cxpx) - Math.atan2(drag.py - cypx, drag.px - cxpx)) * 180 / Math.PI;
+        applyUpdates(window.applyRotate(drag.starts, drag.center, theta));
+      } else {
+        // corner: uniform factor = current pivot->cursor distance / pivot->start-corner distance
+        const pivPx = { x: mmX(drag.pivot.x), y: mmY(drag.pivot.y) };
+        const startD = Math.hypot(drag.px - pivPx.x, drag.py - pivPx.y) || 1;
+        const nowD = Math.hypot(px - pivPx.x, py - pivPx.y);
+        applyUpdates(window.applyScale(drag.starts, drag.pivot, Math.max(0.05, nowD / startD)));
+      }
+      render2D();
+      return;
+    }
     // Mount drag: update mm position.
     if (drag.handle === "mount") {
       var mount = doc.mount;
@@ -1163,12 +1302,45 @@
       scheduleRebuild3D();
       return;
     }
+    if (drag.handle === "scatterRegion") {
+      const toMm = function (p, v0) { return (p - state.marginPx) / s + v0; };
+      scatter.region = {
+        x0: Math.min(toMm(drag.px, state.viewX0), toMm(px, state.viewX0)),
+        x1: Math.max(toMm(drag.px, state.viewX0), toMm(px, state.viewX0)),
+        y0: Math.min(toMm(drag.py, state.viewY0), toMm(py, state.viewY0)),
+        y1: Math.max(toMm(drag.py, state.viewY0), toMm(py, state.viewY0)),
+      };
+      drag.rectPx = { x0: Math.min(drag.px, px), y0: Math.min(drag.py, py), x1: Math.max(drag.px, px), y1: Math.max(drag.py, py) };
+      render2D();
+      return;
+    }
+    if (drag.handle === "marquee") {
+      const rectMm = {
+        x0: Math.min((drag.px - state.marginPx) / s + state.viewX0, (px - state.marginPx) / s + state.viewX0),
+        x1: Math.max((drag.px - state.marginPx) / s + state.viewX0, (px - state.marginPx) / s + state.viewX0),
+        y0: Math.min((drag.py - state.marginPx) / s + state.viewY0, (py - state.marginPx) / s + state.viewY0),
+        y1: Math.max((drag.py - state.marginPx) / s + state.viewY0, (py - state.marginPx) / s + state.viewY0),
+      };
+      drag.rectPx = { x0: Math.min(drag.px, px), y0: Math.min(drag.py, py), x1: Math.max(drag.px, px), y1: Math.max(drag.py, py) };
+      const hits = window.marqueeHits(doc.elements, rectMm);
+      setSelection(drag.additive ? drag.base.concat(hits.filter(function (id) { return drag.base.indexOf(id) === -1; })) : hits);
+      refreshAdvancedForSelection(); renderAdvancedLayers(); render2D();
+      return;
+    }
     const el = doc.elements.find(el => el.id === state.selectedId);
     if (!el) return;
     if (drag.handle === "move") {
-      el.cxMm = drag.start.cx + (px - drag.px) / s;
-      el.cyMm = drag.start.cy + (py - drag.py) / s;
-      applyMoveSnap(el);
+      const dx = (px - drag.px) / s, dy = (py - drag.py) / s;
+      if (drag.starts && drag.starts.length > 1) {
+        drag.starts.forEach(function (st0) {           // inline (no applyMove dependency yet)
+          const m = doc.elements.find(function (x) { return x.id === st0.id; });
+          if (m) { m.cxMm = st0.cxMm + dx; m.cyMm = st0.cyMm + dy; }
+        });
+      } else {
+        el.cxMm = drag.start.cx + dx;
+        el.cyMm = drag.start.cy + dy;
+        applyMoveSnap(el);
+      }
     } else if (drag.handle === "rotate") {
       const ang = Math.atan2(py - mmY(el.cyMm), px - mmX(el.cxMm)) * 180 / Math.PI + 90;
       el.rotationDeg = Math.round(ang);
@@ -1191,7 +1363,9 @@
 
   function endDrag() {
     if (!drag) return;
+    var wasScatter = drag.handle === "scatterRegion";
     drag = null;
+    if (wasScatter && scatter) scatterGenerate(); // re-roll the preview into the new region
     state.snapGuides = []; // clear transient guide lines
     // Re-fit the canvas: a move/scale/rotate (or mount move) may have pushed the element past
     // the old bounds. viewportDomain now includes element bboxes, so this keeps handles on-canvas.
@@ -1239,7 +1413,7 @@
       });
       el.depth.direction = defaultDirection;
       doc.elements.push(el);
-      state.selectedId = el.id;
+      setSelection([el.id]);
       refreshAdvancedForSelection();
       renderAdvancedLayers();
       scheduleRebuild3D();
@@ -1268,7 +1442,7 @@
     var els = doc.elements;
     if (!els.length) return;
     var idx = ((i % els.length) + els.length) % els.length;   // wrap
-    state.selectedId = els[idx].id;
+    setSelection([els[idx].id]);
     refreshAdvancedForSelection();
     renderLayers();
     render2D();
@@ -1288,12 +1462,12 @@
         if (cur === -1) { e.preventDefault(); selectByIndex(0); return; }
         if (cur < els.length - 1) { e.preventDefault(); selectByIndex(cur + 1); return; }
         // at last element → release focus (deselect, allow default Tab) to avoid a keyboard trap
-        state.selectedId = null; refreshAdvancedForSelection(); renderLayers(); render2D();
+        clearSelection(); refreshAdvancedForSelection(); renderLayers(); render2D();
         return; // do NOT preventDefault: focus leaves the canvas
       } else {
         if (cur === -1) { e.preventDefault(); selectByIndex(els.length - 1); return; }
         if (cur > 0) { e.preventDefault(); selectByIndex(cur - 1); return; }
-        state.selectedId = null; refreshAdvancedForSelection(); renderLayers(); render2D();
+        clearSelection(); refreshAdvancedForSelection(); renderLayers(); render2D();
         return; // release focus backward
       }
     }
@@ -1307,7 +1481,7 @@
 
     if (e.key === "Escape") {                         // deselect + release focus
       if (state.selectedId != null) {
-        state.selectedId = null; refreshAdvancedForSelection(); renderLayers(); render2D();
+        clearSelection(); refreshAdvancedForSelection(); renderLayers(); render2D();
       }
       cv.blur();
       return;
@@ -1329,10 +1503,18 @@
     e.preventDefault();                               // stop page scroll
     if (cur === -1) { selectByIndex(0); return; }     // nothing selected → select first, don't move yet
     var stepMm = e.shiftKey ? 0.25 : 1;               // Shift = fine 0.25 mm, else 1 mm
-    withSelected(function (el) {
-      el.cxMm = clamp(el.cxMm + dx * stepMm, 0, doc.body.widthMm);
-      el.cyMm = clamp(el.cyMm + dy * stepMm, 0, doc.body.heightMm);
-    });
+    if (state.selectionIds.length > 1) {              // nudge the whole multi-selection together
+      selectedEls().forEach(function (el) {
+        el.cxMm = clamp(el.cxMm + dx * stepMm, 0, doc.body.widthMm);
+        el.cyMm = clamp(el.cyMm + dy * stepMm, 0, doc.body.heightMm);
+      });
+      render2D(); scheduleRebuild3D();
+    } else {
+      withSelected(function (el) {
+        el.cxMm = clamp(el.cxMm + dx * stepMm, 0, doc.body.widthMm);
+        el.cyMm = clamp(el.cyMm + dy * stepMm, 0, doc.body.heightMm);
+      });
+    }
     refreshAdvancedForSelection();                    // keep advCx/advCy inputs in sync
   });
 
@@ -1804,7 +1986,7 @@
     });
     el.depth.direction = defaultDirection;
     doc.elements.push(el);
-    state.selectedId = el.id;
+    setSelection([el.id]);
     refreshAdvancedForSelection();
     renderAdvancedLayers();
     render2D();
@@ -1829,7 +2011,7 @@
     });
     el.depth.direction = defaultDirection;
     doc.elements.push(el);
-    state.selectedId = el.id;
+    setSelection([el.id]);
     refreshAdvancedForSelection();
     renderAdvancedLayers();
     render2D();
@@ -1865,7 +2047,7 @@
       el.depth.direction = defaultDirection;
       el.depth.threshold = 256;
       doc.elements.push(el);
-      state.selectedId = el.id;
+      setSelection([el.id]);
       refreshAdvancedForSelection();
       renderAdvancedLayers();
       render2D();
@@ -2017,10 +2199,11 @@
     trash: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.8 4.3h10.4"/><path d="M6.2 4.3V3a.8.8 0 0 1 .8-.8h2a.8.8 0 0 1 .8.8v1.3"/><path d="M4.3 4.3l.6 8.6a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.6"/></svg>'
   };
 
-  function buildLayerRow(i) {
+  function buildLayerRow(i, depth) {
     var el = doc.elements[i];
     var li = document.createElement("li");
-    if (el.id === state.selectedId) li.classList.add("adv-sel");
+    if (depth) li.style.paddingLeft = (6 + depth * 14) + "px";
+    if (isSelected(el.id)) li.classList.add("adv-sel");
     if (el._hidden) li.classList.add("adv-hidden");
 
     var thumb = buildLayerThumb(el);
@@ -2121,7 +2304,9 @@
       var to = doc.elements.findIndex(function (x) { return x.id === el.id; });
       if (from === -1 || to === -1) return;
       var moved = doc.elements.splice(from, 1)[0];
+      moved.groupId = el.groupId != null ? el.groupId : null;  // adopt the target row's group
       doc.elements.splice(to, 0, moved); // take the drop target's position
+      window.reindexContiguous(doc);
       renderLayers();
       render2D();
       scheduleRebuild3D();
@@ -2129,7 +2314,8 @@
 
     li.addEventListener("click", function (e) {
       if (e.target.classList.contains("adv-lbtn")) return;
-      state.selectedId = el.id;
+      if (e.shiftKey || e.metaKey || e.ctrlKey) toggleInSelection(el.id);
+      else setSelection([el.id]);
       refreshAdvancedForSelection();
       renderLayers();
       render2D();
@@ -2171,7 +2357,7 @@
     del.addEventListener("click", function (e) {
       e.stopPropagation();
       doc.elements.splice(i, 1);
-      if (state.selectedId === el.id) state.selectedId = null;
+      if (isSelected(el.id)) toggleInSelection(el.id);
       refreshAdvancedForSelection();
       renderLayers();
       render2D();
@@ -2181,20 +2367,93 @@
     return li;
   }
 
+  // Build a group header <li> for a group node at the given depth.
+  function buildGroupHeader(group, depth) {
+    var li = document.createElement("li");
+    li.className = "adv-group-head";
+    li.style.paddingLeft = (6 + depth * 14) + "px";
+    var leafIds = window.groupDescendantLeafIds(doc, group.id);
+    var allSel = leafIds.length && leafIds.every(function (id) { return isSelected(id); });
+    if (allSel) li.classList.add("adv-sel");
+
+    var caret = document.createElement("button");
+    caret.className = "adv-lbtn"; caret.textContent = group.collapsed ? "▸" : "▾"; caret.title = "Ein-/Ausklappen";
+    caret.addEventListener("click", function (e) { e.stopPropagation(); group.collapsed = !group.collapsed; renderLayers(); });
+
+    var name = document.createElement("span");
+    name.className = "adv-lname"; name.textContent = group.name + " (" + leafIds.length + ")";
+    name.title = "Doppelklick zum Umbenennen";
+    name.addEventListener("dblclick", function (e) {
+      e.stopPropagation();
+      var v = prompt("Gruppenname:", group.name);
+      if (v != null && v.trim()) { group.name = v.trim(); renderLayers(); }
+    });
+
+    var anyHidden = leafIds.some(function (id) { var el = doc.elements.find(function (x) { return x.id === id; }); return el && el._hidden; });
+    var vis = document.createElement("button");
+    vis.className = "adv-lbtn"; vis.innerHTML = anyHidden ? ICONS.eyeOff : ICONS.eye; vis.title = anyHidden ? "Einblenden" : "Ausblenden";
+    vis.addEventListener("click", function (e) {
+      e.stopPropagation();
+      leafIds.forEach(function (id) { var el = doc.elements.find(function (x) { return x.id === id; }); if (el) el._hidden = !anyHidden; });
+      renderLayers(); render2D(); scheduleRebuild3D();
+    });
+
+    var del = document.createElement("button");
+    del.className = "adv-lbtn"; del.innerHTML = ICONS.trash; del.title = "Gruppe löschen";
+    del.addEventListener("click", function (e) {
+      e.stopPropagation();
+      // Delete the whole subtree: descendant leaves AND every descendant group record.
+      var groupIds = [group.id];
+      (function collect(gid) { window.childGroupIds(doc, gid).forEach(function (cg) { groupIds.push(cg); collect(cg); }); })(group.id);
+      doc.elements = doc.elements.filter(function (el) { return leafIds.indexOf(el.id) === -1; });
+      doc.groups = doc.groups.filter(function (g) { return groupIds.indexOf(g.id) === -1; });
+      setSelection([]); refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D();
+    });
+
+    li.addEventListener("click", function (e) {
+      if (e.target.classList.contains("adv-lbtn")) return;
+      setSelection(leafIds);
+      refreshAdvancedForSelection(); renderLayers(); render2D();
+    });
+
+    li.append(caret, name, vis, del);
+
+    li.addEventListener("dragover", function (e) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; li.classList.add("drag-over"); });
+    li.addEventListener("dragleave", function () { li.classList.remove("drag-over"); });
+    li.addEventListener("drop", function (e) {
+      e.preventDefault(); e.stopPropagation(); li.classList.remove("drag-over");
+      var fromId = e.dataTransfer.getData("text/plain");
+      var el = doc.elements.find(function (x) { return String(x.id) === fromId; });
+      if (!el) return;
+      el.groupId = group.id;                 // join this group
+      window.reindexContiguous(doc);
+      renderLayers(); render2D(); scheduleRebuild3D();
+    });
+
+    return li;
+  }
+
+  function renderForestNodes(list, nodes, depth) {
+    // nodes are bottom->top; the panel shows topmost first, so iterate reversed.
+    for (var i = nodes.length - 1; i >= 0; i--) {
+      var n = nodes[i];
+      if (n.type === "element") {
+        list.appendChild(buildLayerRow(doc.elements.indexOf(n.el), depth));
+      } else {
+        list.appendChild(buildGroupHeader(n.group, depth));
+        if (!n.group.collapsed) renderForestNodes(list, n.children, depth + 1);
+      }
+    }
+  }
+
   // Populate a layers <ul> container (and its paired empty <p>) with the current doc elements.
   function populateLayersList(list, empty) {
     if (!list) return;
     list.innerHTML = "";
     var els = doc.elements;
-    if (!els || els.length === 0) {
-      if (empty) empty.hidden = false;
-      return;
-    }
+    if (!els || els.length === 0) { if (empty) empty.hidden = false; return; }
     if (empty) empty.hidden = true;
-    // Render back-to-front (last index = topmost layer shown first).
-    for (var idx = els.length - 1; idx >= 0; idx--) {
-      list.appendChild(buildLayerRow(idx));
-    }
+    renderForestNodes(list, window.flattenGroupForest(doc), 0);
   }
 
   // Refresh the (single) layer list. Also drives the stage hero: a big
@@ -2227,6 +2486,14 @@
     // Floating selection toolbar on the stage follows the selection.
     var selTb = document.getElementById("selToolbar");
     if (selTb) selTb.hidden = disabled;
+    var multi = state.selectionIds.length > 1;
+    document.querySelectorAll("#selToolbar .tb-multi, #selToolbar [data-multi]").forEach(function (n) { n.hidden = !multi; });
+    var dist = state.selectionIds.length >= 3;
+    var dH = document.getElementById("selDistH"), dV = document.getElementById("selDistV");
+    if (dH) dH.disabled = !dist; if (dV) dV.disabled = !dist;
+    // Streuen (scatter) applies to a single selected element.
+    var scBtn = document.getElementById("selScatterBtn");
+    if (scBtn) scBtn.hidden = state.selectionIds.length !== 1;
     var flipH = document.getElementById("selFlipHBtn"), flipV = document.getElementById("selFlipVBtn");
     if (flipH) { flipH.classList.toggle("tb-on", !!(el && el.flipH)); flipH.setAttribute("aria-pressed", String(!!(el && el.flipH))); }
     if (flipV) { flipV.classList.toggle("tb-on", !!(el && el.flipV)); flipV.setAttribute("aria-pressed", String(!!(el && el.flipV))); }
@@ -2673,15 +2940,11 @@
 
   // ---- Löschen (Toolbar + Entf/Backspace auf der Arbeitsfläche) ----
   function deleteSelected() {
-    var el = selectedEl();
-    if (!el) return;
-    var i = doc.elements.indexOf(el);
-    if (i !== -1) doc.elements.splice(i, 1);
-    state.selectedId = null;
-    refreshAdvancedForSelection();
-    renderLayers();
-    render2D();
-    scheduleRebuild3D();
+    const ids = state.selectionIds.slice();
+    if (!ids.length) return;
+    doc.elements = doc.elements.filter(function (e) { return ids.indexOf(e.id) === -1; });
+    clearSelection();
+    refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D();
   }
 
   // ---- Duplizieren (Ebenen-Zeile, Strg/Cmd+D, Bühnen-Toolbar) ----
@@ -2695,21 +2958,125 @@
     copy._img = el._img || null; // share the decoded bitmap (read-only)
     copy.cxMm = el.cxMm + 4; copy.cyMm = el.cyMm + 4; // nudge so the copy is visible
     doc.elements.splice(doc.elements.indexOf(el) + 1, 0, copy); // directly above the original
-    state.selectedId = copy.id;
+    setSelection([copy.id]);
     refreshAdvancedForSelection();
     renderLayers();
     render2D();
     scheduleRebuild3D();
   }
-  function duplicateSelected() { duplicateElement(selectedEl()); }
+  function duplicateSelected() {
+    const els = selectedEls();
+    if (!els.length) return;
+    if (els.length === 1) { duplicateElement(els[0]); return; }
+    const copies = [];
+    els.forEach(function (el) {
+      const drop = { _img: 1, _display: 1, _displayKey: 1, _hidden: 1, id: 1 };
+      const props = JSON.parse(JSON.stringify(el, function (k, v) { return drop[k] ? undefined : v; }));
+      const copy = window.makeElementV2(el.type, props);
+      copy._img = el._img || null; copy.groupId = null;
+      copy.cxMm = el.cxMm + 4; copy.cyMm = el.cyMm + 4;
+      doc.elements.push(copy); copies.push(copy.id);
+    });
+    setSelection(copies);
+    var srcGroups = {}; els.forEach(function (el) { if (el.groupId != null) srcGroups[el.groupId] = 1; });
+    if (Object.keys(srcGroups).length === 1) {
+      var gid = window.groupElements(doc, copies);
+      if (gid) setSelection(window.groupDescendantLeafIds(doc, gid));
+    }
+    refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D();
+  }
   window.addEventListener("keydown", function (e) {
     if (!(e.metaKey || e.ctrlKey) || e.shiftKey || String(e.key).toLowerCase() !== "d") return;
     var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
     if (tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable)) return;
-    if (!selectedEl()) return; // nothing selected → leave Cmd+D to the browser
+    if (!state.selectionIds.length) return; // nothing selected → leave Cmd+D to the browser
     e.preventDefault();
     duplicateSelected();
   });
+  function doGroup() {
+    if (state.selectionIds.length < 2) return;
+    var gid = window.groupElements(doc, state.selectionIds.slice());
+    if (gid) { setSelection(window.groupDescendantLeafIds(doc, gid)); refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D(); }
+  }
+  function doUngroup() {
+    var els = selectedEls(), gids = {};
+    els.forEach(function (el) { if (el.groupId != null) gids[el.groupId] = 1; });
+    Object.keys(gids).forEach(function (gid) { window.ungroupGroup(doc, gid); });
+    refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D();
+  }
+  window.addEventListener("keydown", function (e) {
+    if (!(e.metaKey || e.ctrlKey) || String(e.key).toLowerCase() !== "g") return;
+    var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable)) return;
+    e.preventDefault();
+    if (e.shiftKey) doUngroup(); else doGroup();
+  });
+
+  // ---- Streuen (scatter): panel · live preview · apply as a group ----
+  function scatterOpen() {
+    var el = selectedEl();
+    if (!el || state.selectionIds.length !== 1) return;
+    scatter = { sourceId: el.id, region: null, seed: (Date.now() >>> 0), previewIds: [] };
+    var p = document.getElementById("scatterPanel"); if (p) p.hidden = false;
+    scatterGenerate();
+  }
+  function scatterClose(commit) {
+    var p = document.getElementById("scatterPanel"); if (p) p.hidden = true;
+    if (scatter && !commit) scatterClearPreview();
+    scatter = null;
+    render2D(); scheduleRebuild3D();
+  }
+  function scatterClearPreview() {
+    if (!scatter) return;
+    doc.elements = doc.elements.filter(function (e) { return scatter.previewIds.indexOf(e.id) === -1; });
+    scatter.previewIds = [];
+  }
+  function scatterParams() {
+    var num = function (id, d) { var n = document.getElementById(id); var v = n ? parseFloat(n.value) : NaN; return isNaN(v) ? d : v; };
+    return {
+      count: Math.max(1, Math.round(num("scCount", 12))),
+      rotMin: num("scRotMin", 0), rotMax: num("scRotMax", 360),
+      scaleMin: num("scScaleMin", 0.6), scaleMax: num("scScaleMax", 1.4),
+      avoidOverlap: !!(document.getElementById("scAvoid") && document.getElementById("scAvoid").checked),
+    };
+  }
+  function scatterGenerate() {
+    if (!scatter) return;
+    scatterClearPreview();
+    var src = doc.elements.find(function (e) { return e.id === scatter.sourceId; });
+    if (!src) return;
+    var region = scatter.region || { x0: 0, y0: 0, x1: doc.body.widthMm, y1: doc.body.heightMm };
+    var transforms = window.scatterCopies({ wMm: src.wMm, hMm: src.hMm }, region, scatterParams(), scatter.seed);
+    var ids = [];
+    transforms.forEach(function (t) {
+      var drop = { _img: 1, _display: 1, _displayKey: 1, _hidden: 1, id: 1 };
+      var props = JSON.parse(JSON.stringify(src, function (k, v) { return drop[k] ? undefined : v; }));
+      var copy = window.makeElementV2(src.type, props);
+      copy._img = src._img || null; copy.groupId = null;
+      copy.cxMm = t.cxMm; copy.cyMm = t.cyMm; copy.wMm = t.wMm; copy.hMm = t.hMm; copy.rotationDeg = t.rotationDeg;
+      doc.elements.push(copy); ids.push(copy.id);
+    });
+    scatter.previewIds = ids;
+    render2D(); scheduleRebuild3D();
+  }
+  (function () {
+    var wire = function (id, fn) { var n = document.getElementById(id); if (n) n.addEventListener("click", fn); };
+    wire("selScatterBtn", scatterOpen);
+    wire("scReroll", function () { if (scatter) { scatter.seed = (Date.now() >>> 0); scatterGenerate(); } });
+    wire("scApply", function () {
+      if (!scatter || !scatter.previewIds.length) { scatterClose(false); return; }
+      var gid = window.groupElements(doc, scatter.previewIds.slice());
+      var ids = gid ? window.groupDescendantLeafIds(doc, gid) : scatter.previewIds.slice();
+      scatter.previewIds = []; // committed — keep the copies
+      scatterClose(true);
+      setSelection(ids); refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D();
+    });
+    wire("scCancel", function () { scatterClose(false); refreshAdvancedForSelection(); renderLayers(); });
+    ["scCount", "scRotMin", "scRotMax", "scScaleMin", "scScaleMax"].forEach(function (id) {
+      var n = document.getElementById(id); if (n) n.addEventListener("input", function () { if (scatter) scatterGenerate(); });
+    });
+    var av = document.getElementById("scAvoid"); if (av) av.addEventListener("change", function () { if (scatter) scatterGenerate(); });
+  }());
   // ---- Relief-Höhe: "Auto" entfernt den manuellen Override ----
   (function () {
     var b = document.getElementById("reliefAutoBtn");
@@ -2756,11 +3123,30 @@
   (function () {
     var wire = function (id, fn) { var n = document.getElementById(id); if (n) n.addEventListener("click", fn); };
     wire("selDupBtn", duplicateSelected);
+    wire("selGroupBtn", doGroup);
+    wire("selUngroupBtn", doUngroup);
     wire("selCenterHBtn", function () { centerH(); });
     wire("selCenterVBtn", function () { centerV(); });
     wire("selFlipHBtn", function () { flipSelected("h"); });
     wire("selFlipVBtn", function () { flipSelected("v"); });
     wire("selDelBtn", deleteSelected);
+    function applyLayout(fn) {
+      var els = selectedEls();
+      if (els.length < 2) return;
+      fn(els).forEach(function (u) {
+        var m = doc.elements.find(function (x) { return x.id === u.id; });
+        if (m) { if (u.cxMm != null) m.cxMm = u.cxMm; if (u.cyMm != null) m.cyMm = u.cyMm; }
+      });
+      refreshAdvancedForSelection(); render2D(); scheduleRebuild3D();
+    }
+    wire("selAlignL",  function () { applyLayout(function (e) { return window.alignElements(e, "left"); }); });
+    wire("selAlignR",  function () { applyLayout(function (e) { return window.alignElements(e, "right"); }); });
+    wire("selAlignT",  function () { applyLayout(function (e) { return window.alignElements(e, "top"); }); });
+    wire("selAlignB",  function () { applyLayout(function (e) { return window.alignElements(e, "bottom"); }); });
+    wire("selAlignCH", function () { applyLayout(function (e) { return window.alignElements(e, "centerH"); }); });
+    wire("selAlignCV", function () { applyLayout(function (e) { return window.alignElements(e, "centerV"); }); });
+    wire("selDistH",   function () { applyLayout(function (e) { return window.distributeElements(e, "h"); }); });
+    wire("selDistV",   function () { applyLayout(function (e) { return window.distributeElements(e, "v"); }); });
   }());
 
   // ---- Dünne-Stellen prüfen (nozzle-width check) ----
@@ -2839,7 +3225,7 @@
   function resetDocTo(newDoc) {
     Object.keys(doc).forEach(function (k) { delete doc[k]; });
     Object.assign(doc, newDoc);
-    state.selectedId = null;
+    clearSelection();
     defaultDirection = "raised";
     // Register any embedded custom fonts before rendering, then repaint once ready.
     registerDocFonts(doc).then(function () { render2D(); scheduleRebuild3D(); });

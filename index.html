@@ -38,6 +38,19 @@
           </div>
       </div>
     </div>
+    <div id="scatterPanel" class="popover" hidden>
+      <div class="pop-row"><strong>Streuen</strong></div>
+      <label class="pop-row">Anzahl <input id="scCount" type="number" min="1" max="200" value="12"></label>
+      <label class="pop-row">Drehung° <input id="scRotMin" type="number" value="0"> – <input id="scRotMax" type="number" value="360"></label>
+      <label class="pop-row">Skalierung× <input id="scScaleMin" type="number" step="0.1" value="0.6"> – <input id="scScaleMax" type="number" step="0.1" value="1.4"></label>
+      <label class="pop-row"><input id="scAvoid" type="checkbox"> Überlappung vermeiden</label>
+      <p class="hint" id="scHint">Ziehe auf der Fläche einen Bereich auf (sonst ganze Platte).</p>
+      <div class="pop-row">
+        <button type="button" id="scReroll" class="btn">Neu würfeln</button>
+        <button type="button" id="scApply" class="btn btn-primary">Anwenden</button>
+        <button type="button" id="scCancel" class="btn">Abbrechen</button>
+      </div>
+    </div>
     <button type="button" id="openBtn" title="Projekt öffnen (.json)">Öffnen</button>
     <button type="button" id="saveBtn" title="Projekt speichern (.json)">Speichern</button>
     <button type="button" id="exportBtn" title="3D-Modell exportieren (3MF/STL/PNG)">Exportieren</button>
@@ -176,6 +189,18 @@
       <button type="button" id="selCenterVBtn" title="Vertikal zentrieren">↕</button>
       <button type="button" id="selFlipHBtn" title="Horizontal spiegeln" aria-pressed="false"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8v12.4" stroke-dasharray="2 1.7"/><path d="M5.7 4.6v6.8L1.6 8z" fill="currentColor"/><path d="M10.3 4.6v6.8L14.4 8z"/></svg></button>
       <button type="button" id="selFlipVBtn" title="Vertikal spiegeln" aria-pressed="false"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.8 8h12.4" stroke-dasharray="2 1.7"/><path d="M4.6 5.7h6.8L8 1.6z" fill="currentColor"/><path d="M4.6 10.3h6.8L8 14.4z"/></svg></button>
+      <button type="button" id="selGroupBtn" class="tb-multi" title="Gruppieren (Strg/Cmd+G)">▣</button>
+      <button type="button" id="selUngroupBtn" title="Gruppierung aufheben (Strg/Cmd+Shift+G)">▢</button>
+      <span class="tb-sep" data-multi></span>
+      <button type="button" id="selAlignL" class="tb-multi" title="Links ausrichten">⇤</button>
+      <button type="button" id="selAlignCH" class="tb-multi" title="Horizontal zentrieren (Auswahl)">↔</button>
+      <button type="button" id="selAlignR" class="tb-multi" title="Rechts ausrichten">⇥</button>
+      <button type="button" id="selAlignT" class="tb-multi" title="Oben ausrichten">⤒</button>
+      <button type="button" id="selAlignCV" class="tb-multi" title="Vertikal zentrieren (Auswahl)">↕</button>
+      <button type="button" id="selAlignB" class="tb-multi" title="Unten ausrichten">⤓</button>
+      <button type="button" id="selDistH" class="tb-multi" title="Horizontal verteilen">⇹</button>
+      <button type="button" id="selDistV" class="tb-multi" title="Vertikal verteilen">⤡</button>
+      <button type="button" id="selScatterBtn" title="Streuen">✳</button>
       <button type="button" id="selDelBtn" title="Löschen (Entf)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.8 4.3h10.4"/><path d="M6.2 4.3V3a.8.8 0 0 1 .8-.8h2a.8.8 0 0 1 .8.8v1.3"/><path d="M4.3 4.3l.6 8.6a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.6"/></svg></button>
     </div>
     <div id="stageHero" hidden>
@@ -382,6 +407,11 @@
 <script src="js/sources.js"></script>
 <script src="js/bg-removal.js"></script>
 <script src="js/bookmark-model.js"></script>
+<script src="js/geom-util.js"></script>
+<script src="js/selection-ops.js"></script>
+<script src="js/transform-ops.js"></script>
+<script src="js/align-ops.js"></script>
+<script src="js/scatter.js"></script>
 <script src="js/bookmark-export.js"></script>
 <script src="js/build-parts.js"></script>
 <script src="js/preview3d.js"></script>

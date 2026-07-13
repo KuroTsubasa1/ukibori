@@ -163,9 +163,7 @@ Expected: `hasEditor:true, hasSimpleSidebar:true, hasToggle:true, noOldSwitch:tr
 
 ```bash
 git add index.html js/editor.js styles.css
-git commit -m "feat(ui): unified editor shell + Simple/Advanced toggle (retire mode switch)
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(ui): unified editor shell + Simple/Advanced toggle (retire mode switch)"
 ```
 
 ---

@@ -162,9 +162,7 @@ Reload on a fresh port (`python3 -m http.server 8011`). Expected: `fail: 0`; the
 
 ```bash
 git add js/geometry.js tests/geometry-native.test.js tests/run.html
-git commit -m "feat(geometry): shapeFootprintField — rect/circle body + hole/loop cut
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(geometry): shapeFootprintField — rect/circle body + hole/loop cut"
 ```
 
 ---
@@ -328,9 +326,7 @@ Reload on a fresh port (`python3 -m http.server 8013`). Expected: `fail: 0`; the
 
 ```bash
 git add js/build-parts.js tests/build-parts.test.js tests/run.html index.html
-git commit -m "feat(geometry): buildBaseParts(doc) — v2 base-plate from footprint field
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(geometry): buildBaseParts(doc) — v2 base-plate from footprint field"
 ```
 
 ---

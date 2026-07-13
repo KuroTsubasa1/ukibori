@@ -90,7 +90,7 @@
 
 ```bash
 cd /Users/lasseharm/Dev/ukibori
-(python3 /private/tmp/claude-501/-Users-lasseharm-Dev-ukibori/0410b409-a452-4a38-8a58-729d3f34e82c/scratchpad/nocache_server.py >/dev/null 2>&1 &)
+(python3 /private/tmp/scratch/-Users-lasseharm-Dev-ukibori/0410b409-a452-4a38-8a58-729d3f34e82c/scratchpad/nocache_server.py >/dev/null 2>&1 &)
 sleep 1; TS=$(date +%s%N); sed "s/src=\"\([^\"]*\)\"/src=\"\1?v=$TS\"/g" tests/run.html > tests/_run_nocache.html
 ```
 Navigate Playwright to `http://localhost:8899/tests/_run_nocache.html`; expected: 4 new tests FAIL with "window.viewportDomain is not a function".

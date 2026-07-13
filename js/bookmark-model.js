@@ -120,7 +120,7 @@ function defaultDoc() {
     // workpiece's face — engraved: topmost plate band; raised: full-face slab under the
     // motif stack), pushing element colors one step further. null = off.
     topLayerColor: null,
-    elements: [], fonts: {},
+    elements: [], groups: [], fonts: {},
   };
 }
 
@@ -148,7 +148,7 @@ function migrateElement(el, doc, layerHmm) {
     id: el.id, type: el.type,
     cxMm: el.cxMm, cyMm: el.cyMm, wMm: el.wMm, hMm: el.hMm, rotationDeg: el.rotationDeg || 0,
     flipH: false, flipV: false,
-    cutout: !!el.cutout, color: el.color, depth,
+    cutout: !!el.cutout, color: el.color, groupId: el.groupId != null ? el.groupId : null, depth,
   };
   if (el.type === "image") { out.src = el.src; out._img = null; }
   if (el.type === "text") { out.text = el.text; out.fontFamily = el.fontFamily; out.fontWeight = el.fontWeight; }
@@ -170,6 +170,7 @@ function migrateProject(doc) {
     if (doc.autoLayerHeights == null) doc.autoLayerHeights = false;
     if (doc.topLayerColor === undefined) doc.topLayerColor = null;
     if (doc.body && doc.body.baseThicknessMm == null) doc.body.baseThicknessMm = 0;
+    if (!Array.isArray(doc.groups)) doc.groups = [];
     for (const el of doc.elements || []) {
       if (el.flipH == null) el.flipH = false;
       if (el.flipV == null) el.flipV = false;
@@ -181,6 +182,7 @@ function migrateProject(doc) {
         el.depth.colorLayerStyle = el.depth.flush ? "bands" : "stepped";
       }
       if (el.type === "shape" && el.shape == null) el.shape = "rect";
+      if (el.groupId === undefined) el.groupId = null;
     }
     return doc;
   }
@@ -210,6 +212,7 @@ function migrateProject(doc) {
     amsPalette: [], amsSolidBase: false,
     autoLayerHeights: false, topLayerColor: null, // v1 saves predate the feature: keep manual heights
     elements: (doc.elements || []).map(el => migrateElement(el, doc, layerH)),
+    groups: [],
     fonts: doc.fonts || {},
   };
 }
@@ -222,13 +225,109 @@ function makeElementV2(type, props) {
     id: __nextId(), type,
     cxMm: 25, cyMm: 75, wMm: 30, hMm: 30, rotationDeg: 0,
     flipH: false, flipV: false,
-    cutout: false, color: "#000000",
+    cutout: false, color: "#000000", groupId: null,
     depth: defaultDepth(type),
   }, props);
   if (type === "image") { if (e.src == null) e.src = ""; e._img = e._img || null; }
   if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; }
   if (type === "shape") { if (e.shape == null) e.shape = "rect"; } // 'rect' | 'circle' (ellipse when wMm ≠ hMm)
   return e;
+}
+
+function makeGroup(props) {
+  return Object.assign({ id: __nextId(), name: "Gruppe", collapsed: false, parentId: null }, props || {});
+}
+
+function childGroupIds(doc, groupId) {
+  return (doc.groups || []).filter(function (g) { return String(g.parentId) === String(groupId); }).map(function (g) { return g.id; });
+}
+function groupDescendantLeafIds(doc, groupId) {
+  var out = [];
+  (doc.elements || []).forEach(function (e) { if (String(e.groupId) === String(groupId)) out.push(e.id); });
+  childGroupIds(doc, groupId).forEach(function (cg) { groupDescendantLeafIds(doc, cg).forEach(function (id) { out.push(id); }); });
+  return out;
+}
+function flattenGroupForest(doc) {
+  var els = doc.elements || [], groups = doc.groups || [];
+  var idxOf = {}; els.forEach(function (e, i) { idxOf[String(e.id)] = i; });
+  var groupById = {}; groups.forEach(function (g) { groupById[String(g.id)] = g; });
+  var memo = {};
+  function groupMinIdx(gid) {
+    if (memo[gid] != null) return memo[gid];
+    var m = Infinity;
+    els.forEach(function (e) { if (String(e.groupId) === String(gid)) m = Math.min(m, idxOf[String(e.id)]); });
+    childGroupIds(doc, gid).forEach(function (cg) { m = Math.min(m, groupMinIdx(cg)); });
+    memo[gid] = m; return m;
+  }
+  function build(gid) {
+    var kids = [];
+    els.forEach(function (e) { if (String(e.groupId) === String(gid)) kids.push({ type: "element", el: e, _idx: idxOf[String(e.id)] }); });
+    childGroupIds(doc, gid).forEach(function (cg) { kids.push({ type: "group", group: groupById[String(cg)], children: build(cg), _idx: groupMinIdx(cg) }); });
+    kids.sort(function (a, b) { return a._idx - b._idx; });
+    kids.forEach(function (k) { delete k._idx; });
+    return kids;
+  }
+  var top = [];
+  els.forEach(function (e) { if (e.groupId == null) top.push({ type: "element", el: e, _idx: idxOf[String(e.id)] }); });
+  groups.forEach(function (g) { if (g.parentId == null) top.push({ type: "group", group: g, children: build(g.id), _idx: groupMinIdx(g.id) }); });
+  top.sort(function (a, b) { return a._idx - b._idx; });
+  top.forEach(function (k) { delete k._idx; });
+  return top;
+}
+function reindexContiguous(doc) {
+  var order = [];
+  (function walk(nodes) { nodes.forEach(function (n) { if (n.type === "element") order.push(n.el); else walk(n.children); }); })(flattenGroupForest(doc));
+  (doc.elements || []).forEach(function (e) { if (order.indexOf(e) === -1) order.push(e); });
+  doc.elements = order;
+}
+function __outermostSelected(doc, elId, idset) {
+  var el = (doc.elements || []).find(function (e) { return String(e.id) === String(elId); });
+  var node = { kind: "element", id: elId };
+  var gid = el ? el.groupId : null;
+  while (gid != null) {
+    var leaves = groupDescendantLeafIds(doc, gid);
+    if (leaves.length && leaves.every(function (id) { return idset[String(id)]; })) {
+      node = { kind: "group", id: gid };
+      var g = (doc.groups || []).find(function (x) { return String(x.id) === String(gid); });
+      gid = g ? g.parentId : null;
+    } else break;
+  }
+  return node;
+}
+function groupElements(doc, elementIds) {
+  if (!doc || !elementIds || !elementIds.length) return null;
+  var idset = {}; elementIds.forEach(function (id) { idset[String(id)] = 1; });
+  var items = [], seen = {};
+  elementIds.forEach(function (id) {
+    var it = __outermostSelected(doc, id, idset);
+    var key = it.kind + ":" + it.id;
+    if (!seen[key]) { seen[key] = 1; items.push(it); }
+  });
+  if (items.length === 0) return null;
+  if (items.length === 1 && items[0].kind === "group") return items[0].id; // already a group
+  var g = makeGroup({ name: "Gruppe", parentId: null });
+  if (!doc.groups) doc.groups = [];
+  doc.groups.push(g);
+  items.forEach(function (it) {
+    if (it.kind === "element") {
+      var el = doc.elements.find(function (e) { return String(e.id) === String(it.id); });
+      if (el) el.groupId = g.id;
+    } else {
+      var cg = doc.groups.find(function (x) { return String(x.id) === String(it.id); });
+      if (cg) cg.parentId = g.id;
+    }
+  });
+  reindexContiguous(doc);
+  return g.id;
+}
+function ungroupGroup(doc, groupId) {
+  var g = (doc.groups || []).find(function (x) { return String(x.id) === String(groupId); });
+  if (!g) return;
+  var parent = g.parentId;
+  (doc.elements || []).forEach(function (e) { if (String(e.groupId) === String(groupId)) e.groupId = parent; });
+  childGroupIds(doc, groupId).forEach(function (cg) { var c = doc.groups.find(function (x) { return String(x.id) === String(cg); }); if (c) c.parentId = parent; });
+  doc.groups = doc.groups.filter(function (x) { return String(x.id) !== String(groupId); });
+  reindexContiguous(doc);
 }
 
 // === Color merge (Farbe zusammenführen) =====================================
@@ -350,6 +449,13 @@ window.defaultFrame = defaultFrame;
 window.defaultDoc = defaultDoc;
 window.migrateProject = migrateProject;
 window.makeElementV2 = makeElementV2;
+window.makeGroup = makeGroup;
+window.childGroupIds = childGroupIds;
+window.groupDescendantLeafIds = groupDescendantLeafIds;
+window.flattenGroupForest = flattenGroupForest;
+window.reindexContiguous = reindexContiguous;
+window.groupElements = groupElements;
+window.ungroupGroup = ungroupGroup;
 window.mergeReduceColors = mergeReduceColors;
 window.unmergeReduceColor = unmergeReduceColor;
 window.resolveMergeRoots = resolveMergeRoots;

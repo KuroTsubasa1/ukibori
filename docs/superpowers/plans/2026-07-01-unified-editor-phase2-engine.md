@@ -212,9 +212,7 @@ Reload on a fresh port (`python3 -m http.server 8021`). Expected: `fail: 0`; the
 
 ```bash
 git add js/build-parts.js tests/compose-v2.test.js tests/run.html
-git commit -m "feat(geometry): composeDesignV2 — per-pixel element composition for v2 docs
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(geometry): composeDesignV2 — per-pixel element composition for v2 docs"
 ```
 
 ---
@@ -413,9 +411,7 @@ Reload on a fresh port (`python3 -m http.server 8023`). Expected: `fail: 0`; the
 
 ```bash
 git add js/build-parts.js tests/engraved-parity.test.js tests/run.html
-git commit -m "feat(geometry): buildEngravedParts(doc) — v2 engraved model, parity vs bookmark
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(geometry): buildEngravedParts(doc) — v2 engraved model, parity vs bookmark"
 ```
 
 ---
@@ -528,9 +524,7 @@ Reload on a fresh port (`python3 -m http.server 8025`). Expected: `fail: 0`; the
 
 ```bash
 git add js/build-parts.js tests/mount-ring.test.js tests/run.html
-git commit -m "feat(geometry): buildMountRingParts — v2 loop (Öse) ring
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(geometry): buildMountRingParts — v2 loop (Öse) ring"
 ```
 
 ---
@@ -658,9 +652,7 @@ Reload on a fresh port (`python3 -m http.server 8027`). Expected: `fail: 0`; the
 
 ```bash
 git add js/build-parts.js tests/raised-parts.test.js tests/run.html
-git commit -m "feat(geometry): buildRaisedParts — raised element prisms above the base
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(geometry): buildRaisedParts — raised element prisms above the base"
 ```
 
 ---
@@ -831,9 +823,7 @@ git add js/build-parts.js tests/heightmap-parts.test.js tests/run.html
 git commit -m "feat(geometry): buildHeightmapParts — brightness->height relief (slab stack)
 
 Extract __drawElement shared canvas helper; heightmap builds a floor + super-level
-slabs from per-pixel luminance. Prints identically to a continuous surface.
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+slabs from per-pixel luminance. Prints identically to a continuous surface."
 ```
 
 ---
@@ -1065,9 +1055,7 @@ git commit -m "feat(geometry): unified buildParts(doc) entry (base + engraved + 
 
 Extract __engravedBaseAndFloors (parity-safe); buildParts reclassifies non-engraved
 pixels as base so the base recesses only under engraved elements. Pure-engraved doc
-still equals buildEngravedParts. rect/circle; free base + border next.
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+still equals buildEngravedParts. rect/circle; free base + border next."
 ```
 
 ---
@@ -1248,9 +1236,7 @@ git add js/bookmark-model.js js/build-parts.js tests/unified-model.test.js tests
 git commit -m "feat(geometry): freeFootprintField — offset-margin dilation for free bodies
 
 Add body.borderMm (v2 model); free plate = content silhouette dilated by borderMm
-via a chamfer distance transform, mount hole cut. Wiring into buildParts is next.
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+via a chamfer distance transform, mount hole cut. Wiring into buildParts is next."
 ```
 
 ---
@@ -1398,9 +1384,7 @@ git add js/build-parts.js tests/free-entry.test.js tests/run.html
 git commit -m "feat(geometry): buildParts free-body branch + offset-margin border (thread footprint)
 
 Sub-builders accept an optional shared footprint; buildParts uses freeFootprintField
-for body.shape==='free' (offset-margin border). rect/circle output unchanged.
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+for body.shape==='free' (offset-margin border). rect/circle output unchanged."
 ```
 
 ---
