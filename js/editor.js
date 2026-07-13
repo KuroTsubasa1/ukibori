@@ -793,6 +793,23 @@
     ctx.restore();
   }
 
+  // Axis-aligned box + handles for a multi-selection (mm bbox -> canvas px).
+  function drawSelectionBox(ctx, bb, s) {
+    if (!bb) return;
+    const x0 = mmX(bb.x0), y0 = mmY(bb.y0), x1 = mmX(bb.x1), y1 = mmY(bb.y1);
+    ctx.save();
+    ctx.strokeStyle = "#6b4fb0"; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.fillStyle = "#6b4fb0";
+    [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].forEach(function (c) {
+      ctx.beginPath(); ctx.rect(c[0] - 5, c[1] - 5, 10, 10); ctx.fill();
+    });
+    const mx = (x0 + x1) / 2;
+    ctx.beginPath(); ctx.moveTo(mx, y0); ctx.lineTo(mx, y0 - 22); ctx.stroke();
+    ctx.beginPath(); ctx.arc(mx, y0 - 22, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
   // ---- Main render (exported as render2D) ----
   function render2D() {
     noteDocChanged();
@@ -899,8 +916,12 @@
     }
 
     // Selection handles on top.
-    const sel = doc.elements.find(e => e.id === state.selectedId) || null;
-    if (sel) drawSelection(ctx, sel, s);
+    const selEls = selectedEls();
+    if (selEls.length === 1) {
+      drawSelection(ctx, selEls[0], s);
+    } else if (selEls.length > 1) {
+      drawSelectionBox(ctx, window.selectionBBox(selEls), s);
+    }
 
     // Snap guide lines (dashed accent; only while a move-drag is active).
     if (drag && state.snapGuides.length) {
@@ -973,6 +994,22 @@
     const s = state.scale;
     // Priority pass: the current selection's transform handles always win over any
     // element body, so an overlapping neighbor can't steal a scale/rotate grab.
+
+    // Multi-selection: the box's own handles take priority.
+    if (state.selectionIds.length > 1) {
+      const bb = window.selectionBBox(selectedEls());
+      if (bb) {
+        const x0 = mmX(bb.x0), y0 = mmY(bb.y0), x1 = mmX(bb.x1), y1 = mmY(bb.y1);
+        const mx = (x0 + x1) / 2;
+        if (Math.hypot(px - mx, py - (y0 - 22)) <= 9) return { box: true, handle: "rotate" };
+        const corners = { nw: [x0, y0], ne: [x1, y0], se: [x1, y1], sw: [x0, y1] };
+        for (const k in corners) {
+          if (Math.hypot(px - corners[k][0], py - corners[k][1]) <= 9) return { box: true, handle: k };
+        }
+        if (px >= x0 && px <= x1 && py >= y0 && py <= y1) return { box: true, handle: "move" };
+      }
+    }
+
     const selId = state.selectedId;
     if (selId != null) {
       const sel = doc.elements.find(e => e.id === selId);
@@ -1088,6 +1125,19 @@
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
     const hit = hitTest(px, py);
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+    if (hit && hit.box) {
+      const bb = window.selectionBBox(selectedEls());
+      drag = {
+        handle: hit.handle, box: true, px, py, bb: bb,
+        center: { x: (bb.x0 + bb.x1) / 2, y: (bb.y0 + bb.y1) / 2 },
+        pivot: hit.handle === "nw" ? { x: bb.x1, y: bb.y1 } : hit.handle === "ne" ? { x: bb.x0, y: bb.y1 }
+             : hit.handle === "se" ? { x: bb.x0, y: bb.y0 } : { x: bb.x1, y: bb.y0 },
+        starts: selectedEls().map(function (m) { return { id: m.id, cxMm: m.cxMm, cyMm: m.cyMm, wMm: m.wMm, hMm: m.hMm, rotationDeg: m.rotationDeg || 0 }; }),
+      };
+      cv.setPointerCapture(e.pointerId);
+      render2D();
+      return;
+    }
     if (!hit) {
       // Empty canvas: start a marquee (rubber-band) selection.
       drag = { handle: "marquee", px, py, additive, base: additive ? state.selectionIds.slice() : [] };
@@ -1182,6 +1232,33 @@
     const rect = cv.getBoundingClientRect();
     const scaleC = cv.width / rect.width, s = state.scale;
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+    if (drag && drag.box) {
+      const applyUpdates = function (ups) {
+        ups.forEach(function (u) {
+          const m = doc.elements.find(function (x) { return x.id === u.id; });
+          if (!m) return;
+          m.cxMm = u.cxMm; m.cyMm = u.cyMm;
+          if (u.wMm != null) m.wMm = u.wMm;
+          if (u.hMm != null) m.hMm = u.hMm;
+          if (u.rotationDeg != null) m.rotationDeg = u.rotationDeg;
+        });
+      };
+      if (drag.handle === "move") {
+        applyUpdates(window.applyMove(drag.starts, (px - drag.px) / s, (py - drag.py) / s));
+      } else if (drag.handle === "rotate") {
+        const cxpx = mmX(drag.center.x), cypx = mmY(drag.center.y);
+        const theta = (Math.atan2(py - cypx, px - cxpx) - Math.atan2(drag.py - cypx, drag.px - cxpx)) * 180 / Math.PI;
+        applyUpdates(window.applyRotate(drag.starts, drag.center, theta));
+      } else {
+        // corner: uniform factor = current pivot->cursor distance / pivot->start-corner distance
+        const pivPx = { x: mmX(drag.pivot.x), y: mmY(drag.pivot.y) };
+        const startD = Math.hypot(drag.px - pivPx.x, drag.py - pivPx.y) || 1;
+        const nowD = Math.hypot(px - pivPx.x, py - pivPx.y);
+        applyUpdates(window.applyScale(drag.starts, drag.pivot, Math.max(0.05, nowD / startD)));
+      }
+      render2D();
+      return;
+    }
     // Mount drag: update mm position.
     if (drag.handle === "mount") {
       var mount = doc.mount;
