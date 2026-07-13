@@ -623,6 +623,9 @@
     background: var(--surface2); border: 1px solid var(--line);
   }
 
+  .adv-group-head { display:flex; align-items:center; gap:6px; font-weight:600; opacity:.95; }
+  .adv-group-head .adv-lname { flex:1; }
+
   /* Palette swatches */
   .adv-swatches { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding: 2px 0; }
   .pal-entry {

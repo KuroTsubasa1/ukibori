@@ -2168,9 +2168,10 @@
     trash: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.8 4.3h10.4"/><path d="M6.2 4.3V3a.8.8 0 0 1 .8-.8h2a.8.8 0 0 1 .8.8v1.3"/><path d="M4.3 4.3l.6 8.6a1 1 0 0 0 1 .9h4.2a1 1 0 0 0 1-.9l.6-8.6"/></svg>'
   };
 
-  function buildLayerRow(i) {
+  function buildLayerRow(i, depth) {
     var el = doc.elements[i];
     var li = document.createElement("li");
+    if (depth) li.style.paddingLeft = (6 + depth * 14) + "px";
     if (isSelected(el.id)) li.classList.add("adv-sel");
     if (el._hidden) li.classList.add("adv-hidden");
 
@@ -2333,20 +2334,80 @@
     return li;
   }
 
+  // Build a group header <li> for a group node at the given depth.
+  function buildGroupHeader(group, depth) {
+    var li = document.createElement("li");
+    li.className = "adv-group-head";
+    li.style.paddingLeft = (6 + depth * 14) + "px";
+    var leafIds = window.groupDescendantLeafIds(doc, group.id);
+    var allSel = leafIds.length && leafIds.every(function (id) { return isSelected(id); });
+    if (allSel) li.classList.add("adv-sel");
+
+    var caret = document.createElement("button");
+    caret.className = "adv-lbtn"; caret.textContent = group.collapsed ? "▸" : "▾"; caret.title = "Ein-/Ausklappen";
+    caret.addEventListener("click", function (e) { e.stopPropagation(); group.collapsed = !group.collapsed; renderLayers(); });
+
+    var name = document.createElement("span");
+    name.className = "adv-lname"; name.textContent = group.name + " (" + leafIds.length + ")";
+    name.title = "Doppelklick zum Umbenennen";
+    name.addEventListener("dblclick", function (e) {
+      e.stopPropagation();
+      var v = prompt("Gruppenname:", group.name);
+      if (v != null && v.trim()) { group.name = v.trim(); renderLayers(); }
+    });
+
+    var anyHidden = leafIds.some(function (id) { var el = doc.elements.find(function (x) { return x.id === id; }); return el && el._hidden; });
+    var vis = document.createElement("button");
+    vis.className = "adv-lbtn"; vis.innerHTML = anyHidden ? ICONS.eyeOff : ICONS.eye; vis.title = anyHidden ? "Einblenden" : "Ausblenden";
+    vis.addEventListener("click", function (e) {
+      e.stopPropagation();
+      leafIds.forEach(function (id) { var el = doc.elements.find(function (x) { return x.id === id; }); if (el) el._hidden = !anyHidden; });
+      renderLayers(); render2D(); scheduleRebuild3D();
+    });
+
+    var del = document.createElement("button");
+    del.className = "adv-lbtn"; del.innerHTML = ICONS.trash; del.title = "Gruppe löschen";
+    del.addEventListener("click", function (e) {
+      e.stopPropagation();
+      // Delete the whole subtree: descendant leaves AND every descendant group record.
+      var groupIds = [group.id];
+      (function collect(gid) { window.childGroupIds(doc, gid).forEach(function (cg) { groupIds.push(cg); collect(cg); }); })(group.id);
+      doc.elements = doc.elements.filter(function (el) { return leafIds.indexOf(el.id) === -1; });
+      doc.groups = doc.groups.filter(function (g) { return groupIds.indexOf(g.id) === -1; });
+      setSelection([]); refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D();
+    });
+
+    li.addEventListener("click", function (e) {
+      if (e.target.classList.contains("adv-lbtn")) return;
+      setSelection(leafIds);
+      refreshAdvancedForSelection(); renderLayers(); render2D();
+    });
+
+    li.append(caret, name, vis, del);
+    return li;
+  }
+
+  function renderForestNodes(list, nodes, depth) {
+    // nodes are bottom->top; the panel shows topmost first, so iterate reversed.
+    for (var i = nodes.length - 1; i >= 0; i--) {
+      var n = nodes[i];
+      if (n.type === "element") {
+        list.appendChild(buildLayerRow(doc.elements.indexOf(n.el), depth));
+      } else {
+        list.appendChild(buildGroupHeader(n.group, depth));
+        if (!n.group.collapsed) renderForestNodes(list, n.children, depth + 1);
+      }
+    }
+  }
+
   // Populate a layers <ul> container (and its paired empty <p>) with the current doc elements.
   function populateLayersList(list, empty) {
     if (!list) return;
     list.innerHTML = "";
     var els = doc.elements;
-    if (!els || els.length === 0) {
-      if (empty) empty.hidden = false;
-      return;
-    }
+    if (!els || els.length === 0) { if (empty) empty.hidden = false; return; }
     if (empty) empty.hidden = true;
-    // Render back-to-front (last index = topmost layer shown first).
-    for (var idx = els.length - 1; idx >= 0; idx--) {
-      list.appendChild(buildLayerRow(idx));
-    }
+    renderForestNodes(list, window.flattenGroupForest(doc), 0);
   }
 
   // Refresh the (single) layer list. Also drives the stage hero: a big
@@ -2878,6 +2939,24 @@
     e.preventDefault();
     duplicateSelected();
   });
+  function doGroup() {
+    if (state.selectionIds.length < 2) return;
+    var gid = window.groupElements(doc, state.selectionIds.slice());
+    if (gid) { setSelection(window.groupDescendantLeafIds(doc, gid)); refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D(); }
+  }
+  function doUngroup() {
+    var els = selectedEls(), gids = {};
+    els.forEach(function (el) { if (el.groupId != null) gids[el.groupId] = 1; });
+    Object.keys(gids).forEach(function (gid) { window.ungroupGroup(doc, gid); });
+    refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D();
+  }
+  window.addEventListener("keydown", function (e) {
+    if (!(e.metaKey || e.ctrlKey) || String(e.key).toLowerCase() !== "g") return;
+    var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable)) return;
+    e.preventDefault();
+    if (e.shiftKey) doUngroup(); else doGroup();
+  });
   // ---- Relief-Höhe: "Auto" entfernt den manuellen Override ----
   (function () {
     var b = document.getElementById("reliefAutoBtn");
@@ -2924,6 +3003,8 @@
   (function () {
     var wire = function (id, fn) { var n = document.getElementById(id); if (n) n.addEventListener("click", fn); };
     wire("selDupBtn", duplicateSelected);
+    wire("selGroupBtn", doGroup);
+    wire("selUngroupBtn", doUngroup);
     wire("selCenterHBtn", function () { centerH(); });
     wire("selCenterVBtn", function () { centerV(); });
     wire("selFlipHBtn", function () { flipSelected("h"); });
