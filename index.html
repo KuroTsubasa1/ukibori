@@ -38,6 +38,7 @@
           </div>
       </div>
     </div>
+    <button type="button" id="newBtn" title="Neues, leeres Projekt beginnen (Strg/Cmd+Z bringt das alte zurück)">Neu</button>
     <button type="button" id="openBtn" title="Projekt öffnen (.json)">Öffnen</button>
     <button type="button" id="saveBtn" title="Projekt speichern (.json)">Speichern</button>
     <button type="button" id="exportBtn" title="3D-Modell exportieren (3MF/STL/PNG)">Exportieren</button>
@@ -183,6 +184,7 @@
         <div class="hero-icon">⬚</div>
         <p class="hero-title">Zieh ein Bild hierher</p>
         <p class="hero-sub">… oder starte rechts mit <strong>+ Bild</strong>, <strong>+ Text</strong>, <strong>+ QR</strong>, <strong>+ Rechteck</strong> oder <strong>+ Kreis</strong>.</p>
+        <button type="button" id="heroExampleBtn" title="Lädt die Ukibori-Münze als Beispiel-Projekt">Beispiel öffnen: die Ukibori-Münze</button>
       </div>
     </div>
     <div class="pane pane-2d"><canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf. Beim Skalieren an den Ecken hält Umschalt das Seitenverhältnis."></canvas></div>
@@ -382,6 +384,7 @@
 <script src="js/sources.js"></script>
 <script src="js/bg-removal.js"></script>
 <script src="js/bookmark-model.js"></script>
+<script src="js/example-project.js"></script>
 <script src="js/bookmark-export.js"></script>
 <script src="js/build-parts.js"></script>
 <script src="js/preview3d.js"></script>

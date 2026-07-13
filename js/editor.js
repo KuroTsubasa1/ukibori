@@ -2724,6 +2724,59 @@
     });
   }());
 
+  // ---- Undo-Grenze für Nutzer-initiierte Dokument-Wechsel (Neu/Beispiel/Öffnen).
+  // Pusht den AKTUELLEN Stand sofort (der debounced Snapshot hängt sonst noch
+  // <500ms in der Luft) bzw. nach dem Wechsel den neuen — auch im Mute-Fenster
+  // direkt nach einem Undo, das nur die debounced Re-Snapshots unterdrücken soll.
+  function undoBoundary(clearRedo) {
+    clearTimeout(_undo.timer);
+    var cur;
+    try { cur = window.serializeProject(doc); } catch (e) { return; }
+    if (cur !== _undo.stack[_undo.stack.length - 1]) {
+      _undo.stack.push(cur);
+      if (_undo.stack.length > _undo.cap) _undo.stack.shift();
+    }
+    if (clearRedo) _undo.redo = [];
+  }
+
+  // ---- Beispiel laden: die eingebettete Ukibori-Münze (js/example-project.js) ----
+  // Embedded rather than fetched so it also works over file:// and offline.
+  function loadExampleAction() {
+    if (!window.EXAMPLE_PROJECT) {
+      alert("Beispiel nicht verfügbar (js/example-project.js wurde nicht geladen).");
+      return;
+    }
+    try {
+      var json = JSON.stringify(window.EXAMPLE_PROJECT);
+      var loaded = window.migrateProject(window.deserializeProject(json));
+      undoBoundary(false);
+      resetDocTo(loaded);
+      undoBoundary(true);
+    } catch (e) {
+      if (window.__errs) window.__errs.push(String(e && e.message || e));
+      alert("Fehler beim Laden des Beispiels: " + (e && e.message || e));
+    }
+  }
+
+  // ---- Neu: leeres Projekt (Undo bringt das alte zurück) ----
+  (function () {
+    var btn = document.getElementById("newBtn");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      var nameField = document.getElementById("exportName");
+      // Nachfragen, sobald echter Inhalt verloren ginge — auch reine
+      // Werkstück-/Paletten-Änderungen ohne Elemente oder ein getippter Name.
+      var dirty;
+      try { dirty = window.serializeProject(doc) !== window.serializeProject(window.defaultDoc()); } catch (e) { dirty = true; }
+      if (nameField && nameField.value.trim()) dirty = true;
+      if (dirty && !confirm("Aktuelles Projekt verwerfen und neu beginnen?")) return;
+      if (nameField) nameField.value = "";
+      undoBoundary(false);
+      resetDocTo(window.defaultDoc());
+      undoBoundary(true);
+    });
+  }());
+
   // ---- Bühnen-Hero: Klick öffnet den Bild-Dialog, Drops landen direkt ----
   (function () {
     var hero = document.getElementById("stageHero");
@@ -2732,6 +2785,13 @@
     card.addEventListener("click", function () { addImageAction(); });
     card.addEventListener("dragover", handleDragOver);
     card.addEventListener("drop", handleDrop);
+    var ex = document.getElementById("heroExampleBtn");
+    if (ex) ex.addEventListener("click", function (e) {
+      e.stopPropagation(); // not a card click — don't open the image dialog
+      loadExampleAction();
+      // Falls die Tour gerade diesen Knopf anleuchtet: weiter zum nächsten Schritt.
+      if (window.coachmarks && window.coachmarks.refresh) window.coachmarks.refresh();
+    });
   }());
 
   // ---- Einrasten popover (topbar lock button) ----
@@ -2898,7 +2958,9 @@
       rd.onload = function () {
         try {
           var loaded = window.migrateProject(window.deserializeProject(rd.result));
+          undoBoundary(false);
           resetDocTo(loaded);
+          undoBoundary(true);
         } catch (err) {
           if (window.__errs) window.__errs.push(String(err && err.message || err));
           alert("Fehler beim Öffnen: " + (err && err.message || err));

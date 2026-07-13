@@ -12,7 +12,7 @@ Bild · Text · QR · Rechteck & Kreis → Relief · Erhaben & Vertieft · AMS-M
 ![Build](https://img.shields.io/badge/Build-keiner-16161a)
 ![offline](https://img.shields.io/badge/100%25-offline-2f8f6b)
 ![Vanilla JS](https://img.shields.io/badge/Vanilla-JS-f7df1e?logo=javascript&logoColor=000)
-![Tests](https://img.shields.io/badge/Tests-221%20%E2%9C%93-2f8f6b)
+![Tests](https://img.shields.io/badge/Tests-228%20%E2%9C%93-2f8f6b)
 ![Export](https://img.shields.io/badge/Export-PNG%20·%20.svg%20·%20.3mf%20·%20.stl-6b4fb0)
 
 <img src="assets/hero.png" width="900" alt="Die Ukibori-Werkstatt: 2D-Werkbank und dunkle 3D-Bühne nebeneinander, rechts Element-Inspektor und Ebenen-Dock">
@@ -50,7 +50,7 @@ Ein Dreispalter im „Papier & Tusche"-Look: links das **Dokument**-Panel
 (Werkstück · Stapelung · Druck), in der Mitte die **Bühne** mit 2D-Werkbank und
 dunkler 3D-Ansicht (umschaltbar **2D / 3D / Geteilt**), rechts der
 **Element-Inspektor** mit Add-Dock und darunter das **Ebenen-Dock** im
-Photoshop-Stil. Rückgängig/Wiederholen, Einrasten-Optionen und der
+Photoshop-Stil. **Neu**, Rückgängig/Wiederholen, Einrasten-Optionen und der
 Export-Dialog sitzen in der Topbar.
 
 | 2D-Werkbank | Erhaben | Vertieft |
@@ -74,7 +74,10 @@ Export-Dialog sitzen in der Topbar.
 - **Dünne Stellen prüfen** — markiert Bereiche schmaler als die 0,4-mm-Düse als
   rotes Overlay in der 2D-Ansicht, bevor der Druck sie verschluckt.
 - **Leere Bühne?** Eine klickbare Hero-Karte begrüßt — Klick öffnet den
-  Bild-Dialog, Drag & Drop landet direkt auf dem Werkstück.
+  Bild-Dialog, Drag & Drop landet direkt auf dem Werkstück, und ein Knopf lädt
+  die eingebaute **Beispiel-Münze**.
+- **Neu** — leert das Werkstück für einen frischen Start;
+  <kbd>Strg/Cmd</kbd>+<kbd>Z</kbd> bringt das alte Projekt zurück.
 
 ---
 
@@ -199,6 +202,11 @@ python3 -m http.server 8000
 Dann: **Bild per Drag & Drop laden (oder + Text / + QR / + Rechteck / + Kreis) →
 Parameter einstellen → PNG oder 3D-Modell (.3mf) exportieren.**
 
+> [!TIP]
+> Direkt ausprobieren: die Münze aus den Screenshots ist als Beispiel eingebaut —
+> Knopf **„Beispiel öffnen"** auf der leeren Bühne, oder **Öffnen** →
+> [`examples/ukibori-coin.json`](examples/ukibori-coin.json).
+
 ---
 
 ## 🧠 Wie es funktioniert
@@ -269,7 +277,8 @@ flowchart TD
 | `js/trace.js` · `js/vendor/potrace.js` | potrace-Konturierung: Masken → glatte Kurven für alle 3D-Teile und den SVG-Export |
 | `js/coachmarks.js` | Erster-Start-Tour (Coach-Marks) |
 | `vendor/` | lokal mitgeliefert: three.js, onnxruntime-web (+ WASM) mit `u2netp.onnx`, QR-Encoder |
-| `tests/` | Browser-Test-Suite — `tests/run.html` führt alle `*.test.js` aus (221 Tests) |
+| `examples/` | Beispiel-Projekte zum Öffnen — u. a. die Münze aus den Screenshots oben |
+| `tests/` | Browser-Test-Suite — `tests/run.html` führt alle `*.test.js` aus (228 Tests) |
 | `docs/superpowers/specs/` · `docs/superpowers/plans/` | Design- & Umsetzungs-Dokumente je Feature |
 
 Reines HTML/CSS/JavaScript, **kein Build-Schritt und kein CDN**. Einige Funktionen
