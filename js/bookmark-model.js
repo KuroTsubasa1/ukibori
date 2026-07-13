@@ -120,7 +120,7 @@ function defaultDoc() {
     // workpiece's face — engraved: topmost plate band; raised: full-face slab under the
     // motif stack), pushing element colors one step further. null = off.
     topLayerColor: null,
-    elements: [], fonts: {},
+    elements: [], groups: [], fonts: {},
   };
 }
 
@@ -148,7 +148,7 @@ function migrateElement(el, doc, layerHmm) {
     id: el.id, type: el.type,
     cxMm: el.cxMm, cyMm: el.cyMm, wMm: el.wMm, hMm: el.hMm, rotationDeg: el.rotationDeg || 0,
     flipH: false, flipV: false,
-    cutout: !!el.cutout, color: el.color, depth,
+    cutout: !!el.cutout, color: el.color, groupId: el.groupId != null ? el.groupId : null, depth,
   };
   if (el.type === "image") { out.src = el.src; out._img = null; }
   if (el.type === "text") { out.text = el.text; out.fontFamily = el.fontFamily; out.fontWeight = el.fontWeight; }
@@ -170,6 +170,7 @@ function migrateProject(doc) {
     if (doc.autoLayerHeights == null) doc.autoLayerHeights = false;
     if (doc.topLayerColor === undefined) doc.topLayerColor = null;
     if (doc.body && doc.body.baseThicknessMm == null) doc.body.baseThicknessMm = 0;
+    if (!Array.isArray(doc.groups)) doc.groups = [];
     for (const el of doc.elements || []) {
       if (el.flipH == null) el.flipH = false;
       if (el.flipV == null) el.flipV = false;
@@ -181,6 +182,7 @@ function migrateProject(doc) {
         el.depth.colorLayerStyle = el.depth.flush ? "bands" : "stepped";
       }
       if (el.type === "shape" && el.shape == null) el.shape = "rect";
+      if (el.groupId === undefined) el.groupId = null;
     }
     return doc;
   }
@@ -210,6 +212,7 @@ function migrateProject(doc) {
     amsPalette: [], amsSolidBase: false,
     autoLayerHeights: false, topLayerColor: null, // v1 saves predate the feature: keep manual heights
     elements: (doc.elements || []).map(el => migrateElement(el, doc, layerH)),
+    groups: [],
     fonts: doc.fonts || {},
   };
 }
@@ -222,13 +225,17 @@ function makeElementV2(type, props) {
     id: __nextId(), type,
     cxMm: 25, cyMm: 75, wMm: 30, hMm: 30, rotationDeg: 0,
     flipH: false, flipV: false,
-    cutout: false, color: "#000000",
+    cutout: false, color: "#000000", groupId: null,
     depth: defaultDepth(type),
   }, props);
   if (type === "image") { if (e.src == null) e.src = ""; e._img = e._img || null; }
   if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; }
   if (type === "shape") { if (e.shape == null) e.shape = "rect"; } // 'rect' | 'circle' (ellipse when wMm ≠ hMm)
   return e;
+}
+
+function makeGroup(props) {
+  return Object.assign({ id: __nextId(), name: "Gruppe", collapsed: false, parentId: null }, props || {});
 }
 
 // === Color merge (Farbe zusammenführen) =====================================
@@ -350,6 +357,7 @@ window.defaultFrame = defaultFrame;
 window.defaultDoc = defaultDoc;
 window.migrateProject = migrateProject;
 window.makeElementV2 = makeElementV2;
+window.makeGroup = makeGroup;
 window.mergeReduceColors = mergeReduceColors;
 window.unmergeReduceColor = unmergeReduceColor;
 window.resolveMergeRoots = resolveMergeRoots;
