@@ -2379,6 +2379,11 @@
     // Floating selection toolbar on the stage follows the selection.
     var selTb = document.getElementById("selToolbar");
     if (selTb) selTb.hidden = disabled;
+    var multi = state.selectionIds.length > 1;
+    document.querySelectorAll("#selToolbar .tb-multi, #selToolbar [data-multi]").forEach(function (n) { n.hidden = !multi; });
+    var dist = state.selectionIds.length >= 3;
+    var dH = document.getElementById("selDistH"), dV = document.getElementById("selDistV");
+    if (dH) dH.disabled = !dist; if (dV) dV.disabled = !dist;
     var flipH = document.getElementById("selFlipHBtn"), flipV = document.getElementById("selFlipVBtn");
     if (flipH) { flipH.classList.toggle("tb-on", !!(el && el.flipH)); flipH.setAttribute("aria-pressed", String(!!(el && el.flipH))); }
     if (flipV) { flipV.classList.toggle("tb-on", !!(el && el.flipV)); flipV.setAttribute("aria-pressed", String(!!(el && el.flipV))); }
@@ -2924,6 +2929,23 @@
     wire("selFlipHBtn", function () { flipSelected("h"); });
     wire("selFlipVBtn", function () { flipSelected("v"); });
     wire("selDelBtn", deleteSelected);
+    function applyLayout(fn) {
+      var els = selectedEls();
+      if (els.length < 2) return;
+      fn(els).forEach(function (u) {
+        var m = doc.elements.find(function (x) { return x.id === u.id; });
+        if (m) { if (u.cxMm != null) m.cxMm = u.cxMm; if (u.cyMm != null) m.cyMm = u.cyMm; }
+      });
+      refreshAdvancedForSelection(); render2D(); scheduleRebuild3D();
+    }
+    wire("selAlignL",  function () { applyLayout(function (e) { return window.alignElements(e, "left"); }); });
+    wire("selAlignR",  function () { applyLayout(function (e) { return window.alignElements(e, "right"); }); });
+    wire("selAlignT",  function () { applyLayout(function (e) { return window.alignElements(e, "top"); }); });
+    wire("selAlignB",  function () { applyLayout(function (e) { return window.alignElements(e, "bottom"); }); });
+    wire("selAlignCH", function () { applyLayout(function (e) { return window.alignElements(e, "centerH"); }); });
+    wire("selAlignCV", function () { applyLayout(function (e) { return window.alignElements(e, "centerV"); }); });
+    wire("selDistH",   function () { applyLayout(function (e) { return window.distributeElements(e, "h"); }); });
+    wire("selDistV",   function () { applyLayout(function (e) { return window.distributeElements(e, "v"); }); });
   }());
 
   // ---- Dünne-Stellen prüfen (nozzle-width check) ----

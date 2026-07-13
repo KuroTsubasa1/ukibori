@@ -821,3 +821,6 @@
     transition: background .12s;
   }
   #cmNextBtn:hover { background: var(--accent-hover); }
+
+#selToolbar .tb-sep { width:1px; height:18px; background:var(--line, #d9d2c4); display:inline-block; margin:0 3px; }
+#selToolbar .tb-multi[disabled] { opacity:.4; cursor:default; }
