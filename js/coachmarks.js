@@ -7,6 +7,16 @@
 
   var STEPS = [
     {
+      id: 'heroExampleBtn',
+      // Only while the stage is empty — the hero card (and this button) hides
+      // as soon as the project has elements.
+      when: function () {
+        var h = document.getElementById('stageHero');
+        return !!h && !h.hidden;
+      },
+      text: 'Neu hier? Öffne das Beispiel — eine fertige Untersetzer-Münze zum Anschauen, Verändern und Exportieren.'
+    },
+    {
       id: 'addImageBtn',
       text: 'Füge ein Bild, Text, QR oder eine Form (Rechteck/Kreis) hinzu — für Lesezeichen, Untersetzer, Schlüsselanhänger u. v. m.'
     },
@@ -106,6 +116,9 @@
     if (!el) return;
 
     var rect = el.getBoundingClientRect();
+    // Target vanished mid-tour (e.g. step 1 invites clicking the hero button,
+    // which hides the hero card) → move on instead of spotlighting (0,0).
+    if (!rect.width && !rect.height) { advance(); return; }
     var pad = 8;
 
     // Spotlight ring
@@ -201,9 +214,11 @@
 
     buildDOM();
 
-    // Filter steps whose target elements are present in the DOM
+    // Filter steps whose target elements are present in the DOM (and whose
+    // optional `when` predicate holds — e.g. the hero button on an empty stage).
     activeSteps = STEPS.filter(function (s) {
-      return !!document.getElementById(s.id);
+      if (!document.getElementById(s.id)) return false;
+      return !s.when || s.when();
     });
 
     if (activeSteps.length === 0) {
@@ -250,6 +265,13 @@
     } catch (e) { /* localStorage unavailable — fail silently */ }
   });
 
+  // --- Public: re-evaluate the current spotlight (advances past a target
+  // that disappeared, e.g. after the hero example button was clicked). ---
+  function refresh() {
+    if (!overlay || overlay.style.display !== 'block') return;
+    position();
+  }
+
   // --- Expose API ---
-  window.coachmarks = { start: start };
+  window.coachmarks = { start: start, refresh: refresh };
 }());

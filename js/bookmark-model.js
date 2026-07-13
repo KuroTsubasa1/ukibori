@@ -53,7 +53,13 @@ function serializeProject(doc) {
 
 function deserializeProject(text) {
   const doc = JSON.parse(text);
-  for (const el of doc.elements || []) if (el.type === "image") el._img = null;
+  for (const el of doc.elements || []) {
+    if (el.type === "image") el._img = null;
+    // Keep the id counter ahead of loaded ids — a fresh makeElementV2 after
+    // Öffnen/Beispiel must never mint an id that already exists in the doc.
+    const n = parseInt(el.id, 10);
+    if (Number.isFinite(n) && n > __bmId) __bmId = n;
+  }
   if (!doc.fonts) doc.fonts = {};
   return doc;
 }
