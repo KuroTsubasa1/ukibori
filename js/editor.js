@@ -38,6 +38,9 @@
   };
   function persistSnap() { try { localStorage.setItem(SNAP_KEY, JSON.stringify(state.snap)); } catch (e) {} }
 
+  // Streuen (scatter) sub-mode state: null unless the panel is open.
+  var scatter = null; // { sourceId, region:{x0,y0,x1,y1}|null, seed, previewIds:[] }
+
   var MARGIN_PX = 48;
 
   // ---- mm↔px helpers — all drawing/hit-test coordinates go through these ----
@@ -945,7 +948,7 @@
       ctx.restore();
     }
 
-    if (drag && drag.handle === "marquee" && drag.rectPx) {
+    if (drag && (drag.handle === "marquee" || drag.handle === "scatterRegion") && drag.rectPx) {
       ctx.save();
       ctx.strokeStyle = "#6b4fb0"; ctx.fillStyle = "rgba(107,79,176,0.10)";
       ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
@@ -1123,6 +1126,12 @@
     const rect = cv.getBoundingClientRect();
     const scaleC = cv.width / rect.width;
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+    // Scatter sub-mode: while the panel is open, a canvas drag defines the placement region.
+    if (scatter) {
+      drag = { handle: "scatterRegion", px, py };
+      cv.setPointerCapture(e.pointerId);
+      return;
+    }
     const hit = hitTest(px, py);
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     if (hit && hit.box) {
@@ -1293,6 +1302,18 @@
       scheduleRebuild3D();
       return;
     }
+    if (drag.handle === "scatterRegion") {
+      const toMm = function (p, v0) { return (p - state.marginPx) / s + v0; };
+      scatter.region = {
+        x0: Math.min(toMm(drag.px, state.viewX0), toMm(px, state.viewX0)),
+        x1: Math.max(toMm(drag.px, state.viewX0), toMm(px, state.viewX0)),
+        y0: Math.min(toMm(drag.py, state.viewY0), toMm(py, state.viewY0)),
+        y1: Math.max(toMm(drag.py, state.viewY0), toMm(py, state.viewY0)),
+      };
+      drag.rectPx = { x0: Math.min(drag.px, px), y0: Math.min(drag.py, py), x1: Math.max(drag.px, px), y1: Math.max(drag.py, py) };
+      render2D();
+      return;
+    }
     if (drag.handle === "marquee") {
       const rectMm = {
         x0: Math.min((drag.px - state.marginPx) / s + state.viewX0, (px - state.marginPx) / s + state.viewX0),
@@ -1342,7 +1363,9 @@
 
   function endDrag() {
     if (!drag) return;
+    var wasScatter = drag.handle === "scatterRegion";
     drag = null;
+    if (wasScatter && scatter) scatterGenerate(); // re-roll the preview into the new region
     state.snapGuides = []; // clear transient guide lines
     // Re-fit the canvas: a move/scale/rotate (or mount move) may have pushed the element past
     // the old bounds. viewportDomain now includes element bboxes, so this keeps handles on-canvas.
@@ -2460,6 +2483,9 @@
     var dist = state.selectionIds.length >= 3;
     var dH = document.getElementById("selDistH"), dV = document.getElementById("selDistV");
     if (dH) dH.disabled = !dist; if (dV) dV.disabled = !dist;
+    // Streuen (scatter) applies to a single selected element.
+    var scBtn = document.getElementById("selScatterBtn");
+    if (scBtn) scBtn.hidden = state.selectionIds.length !== 1;
     var flipH = document.getElementById("selFlipHBtn"), flipV = document.getElementById("selFlipVBtn");
     if (flipH) { flipH.classList.toggle("tb-on", !!(el && el.flipH)); flipH.setAttribute("aria-pressed", String(!!(el && el.flipH))); }
     if (flipV) { flipV.classList.toggle("tb-on", !!(el && el.flipV)); flipV.setAttribute("aria-pressed", String(!!(el && el.flipV))); }
@@ -2977,6 +3003,72 @@
     e.preventDefault();
     if (e.shiftKey) doUngroup(); else doGroup();
   });
+
+  // ---- Streuen (scatter): panel · live preview · apply as a group ----
+  function scatterOpen() {
+    var el = selectedEl();
+    if (!el || state.selectionIds.length !== 1) return;
+    scatter = { sourceId: el.id, region: null, seed: (Date.now() >>> 0), previewIds: [] };
+    var p = document.getElementById("scatterPanel"); if (p) p.hidden = false;
+    scatterGenerate();
+  }
+  function scatterClose(commit) {
+    var p = document.getElementById("scatterPanel"); if (p) p.hidden = true;
+    if (scatter && !commit) scatterClearPreview();
+    scatter = null;
+    render2D(); scheduleRebuild3D();
+  }
+  function scatterClearPreview() {
+    if (!scatter) return;
+    doc.elements = doc.elements.filter(function (e) { return scatter.previewIds.indexOf(e.id) === -1; });
+    scatter.previewIds = [];
+  }
+  function scatterParams() {
+    var num = function (id, d) { var n = document.getElementById(id); var v = n ? parseFloat(n.value) : NaN; return isNaN(v) ? d : v; };
+    return {
+      count: Math.max(1, Math.round(num("scCount", 12))),
+      rotMin: num("scRotMin", 0), rotMax: num("scRotMax", 360),
+      scaleMin: num("scScaleMin", 0.6), scaleMax: num("scScaleMax", 1.4),
+      avoidOverlap: !!(document.getElementById("scAvoid") && document.getElementById("scAvoid").checked),
+    };
+  }
+  function scatterGenerate() {
+    if (!scatter) return;
+    scatterClearPreview();
+    var src = doc.elements.find(function (e) { return e.id === scatter.sourceId; });
+    if (!src) return;
+    var region = scatter.region || { x0: 0, y0: 0, x1: doc.body.widthMm, y1: doc.body.heightMm };
+    var transforms = window.scatterCopies({ wMm: src.wMm, hMm: src.hMm }, region, scatterParams(), scatter.seed);
+    var ids = [];
+    transforms.forEach(function (t) {
+      var drop = { _img: 1, _display: 1, _displayKey: 1, _hidden: 1, id: 1 };
+      var props = JSON.parse(JSON.stringify(src, function (k, v) { return drop[k] ? undefined : v; }));
+      var copy = window.makeElementV2(src.type, props);
+      copy._img = src._img || null; copy.groupId = null;
+      copy.cxMm = t.cxMm; copy.cyMm = t.cyMm; copy.wMm = t.wMm; copy.hMm = t.hMm; copy.rotationDeg = t.rotationDeg;
+      doc.elements.push(copy); ids.push(copy.id);
+    });
+    scatter.previewIds = ids;
+    render2D(); scheduleRebuild3D();
+  }
+  (function () {
+    var wire = function (id, fn) { var n = document.getElementById(id); if (n) n.addEventListener("click", fn); };
+    wire("selScatterBtn", scatterOpen);
+    wire("scReroll", function () { if (scatter) { scatter.seed = (Date.now() >>> 0); scatterGenerate(); } });
+    wire("scApply", function () {
+      if (!scatter || !scatter.previewIds.length) { scatterClose(false); return; }
+      var gid = window.groupElements(doc, scatter.previewIds.slice());
+      var ids = gid ? window.groupDescendantLeafIds(doc, gid) : scatter.previewIds.slice();
+      scatter.previewIds = []; // committed — keep the copies
+      scatterClose(true);
+      setSelection(ids); refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D();
+    });
+    wire("scCancel", function () { scatterClose(false); refreshAdvancedForSelection(); renderLayers(); });
+    ["scCount", "scRotMin", "scRotMax", "scScaleMin", "scScaleMax"].forEach(function (id) {
+      var n = document.getElementById(id); if (n) n.addEventListener("input", function () { if (scatter) scatterGenerate(); });
+    });
+    var av = document.getElementById("scAvoid"); if (av) av.addEventListener("change", function () { if (scatter) scatterGenerate(); });
+  }());
   // ---- Relief-Höhe: "Auto" entfernt den manuellen Override ----
   (function () {
     var b = document.getElementById("reliefAutoBtn");
