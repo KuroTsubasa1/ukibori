@@ -1503,10 +1503,18 @@
     e.preventDefault();                               // stop page scroll
     if (cur === -1) { selectByIndex(0); return; }     // nothing selected → select first, don't move yet
     var stepMm = e.shiftKey ? 0.25 : 1;               // Shift = fine 0.25 mm, else 1 mm
-    withSelected(function (el) {
-      el.cxMm = clamp(el.cxMm + dx * stepMm, 0, doc.body.widthMm);
-      el.cyMm = clamp(el.cyMm + dy * stepMm, 0, doc.body.heightMm);
-    });
+    if (state.selectionIds.length > 1) {              // nudge the whole multi-selection together
+      selectedEls().forEach(function (el) {
+        el.cxMm = clamp(el.cxMm + dx * stepMm, 0, doc.body.widthMm);
+        el.cyMm = clamp(el.cyMm + dy * stepMm, 0, doc.body.heightMm);
+      });
+      render2D(); scheduleRebuild3D();
+    } else {
+      withSelected(function (el) {
+        el.cxMm = clamp(el.cxMm + dx * stepMm, 0, doc.body.widthMm);
+        el.cyMm = clamp(el.cyMm + dy * stepMm, 0, doc.body.heightMm);
+      });
+    }
     refreshAdvancedForSelection();                    // keep advCx/advCy inputs in sync
   });
 
