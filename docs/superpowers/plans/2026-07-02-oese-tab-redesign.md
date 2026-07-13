@@ -15,7 +15,6 @@
 - `bookmark-model.js` untouched (no schema change; `ringHeightMm` kept but inert).
 - Harness must end green; all pre-existing non-loop behavior byte-identical (default domain).
 - Spec: `docs/superpowers/specs/2026-07-02-oese-tab-redesign-design.md` — its locked decisions govern.
-- Commit trailer: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
 
 ---
 

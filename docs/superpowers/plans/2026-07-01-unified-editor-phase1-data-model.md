@@ -169,9 +169,7 @@ Expected: `fail: 0`. The two new v2 tests now pass; all existing tests still pas
 
 ```bash
 git add js/bookmark-model.js tests/unified-model.test.js tests/run.html
-git commit -m "feat(model): add v2 unified-doc factories (defaultDoc/defaultDepth)
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(model): add v2 unified-doc factories (defaultDoc/defaultDepth)"
 ```
 
 ---
@@ -338,9 +336,7 @@ Expected: `fail: 0`. All Task 1 + Task 2 tests and all pre-existing tests pass.
 
 ```bash
 git add js/bookmark-model.js tests/unified-model.test.js
-git commit -m "feat(model): add v1->v2 project migration (migrateProject)
-
-Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
+git commit -m "feat(model): add v1->v2 project migration (migrateProject)"
 ```
 
 ---

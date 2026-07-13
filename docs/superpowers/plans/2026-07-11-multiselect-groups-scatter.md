@@ -91,7 +91,7 @@ ungroupGroup(doc, groupId) -> void
 
 - [ ] **Step 1: Write the failing Playwright check**
 
-Serve and drive the app; set up two overlapping elements, select the lower one, and probe its corner handle. Save as `/private/tmp/claude-501/-Users-lharm-Dev-ukibori/976d1947-5a59-4f35-b269-e1b23a8b33af/scratchpad/p0-check.js` (a note of the steps to run via Playwright MCP):
+Serve and drive the app; set up two overlapping elements, select the lower one, and probe its corner handle. Save as `/private/tmp/scratch/-Users-lharm-Dev-ukibori/976d1947-5a59-4f35-b269-e1b23a8b33af/scratchpad/p0-check.js` (a note of the steps to run via Playwright MCP):
 
 ```
 // Playwright MCP steps:
@@ -158,9 +158,7 @@ Expected: `fail: 0` (unchanged; P0 touches no pure module).
 
 ```bash
 git add js/editor.js
-git commit -m "fix(auswahl): Transform-Griffe der Auswahl gewinnen gegen überlappende Elemente
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "fix(auswahl): Transform-Griffe der Auswahl gewinnen gegen überlappende Elemente"
 ```
 
 ---
@@ -275,9 +273,7 @@ Insert after line `<script src="js/bookmark-model.js"></script>` (index.html:384
 
 ```bash
 git add js/geom-util.js tests/geom-util.test.js tests/run.html index.html
-git commit -m "feat(geom): geteilte Rotations-AABB-Helfer (geom-util)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(geom): geteilte Rotations-AABB-Helfer (geom-util)"
 ```
 
 ### Task 3: `js/selection-ops.js` — marquee hit set
@@ -345,9 +341,7 @@ window.marqueeHits = marqueeHits;
 
 ```bash
 git add js/selection-ops.js tests/selection-ops.test.js tests/run.html index.html
-git commit -m "feat(auswahl): marqueeHits — Rahmenauswahl-Trefferset
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(auswahl): marqueeHits — Rahmenauswahl-Trefferset"
 ```
 
 ### Task 4: Selection state = primary + set (editor.js)
@@ -448,9 +442,7 @@ Expected: `count === 2` (both rows highlighted).
 
 ```bash
 git add js/editor.js
-git commit -m "feat(auswahl): Auswahl-Set (selectionIds) neben primärer Auswahl
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(auswahl): Auswahl-Set (selectionIds) neben primärer Auswahl"
 ```
 
 ### Task 5: Marquee + Shift-click + collective move/delete/duplicate (editor.js)
@@ -621,9 +613,7 @@ Expected: `hits === 2`. Then manually (Playwright pointer): drag on empty canvas
 
 ```bash
 git add js/editor.js
-git commit -m "feat(auswahl): Rahmenauswahl, Shift-Klick, Sammel-Verschieben/Löschen/Duplizieren
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(auswahl): Rahmenauswahl, Shift-Klick, Sammel-Verschieben/Löschen/Duplizieren"
 ```
 
 ---
@@ -729,9 +719,7 @@ window.applyRotate = applyRotate;
 
 ```bash
 git add js/transform-ops.js tests/transform-ops.test.js tests/run.html index.html
-git commit -m "feat(transform): Auswahl-Box-Mathematik (Verschieben/Skalieren/Drehen)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(transform): Auswahl-Box-Mathematik (Verschieben/Skalieren/Drehen)"
 ```
 
 ### Task 7: `js/align-ops.js` — align + distribute
@@ -835,9 +823,7 @@ window.distributeElements = distributeElements;
 
 ```bash
 git add js/align-ops.js tests/align-ops.test.js tests/run.html index.html
-git commit -m "feat(anordnen): Ausrichten/Verteilen-Mathematik (align-ops)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(anordnen): Ausrichten/Verteilen-Mathematik (align-ops)"
 ```
 
 ### Task 8: Multi-selection box draw + transform dispatch (editor.js)
@@ -984,9 +970,7 @@ Expected: `{ box: true, handle: 'se' }`.
 
 ```bash
 git add js/editor.js
-git commit -m "feat(transform): Auswahl-Box mit einheitlichem Skalieren + Drehen für Mehrfachauswahl
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(transform): Auswahl-Box mit einheitlichem Skalieren + Drehen für Mehrfachauswahl"
 ```
 
 ### Task 9: Align/distribute toolbar buttons (editor.js + index.html)
@@ -1060,9 +1044,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ```bash
 git add js/editor.js index.html styles.css
-git commit -m "feat(anordnen): Ausrichten/Verteilen-Knöpfe in der Auswahl-Toolbar
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(anordnen): Ausrichten/Verteilen-Knöpfe in der Auswahl-Toolbar"
 ```
 
 ---
@@ -1141,9 +1123,7 @@ At the bottom `window.*` exports, add: `window.makeGroup = makeGroup;`
 
 ```bash
 git add js/bookmark-model.js tests/groups-model.test.js tests/run.html
-git commit -m "feat(gruppen): Modellfelder groupId/groups + Migration
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(gruppen): Modellfelder groupId/groups + Migration"
 ```
 
 ### Task 11: Group operations — nesting + contiguity (bookmark-model.js)
@@ -1335,9 +1315,7 @@ window.ungroupGroup = ungroupGroup;
 
 ```bash
 git add js/bookmark-model.js tests/groups-ops.test.js tests/run.html
-git commit -m "feat(gruppen): Gruppieren/Aufheben mit Verschachtelung + Kontiguität
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(gruppen): Gruppieren/Aufheben mit Verschachtelung + Kontiguität"
 ```
 
 ### Task 12: Geometry-invariance parity lock (test only)
@@ -1389,9 +1367,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ```bash
 git add tests/groups-parity.test.js tests/run.html
-git commit -m "test(gruppen): Parität — buildParts unverändert mit/ohne Gruppen
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "test(gruppen): Parität — buildParts unverändert mit/ohne Gruppen"
 ```
 
 ### Task 13: Recursive layers panel + group/ungroup + group selection/visibility (editor.js + index.html)
@@ -1550,9 +1526,7 @@ And add a keydown at editor scope, near the existing Cmd+D handler (editor.js ~2
 
 ```bash
 git add js/editor.js index.html styles.css
-git commit -m "feat(gruppen): verschachteltes Ebenen-Panel, Gruppieren/Aufheben, Gruppen-Auswahl/Sichtbarkeit
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(gruppen): verschachteltes Ebenen-Panel, Gruppieren/Aufheben, Gruppen-Auswahl/Sichtbarkeit"
 ```
 
 ### Task 14: Group drag-into/out-of + group duplicate (editor.js)
@@ -1609,9 +1583,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ```bash
 git add js/editor.js
-git commit -m "feat(gruppen): Ziehen in/aus Gruppen + Gruppen-Duplikat
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(gruppen): Ziehen in/aus Gruppen + Gruppen-Duplikat"
 ```
 
 ---
@@ -1725,9 +1697,7 @@ window.scatterCopies = scatterCopies;
 
 ```bash
 git add js/scatter.js tests/scatter.test.js tests/run.html index.html
-git commit -m "feat(streuen): geseedeter Streu-Generator (scatter)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(streuen): geseedeter Streu-Generator (scatter)"
 ```
 
 ### Task 16: Scatter panel + region drag + apply (editor.js + index.html)
@@ -1923,9 +1893,7 @@ Expected: `total === 1 + count` (default 12 → 13), `groups === 1`.
 
 ```bash
 git add js/editor.js index.html styles.css
-git commit -m "feat(streuen): Streu-Panel mit Bereichsauswahl, Vorschau und Gruppen-Ausgabe
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git commit -m "feat(streuen): Streu-Panel mit Bereichsauswahl, Vorschau und Gruppen-Ausgabe"
 ```
 
 ---
