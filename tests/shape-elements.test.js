@@ -1,5 +1,5 @@
 "use strict";
-// Form-Elemente (Kreis / Rechteck): model defaults, rasterization, 3D parts.
+// Shape elements (Kreis / Rechteck): model defaults, rasterization, 3D parts.
 (function () {
   function signedVol(facets) {
     let v = 0;
@@ -104,15 +104,15 @@
     assertClose(box.h, 20 * Math.SQRT2, 1.5, "rotated bbox height");
   });
 
-  test("engraved (Vertieft) circle → farbe floor at T − heightMm, plate present, watertight", () => {
+  test("engraved (Vertieft) circle → farbe- floor at T − heightMm, plate present, watertight", () => {
     const el = mkShape("circle");
     el.depth.direction = "engraved";
     el.depth.heightMm = 1.0;
     const parts = buildParts(shapeDoc(el));
-    const farbe = parts.filter(p => p.name.indexOf("farbe") === 0);
-    assertEqual(farbe.length, 1, "one color floor");
-    assertClose(zMax(farbe[0].facets), 3 - 1.0, 1e-6, "floor top recessed by heightMm");
-    assertEqual(farbe[0].color[0], 255, "floor keeps el.color red");
+    const colorFloors = parts.filter(p => p.name.indexOf("farbe") === 0);
+    assertEqual(colorFloors.length, 1, "one color floor");
+    assertClose(zMax(colorFloors[0].facets), 3 - 1.0, 1e-6, "floor top recessed by heightMm");
+    assertEqual(colorFloors[0].color[0], 255, "floor keeps el.color red");
     assert(parts.some(p => p.name.indexOf("grundplatte") === 0), "grundplatte exists");
     assert(parts.every(p => Math.abs(signedVol(p.facets)) > 0), "every part watertight");
   });
