@@ -1,308 +1,335 @@
 <div align="center">
 
-<img src="assets/logo.png" width="96" alt="Ukibori Logo">
+<img src="assets/logo.png" width="96" alt="Ukibori logo">
 
 # Ukibori · 浮彫
 
-**Verwandle Bilder, Text und Formen in 3D-Reliefs — direkt im Browser.**
+**Turn images, text, and shapes into 3D-printable reliefs — right in your browser.**
 
-Bild · Text · QR · Rechteck & Kreis → Relief · Erhaben & Vertieft · AMS-Mehrfarbdruck · KI-Freistellung · Live-3D · 100 % lokal.
+Image · Text · QR · Rectangle & Circle → Relief · Raised & Engraved · AMS multi-color · AI cutout · Live 3D · 100% local.
 
-![lokal](https://img.shields.io/badge/100%25-lokal%20im%20Browser-4f46e5)
-![Build](https://img.shields.io/badge/Build-keiner-16161a)
+![local](https://img.shields.io/badge/100%25-local%20in%20the%20browser-4f46e5)
+![Build](https://img.shields.io/badge/Build-none-16161a)
 ![offline](https://img.shields.io/badge/100%25-offline-2f8f6b)
 ![Vanilla JS](https://img.shields.io/badge/Vanilla-JS-f7df1e?logo=javascript&logoColor=000)
-![Tests](https://img.shields.io/badge/Tests-228%20%E2%9C%93-2f8f6b)
+![Tests](https://img.shields.io/badge/Tests-255%20%E2%9C%93-2f8f6b)
 ![Export](https://img.shields.io/badge/Export-PNG%20·%20.svg%20·%20.3mf%20·%20.stl-6b4fb0)
 
-<img src="assets/hero.png" width="900" alt="Die Ukibori-Werkstatt: 2D-Werkbank und dunkle 3D-Bühne nebeneinander, rechts Element-Inspektor und Ebenen-Dock">
+<img src="assets/hero.png" width="900" alt="The Ukibori workshop: 2D workbench and dark 3D stage side by side, element inspector and layers dock on the right">
 
 </div>
 
 ---
 
-## ✨ Warum Ukibori?
+## ✨ Why Ukibori?
 
-> *Ukibori* (jap. **浮彫**, „erhabenes Relief") macht aus einem Foto, Logo oder
-> Schriftzug in Sekunden ein **physisches Objekt** — ohne CAD, ohne Konto, ohne
-> Cloud.
+> *Ukibori* (Japanese **浮彫**, "raised relief") turns a photo, logo, or piece
+> of lettering into a **physical object** in seconds — no CAD, no account, no
+> cloud.
 
-- 🧩 **Vom Entwurf zum Druck in einem Schritt.** Elemente aufs Werkstück legen,
-  Regler ziehen, `.3mf` exportieren — fertig für den Slicer. Jede Komponente
-  wird als eigenes, einfarbiges Objekt ausgegeben, ideal für
-  **Mehrfarb-/AMS-Druck**.
-- 🪶 **Glatt statt verpixelt.** Vektorisierte Konturen (potrace) liefern weiche
-  Kurven und saubere runde Ränder — auch bei niedriger Auflösung (siehe
-  [Technik](#-wie-es-funktioniert)).
-- 🔒 **Deine Bilder bleiben deine.** Alles rechnet im Browser. Kein Upload,
-  kein Server, kein Tracking — funktioniert sogar offline.
-- ⚡ **Kein Build, kein CDN.** Läuft aus statischen Dateien ohne Toolchain. Die
-  genutzten Bibliotheken (three.js, ONNX-Laufzeit + Freistell-Modell, QR-Encoder,
-  potrace) sind **lokal mitgeliefert** — zur Laufzeit wird nichts nachgeladen.
+- 🧩 **From draft to print in one step.** Drop elements onto the workpiece,
+  drag a few sliders, export a `.3mf` — ready for the slicer. Every component
+  is written as its own single-color object, ideal for
+  **multi-color/AMS printing**.
+- 🪶 **Smooth instead of pixelated.** Vectorized contours (potrace) produce
+  soft curves and clean round edges — even from low-resolution sources (see
+  [How it works](#-how-it-works)).
+- 🔒 **Your images stay yours.** Everything is computed in the browser. No
+  upload, no server, no tracking — it even works offline.
+- ⚡ **No build, no CDN.** Runs from static files without a toolchain. The
+  libraries it uses (three.js, ONNX runtime + cutout model, QR encoder,
+  potrace) are **bundled locally** — nothing is fetched at runtime.
 
-**Wofür?** Untersetzer · Tür- & Regalschilder · Logo-Plaketten · Kühlschrank­magnete · Schlüsselanhänger · Namens- & WLAN-QR-Schilder · Stempel-Vorlagen · Deko-Reliefs.
+**What for?** Coasters · door & shelf signs · logo plaques · fridge magnets · keychains · name & wifi-QR signs · stamp templates · decorative reliefs.
+
+> [!NOTE]
+> The app's user interface is currently German. Where this README refers to
+> specific controls, it quotes their German labels.
 
 ---
 
-## 🖼️ Die Werkstatt
+## 🖼️ The workshop
 
-Ein Dreispalter im „Papier & Tusche"-Look: links das **Dokument**-Panel
-(Werkstück · Stapelung · Druck), in der Mitte die **Bühne** mit 2D-Werkbank und
-dunkler 3D-Ansicht (umschaltbar **2D / 3D / Geteilt**), rechts der
-**Element-Inspektor** mit Add-Dock und darunter das **Ebenen-Dock** im
-Photoshop-Stil. **Neu**, Rückgängig/Wiederholen, Einrasten-Optionen und der
-Export-Dialog sitzen in der Topbar.
+A three-column layout in a "paper & ink" look: on the left the **document**
+panel (workpiece · stacking · print), in the middle the **stage** with the 2D
+workbench and a dark 3D view (switchable **2D / 3D / Split**), on the right the
+**element inspector** with the add dock and, below it, the Photoshop-style
+**layers dock**. New project, undo/redo, snapping options, and the export
+dialog sit in the topbar.
 
-| 2D-Werkbank | Erhaben | Vertieft |
+| 2D workbench | Raised („Erhaben“) | Engraved („Vertieft“) |
 | :---: | :---: | :---: |
-| ![2D-Werkbank](assets/werkbank-2d.png) | ![Erhabenes Relief](assets/relief-erhaben.png) | ![Vertieftes Relief](assets/relief-vertieft.png) |
-| Ziehen, Skalieren, Drehen, Einrasten — mit Hilfslinien | Motive stapeln als Prismen auf der Platte | Motive gravieren in die Platte; die Farbbänder bleiben sichtbar |
+| ![2D workbench](assets/werkbank-2d.png) | ![Raised relief](assets/relief-erhaben.png) | ![Engraved relief](assets/relief-vertieft.png) |
+| Drag, scale, rotate, snap — with guides | Motifs stack as prisms on the plate | Motifs engrave into the plate; the color bands stay visible |
 
-- **Ebenen-Dock** — jede Zeile mit Miniatur/Chip und Druck-Badge (↑/↓ Höhe in
-  mm, ✎ bei manuellem Override, „bündig"; bei Farbebenen/Höhenrelief der Modus),
-  Einfarbig-Zeilen zusätzlich mit Farbpunkt; per **Drag & Drop sortierbar**,
-  beim Hover erscheinen Auge, Duplizieren (⧉), ▲/▼ und Papierkorb.
-- **Schwebende Auswahl-Toolbar** auf der Bühne: Duplizieren, Zentrieren (↔/↕),
-  **Spiegeln H/V** und Löschen.
-- **Schicht-Vorschau** — ein Slider kappt das 3D-Modell wie ein Slicer-Scrubber
-  stufenlos von oben.
-- **Rückgängig/Wiederholen** über das ganze Dokument (bis zu 30 gespeicherte
-  Zustände, <kbd>Strg/Cmd</kbd>+<kbd>Z</kbd>).
-- **Einrasten** — an Plattenkanten/-mitte, an anderen Elementen oder auf einem
-  mm-Raster, mit gestrichelten Hilfslinien beim Ziehen; einstellbar über das
-  Schloss-Popover in der Topbar (bleibt lokal gespeichert).
-- **Dünne Stellen prüfen** — markiert Bereiche schmaler als die 0,4-mm-Düse als
-  rotes Overlay in der 2D-Ansicht, bevor der Druck sie verschluckt.
-- **Leere Bühne?** Eine klickbare Hero-Karte begrüßt — Klick öffnet den
-  Bild-Dialog, Drag & Drop landet direkt auf dem Werkstück, und ein Knopf lädt
-  die eingebaute **Beispiel-Münze**.
-- **Neu** — leert das Werkstück für einen frischen Start;
-  <kbd>Strg/Cmd</kbd>+<kbd>Z</kbd> bringt das alte Projekt zurück.
+- **Layers dock** — every row with a thumbnail/chip and a print badge (↑/↓
+  height in mm, ✎ for a manual override, „bündig“ for flush; for
+  color-layer/heightmap elements, the mode), single-color rows additionally
+  show a color dot;
+  **sortable via drag & drop**, hovering reveals visibility, duplicate (⧉),
+  ▲/▼, and a trash can. Groups appear as collapsible nested rows.
+- **Multi-select** — drag a marquee over empty canvas or <kbd>Shift</kbd>-click
+  to build a selection; move, delete, duplicate, and nudge it as one, or scale
+  and rotate the whole selection uniformly via its selection box.
+- **Groups** — group elements (nesting supported) to move and manage them
+  together; grouping never changes the printed geometry.
+- **Floating selection toolbar** on the stage: duplicate, center (↔/↕),
+  **mirror H/V**, and delete — plus, for multi-selections, group/ungroup,
+  **align** (left · center · right · top · middle · bottom) and **distribute**
+  (horizontal/vertical).
+- **Scatter („Streuen“)** — sprinkle randomized copies of an element across the
+  plate or a region you drag out: count, rotation and scale ranges, optional
+  overlap avoidance, re-roll, live preview; applying commits the copies as a
+  group.
+- **Layer preview** — a slider cuts the 3D model from the top, continuously,
+  like a slicer scrubber.
+- **Undo/redo** across the whole document (up to 30 stored states,
+  <kbd>Ctrl/Cmd</kbd>+<kbd>Z</kbd>).
+- **Snapping** — to plate edges/center, to other elements, or to a mm grid,
+  with dashed guides while dragging; configured via the lock popover in the
+  topbar (persisted locally).
+- **Thin-feature check** — marks areas narrower than the 0.4 mm nozzle as a
+  red overlay in the 2D view, before the print swallows them.
+- **Empty stage?** A clickable hero card greets you — a click opens the image
+  dialog, drag & drop lands straight on the workpiece, and a button loads the
+  built-in **example coin**.
+- **New („Neu“)** — clears the workpiece for a fresh start;
+  <kbd>Ctrl/Cmd</kbd>+<kbd>Z</kbd> brings the old project back.
 
 ---
 
-## 🎨 Funktionen
+## 🎨 Features
 
-### Elemente
+### Elements
 
-- **Fünf Element-Typen** — **Bild** laden, **Text** tippen, **QR-Code**
-  erzeugen oder eine Form (**Rechteck** / **Kreis**) aufziehen; alle fließen in
-  dieselbe Relief-Pipeline.
-- **Formen sind Vektoren** — Rechteck und Kreis werden bei jeder Größe und
-  Auflösung gestochen scharf gerastert; der Kreis wird zur **Ellipse**, sobald
-  Breite ≠ Höhe, und die Art ist im Inspektor nachträglich umschaltbar.
-- **Spiegeln** — jedes Element horizontal/vertikal kippen; der Zustand wirkt in
-  2D, 3D und allen Exporten.
-- **Duplizieren** — per <kbd>Strg/Cmd</kbd>+<kbd>D</kbd>, über die
-  Auswahl-Toolbar oder direkt als ⧉-Aktion in der Ebenen-Zeile; die Kopie landet
-  leicht versetzt über dem Original.
-- **Drei Tiefenmodi je Element** — **Einfarbig** (Silhouette per Schwellwert),
-  **Farbebenen** (Palette per Median-Cut) oder **Höhenrelief** (Helligkeit →
-  Höhe, fein abgestuft in Druckschichten).
-- **Als Loch ausschneiden** — jedes Element kann statt zu drucken die Platte
-  durchstanzen.
-- **KI-Freistellung** — lokales Modell (u2netp via onnxruntime-web) entfernt den
-  Bildhintergrund direkt im Browser; das Bild verlässt das Gerät nicht.
-  *(Erfordert HTTP-Serving — „Variante B" unten; per Doppelklick/`file://` ist die Funktion deaktiviert.)*
-- **Transparenz erhalten** — freigestellte Motive bleiben transparent
-  (Vorschau, PNG **und** 3D: transparente Bereiche werden ausgespart).
-- **Schriftarten** — System-Schriften + **Fett**, oder eine eigene
-  **`.ttf`/`.otf`/`.woff`/`.woff2`** laden (lokal eingebettet und im Projekt
-  gespeichert).
+- **Five element types** — load an **image**, type **text**, generate a
+  **QR code**, or draw a shape (**rectangle** / **circle**); they all flow
+  through the same relief pipeline.
+- **Shapes are vectors** — rectangle and circle rasterize razor-sharp at any
+  size and resolution; the circle becomes an **ellipse** as soon as width ≠
+  height, and the kind can be switched later in the inspector.
+- **Mirroring** — flip any element horizontally/vertically; the state carries
+  through 2D, 3D, and all exports.
+- **Duplicate** — via <kbd>Ctrl/Cmd</kbd>+<kbd>D</kbd>, the selection toolbar,
+  or the ⧉ action right in the layer row; the copy lands slightly offset above
+  the original.
+- **Three depth modes per element** — **„Einfarbig“** (single color: silhouette
+  by threshold), **„Farbebenen“** (color layers: palette via median cut), or
+  **„Höhenrelief“** (heightmap: brightness → height, finely stepped into print
+  layers).
+- **Cut out as hole** — any element can punch through the plate instead of
+  printing.
+- **AI cutout** — a local model (u2netp via onnxruntime-web) removes the image
+  background right in the browser; the image never leaves the device.
+  *(Requires HTTP serving — Option B below; the feature is disabled when the
+  app is opened via double-click/`file://`.)*
+- **Transparency preserved** — cut-out motifs stay transparent (preview, PNG,
+  **and** 3D: transparent areas are left out of the geometry).
+- **Fonts** — system fonts + **bold**, or load your own
+  **`.ttf`/`.otf`/`.woff`/`.woff2`** (embedded locally and saved with the
+  project).
 
-### Werkstück
+### Workpiece
 
-- **Vier Plattenformen** — **Rechteck** (mit Eckenradius), **Kreis**, **Frei**
-  (die Platte folgt der Bildsilhouette) oder **Bild** (plattenloses Objekt).
-- **Rahmen** in Wunschbreite, -höhe und -farbe — der klassische
-  Untersetzer-Rand; bei der Freiform folgt der Ring der Außenkontur.
-- **Befestigung** — **Loch** zum Aufhängen/Verschrauben oder **Öse**
-  (angesetzte Lasche mit Loch), per ziehbarem Marker platziert — die Öse
-  bleibt dabei stets mit dem Plattenrand verbunden.
+- **Four plate shapes** — **rectangle** (with corner radius), **circle**,
+  **free** (the plate follows the image silhouette), or **image** (a plateless
+  object).
+- **Frame** with custom width, height, and color — the classic coaster rim; on
+  the free-form plate the ring follows the outer contour.
+- **Mounting** — a **hole** for hanging/screwing, or an **eyelet („Öse“)** — an
+  attached tab with a hole — placed via a draggable marker; the eyelet always
+  stays connected to the plate edge.
 
-### Relief & Farben
+### Relief & colors
 
-- **Erhaben oder Vertieft** — global für alle Ebenen und zusätzlich je Element
-  umschaltbar (bei Einfarbig und Farbebenen; Höhenreliefs bauen immer nach
-  oben auf der Platte auf).
-- **Farb-Relief, drei Stapel-Stile** — **Gestuft** (Rang-Höhen), **Eine Fläche**
-  (alle Farben auf einer Ebene) oder **AMS-Farbschichten** (eine Farbe pro
-  Druck­schicht, gemacht für Filament-Wechsel).
-- **AMS-Filament-Palette** — eine gemeinsame, geordnete Farbschicht-Liste fürs
-  ganze Modell: Farben **hinzufügen**, per **Ziehen umsortieren** oder
-  **entfernen** — die Pixel einer entfernten Farbe rasten auf die ähnlichste
-  verbleibende Schicht (glättet verrauschte Bilder). Alle AMS-Elemente (und
-  über „Höhe je Farbe" auch Einfarbig-Elemente) rasten auf dieselben Schichten
-  ein; explizites **Zusammenführen** zweier Farben bietet die Element-Palette
-  der Stile Gestuft/Eine Fläche.
-- **Höhe je Farbe (AMS-Ebenen)** — Einfarbig-Elemente bekommen ihre Höhe
-  automatisch aus ihrer Farbe: gleiche Farbe = gleiche Ebene, jede weitere
-  Farbe eine Stufe höher. <details><summary>Details</summary>
+- **Raised or engraved** — globally for all layers, plus switchable per element
+  (for single-color and color-layer elements; heightmap reliefs always build
+  upward on the plate).
+- **Color relief, three stacking styles** — **„Gestuft“** (stepped: heights by
+  rank), **„Eine Fläche“** (all colors on one level), or
+  **„AMS-Farbschichten“** (one color per print layer, made for filament
+  changes).
+- **AMS filament palette** — one shared, ordered color-layer list for the whole
+  model: **add** colors, **drag to reorder**, or **remove** them — the pixels
+  of a removed color snap to the closest remaining layer (smooths noisy
+  images). All AMS elements (and, via „Höhe je Farbe“, single-color elements
+  too) snap to the same layers; explicit **merging** of two colors is offered
+  by the element palette of the „Gestuft“/„Eine Fläche“ styles.
+- **Height per color (AMS layers)** — single-color elements get their height
+  automatically from their color: same color = same level, each additional
+  color one step higher. <details><summary>Details</summary>
 
-  - **Erhaben** druckt das Werkstück als **einen** Stapel massiver einfarbiger
-    Vollschichten — untere Farben laufen unter höheren durch, jede
-    Druck­schicht bleibt einfarbig.
-  - **Vertieft** teilt stattdessen die Grundplatte in massive Farbbänder; die
-    Plattenoberseite bleibt — ohne Deckschicht — ein durchgehendes
-    Grundfarben-Band, und grundfarbene Elemente bleiben bündig darin. Auch der
-    Rahmen-Unterbau bandet mit.
-  - Die **Deckschicht** legt optional eine eigene Farbe als oberste Ebene aufs
-    Werkstück — erhaben als Fläche über der Platte, auf der die Farb-Motive
-    stapeln (grundfarbene und manuell fixierte Elemente stanzen weiterhin
-    durch); vertieft als oberstes Plattenband, durch das die Motive gravieren.
-  - Die **Relief-Höhe** wirkt als manueller Override pro Element (der
-    Platzhalter zeigt den Auto-Wert, der **Auto**-Knopf stellt ihn wieder her).
-  - Abschaltbar per Häkchen; alte Projekte behalten ihre manuellen Höhen.
+  - **Raised** prints the workpiece as **one** stack of solid single-color
+    full layers — lower colors run underneath higher ones, and every print
+    layer stays single-color.
+  - **Engraved** instead splits the base plate into solid color bands; the
+    plate top stays — without a top coat — one continuous base-color band, and
+    base-colored elements stay flush within it. The frame's substructure is
+    banded along with it.
+  - The **top coat („Deckschicht“)** optionally lays an extra color as the
+    topmost level of the workpiece — raised, as a surface above the plate on
+    which the color motifs stack (base-colored and manually pinned elements
+    still punch through); engraved, as the topmost plate band through which
+    the motifs engrave.
+  - The **relief height** acts as a manual override per element (the
+    placeholder shows the auto value, the **Auto** button restores it).
+  - Can be turned off with a checkbox; old projects keep their manual heights.
   </details>
 
-### Vorschau, Speichern & Export
+### Preview, save & export
 
-- **Live-3D-Vorschau** — dreh-, zoom- und schwenkbare three.js-Ansicht des
-  exakten Druck­modells; die Kamera startet von vorn, leicht schräg aufs
-  Werkstück.
-- **Export-Dialog** — **PNG**, vektorisiertes **SVG** (potrace), **`.3mf`**
-  (jede Komponente als eigenes, einfarbiges Objekt — ideal für
-  Mehrfarb-/AMS-Druck) und universelles **`.stl`**, mit eigenem Dateinamen; der
-  Name des zuerst geladenen Bildes wird automatisch vorgeschlagen.
-- **Speichern / Öffnen** — Projekt als `.json`-Datei herunterladen und wieder
-  laden (vollständige Rundreise inkl. Bildquellen, Schriften und
-  Tiefen-Einstellungen).
+- **Live 3D preview** — a rotatable, zoomable, pannable three.js view of the
+  exact print model; the camera starts from the front, slightly tilted toward
+  the workpiece.
+- **Export dialog** — **PNG**, vectorized **SVG** (potrace), **`.3mf`** (every
+  component as its own single-color object — ideal for multi-color/AMS
+  printing), and universal **`.stl`**, with a custom filename; the name of the
+  first loaded image is suggested automatically.
+- **Save / Open** — download the project as a `.json` file and load it again
+  (a full round trip incl. image sources, fonts, and depth settings).
 
 ---
 
-## ⌨️ Tastatur & Maus
+## ⌨️ Keyboard & mouse
 
-| Kürzel | Wirkung |
+| Shortcut | Effect |
 | --- | --- |
-| <kbd>Strg/Cmd</kbd>+<kbd>Z</kbd> · <kbd>Strg/Cmd</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd> | Rückgängig · Wiederholen |
-| <kbd>Strg/Cmd</kbd>+<kbd>D</kbd> | Ausgewähltes Element duplizieren |
-| <kbd>Entf</kbd> / <kbd>⌫</kbd> | Ausgewähltes Element löschen |
-| <kbd>Tab</kbd> / <kbd>⇧</kbd>+<kbd>Tab</kbd> | Nächstes/vorheriges Element auswählen |
-| <kbd>Pfeiltasten</kbd> · mit <kbd>⇧</kbd> | Element 1 mm verschieben · fein (0,25 mm) |
-| <kbd>⇧</kbd> beim Eck-Skalieren | Seitenverhältnis halten |
-| <kbd>Esc</kbd> | Auswahl aufheben |
+| <kbd>Ctrl/Cmd</kbd>+<kbd>Z</kbd> · <kbd>Ctrl/Cmd</kbd>+<kbd>⇧</kbd>+<kbd>Z</kbd> | Undo · Redo |
+| <kbd>Ctrl/Cmd</kbd>+<kbd>D</kbd> | Duplicate the selection |
+| <kbd>Ctrl/Cmd</kbd>+<kbd>G</kbd> · <kbd>Ctrl/Cmd</kbd>+<kbd>⇧</kbd>+<kbd>G</kbd> | Group · Ungroup |
+| <kbd>Del</kbd> / <kbd>⌫</kbd> | Delete the selection |
+| <kbd>Tab</kbd> / <kbd>⇧</kbd>+<kbd>Tab</kbd> | Select next/previous element |
+| <kbd>Arrow keys</kbd> · with <kbd>⇧</kbd> | Move the selection 1 mm · fine (0.25 mm) |
+| <kbd>⇧</kbd> while corner-scaling | Keep aspect ratio |
+| <kbd>Esc</kbd> | Clear the selection |
 
-**3D-Bühne:** Ziehen = Drehen · Rechte/mittlere Taste oder <kbd>⇧</kbd>+Ziehen = Schwenken · Mausrad = Zoom.
+**2D stage:** drag over empty canvas = marquee selection · <kbd>Shift</kbd>+click = add/remove an element.
+
+**3D stage:** drag = rotate · right/middle button or <kbd>⇧</kbd>+drag = pan · mouse wheel = zoom.
 
 ---
 
-## 🚀 Loslegen
+## 🚀 Getting started
 
-Kein Build-Schritt, keine Installation.
+No build step, no installation.
 
 ```sh
-# Variante A — einfach öffnen
-open index.html            # bzw. Doppelklick im Dateimanager
+# Option A — just open it
+open index.html            # or double-click it in your file manager
 
-# Variante B — lokal servieren (empfohlen, schaltet die KI-Freistellung frei)
+# Option B — serve locally (recommended; enables the AI cutout)
 python3 -m http.server 8000
 # → http://localhost:8000/
 ```
 
-Dann: **Bild per Drag & Drop laden (oder + Text / + QR / + Rechteck / + Kreis) →
-Parameter einstellen → PNG oder 3D-Modell (.3mf) exportieren.**
+Then: **drop an image onto the stage (or + Text / + QR / + Rechteck /
++ Kreis) → tune the parameters → export a PNG or a 3D model (.3mf).**
 
 > [!TIP]
-> Direkt ausprobieren: die Münze aus den Screenshots ist als Beispiel eingebaut —
-> Knopf **„Beispiel öffnen"** auf der leeren Bühne, oder **Öffnen** →
-> [`examples/ukibori-coin.json`](examples/ukibori-coin.json).
+> Try it right away: the coin from the screenshots ships as a built-in
+> example — the **„Beispiel öffnen“** button on the empty stage, or
+> **Öffnen** → [`examples/ukibori-coin.json`](examples/ukibori-coin.json).
 
 ---
 
-## 🧠 Wie es funktioniert
+## 🧠 How it works
 
-Die 2D-Werkbank rendert das Dokument WYSIWYG auf ein Canvas; PNG- und
-SVG-Export nutzen dieselbe Zeichenroutine auf eigenen Offscreen-Canvases im
-Druckraster. Für das 3D-Modell rastert die Engine jedes Element in Masken auf
-dem Druckraster und zeichnet die Konturen als glatte Kurven nach:
+The 2D workbench renders the document WYSIWYG onto a canvas; PNG and SVG export
+reuse the same drawing routine on their own offscreen canvases at print
+resolution. For the 3D model, the engine rasterizes every element into masks on
+the print grid and retraces the contours as smooth curves:
 
 ```mermaid
 flowchart LR
-    A["Elemente<br/>Bild · Text · QR · Form"] --> B["buildParts<br/>Komposition · Masken · Höhen-Bänder"]
-    A --> C["2D-Werkbank<br/>PNG · SVG"]
-    B --> D["traceMaskToFacets<br/>potrace: Maske → glatte Kurven"]
-    D --> E["extrudeLoops<br/>Triangulation + Extrusion"]
-    E --> F["build3MF / STL<br/>Download"]
-    B --> G["three.js<br/>Live-3D-Vorschau"]
+    A["Elements<br/>image · text · QR · shape"] --> B["buildParts<br/>composition · masks · height bands"]
+    A --> C["2D workbench<br/>PNG · SVG"]
+    B --> D["traceMaskToFacets<br/>potrace: mask → smooth curves"]
+    D --> E["extrudeLoops<br/>triangulation + extrusion"]
+    E --> F["build3MF / STL<br/>download"]
+    B --> G["three.js<br/>live 3D preview"]
 ```
 
-### Glatte Kanten statt Pixel-Treppe
+### Smooth edges instead of pixel stairs
 
-Naive Bild-zu-Relief-Konverter ziehen die Kontur entlang der **Pixelkanten** —
-das Ergebnis ist eine sichtbare Treppe. Ukibori rastert das Dokument stattdessen
-auf ein feines mm-Raster — Plattenform, Rahmen und Öse aus analytischen
-Distanzfeldern, Bilder und Text über ihren Alphakanal — und vektorisiert die
-entstandene Maske mit dem lokal mitgelieferten **potrace** zu glatten
-**Bézier-Kurven**, statt den Pixelkanten zu folgen.
+Naive image-to-relief converters trace the contour along the **pixel edges** —
+the result is a visible staircase. Ukibori instead rasterizes the document onto
+a fine mm grid — plate shape, frame, and eyelet from analytic distance fields,
+images and text via their alpha channel — and vectorizes the resulting mask
+with the locally bundled **potrace** into smooth **Bézier curves** instead of
+following the pixel edges.
 
 <div align="center">
-<img src="assets/smooth-compare.png" width="760" alt="Vergleich Pixel-Treppe vs. glatte Vektor-Kontur">
+<img src="assets/smooth-compare.png" width="760" alt="Comparison: pixel staircase vs. smooth vector contour">
 </div>
 
-Das Modell wird in z-Schichten gestapelt: **Grundplatte** (ggf. in Farbbänder
-geteilt) → **Elemente** (Prismen bzw. Gravuren) → **Rahmen/Öse** — jede
-Komponente als eigenes, eingefärbtes Objekt im `.3mf`.
+The model is stacked in z layers: **base plate** (split into color bands if
+needed) → **elements** (prisms or engravings) → **frame/eyelet** — every
+component as its own colored object in the `.3mf`.
 
-### Architektur
+### Architecture
 
 ```mermaid
 flowchart TD
-    editor["js/editor.js<br/>Unified Editor · DOM · Zustand · Undo · Export"]
-    bm["js/bookmark-model.js<br/>Dokument-Schema · (De)Serialisierung · Migration"]
-    bp["js/build-parts.js<br/>Geometrie-Teile aus dem Dokument"]
-    tr["js/trace.js<br/>potrace-Konturen"]
-    geo["js/geometry.js<br/>earcut · Extrusion · 3MF/STL"]
-    p3d["js/preview3d.js<br/>three.js-Bühne"]
-    editor --> bm
-    editor --> bp
+    editor["js/editor.js<br/>unified editor · DOM & state · undo · save/open · export dialog"]
+    model["js/bookmark-model.js<br/>document schema · (de)serialization · migration"]
+    ops["js/geom-util.js · selection-ops.js · transform-ops.js · align-ops.js · scatter.js<br/>pure selection & arrangement math"]
+    inputs["js/sources.js · js/image-ops.js · js/bg-removal.js<br/>text/QR → ImageData · pixel ops · AI cutout"]
+    parts["js/build-parts.js<br/>geometry parts from the document"]
+    trace["js/trace.js<br/>potrace contours"]
+    geo["js/geometry.js<br/>earcut · extrusion · 3MF/STL"]
+    p3d["js/preview3d.js<br/>three.js stage"]
+
+    editor --> model
+    editor --> ops
+    editor --> inputs
+    editor --> parts
     editor --> p3d
-    bp --> tr
-    bp --> geo
-    tr --> geo
+    parts --> trace
+    parts --> geo
+    trace --> geo
 ```
 
-| Datei | Rolle |
+`buildParts()` is the single geometry source: the live 3D preview and the
+3MF/STL exports render exactly the same parts — what you preview is what you
+print.
+
+| File | Role |
 | --- | --- |
-| `index.html` | Markup: Topbar, drei Panels, Bühne, Export-Dialog, Favicon |
-| `styles.css` | Werkstatt-Look „Papier & Tusche", Dreispalter, Ebenen-Dock |
-| `js/editor.js` | Unified Editor: DOM & Zustand, Canvas-Rendering, Auswahl/Drag/Einrasten, Undo, Speichern/Öffnen, Export-Dialog, 2D/3D/Geteilt |
-| `js/bookmark-model.js` | v2-Dokument-Schema (`defaultDoc`, `makeElementV2`), Serialisierung, Migration von v1 |
-| `js/build-parts.js` | baut die Geometrie-Teile (Platte, Farbbänder, Elemente, Rahmen, Öse) für 3D-Vorschau und Export |
-| `js/bookmark-export.js` | Paletten-Helfer (Median-Cut, Farbzuordnung); dazu der alte v1-Export-Pfad, heute Referenz für Paritäts-Tests |
-| `js/geometry.js` | Extrusion & Triangulation (earcut), Distanzfelder der Plattenformen, 3MF/STL-Erzeugung |
-| `js/image-ops.js` | reine Pixel-Operationen: Schwellwert, Inseln, Median-Cut, … |
-| `js/sources.js` | Text- & QR-Eingabe → ImageData |
-| `js/bg-removal.js` | KI-Freistellung (u2netp via onnxruntime-web) |
-| `js/preview3d.js` | Live-3D-Vorschau (three.js, Szene aus `buildParts()`) |
-| `js/trace.js` · `js/vendor/potrace.js` | potrace-Konturierung: Masken → glatte Kurven für alle 3D-Teile und den SVG-Export |
-| `js/coachmarks.js` | Erster-Start-Tour (Coach-Marks) |
-| `vendor/` | lokal mitgeliefert: three.js, onnxruntime-web (+ WASM) mit `u2netp.onnx`, QR-Encoder |
-| `examples/` | Beispiel-Projekte zum Öffnen — u. a. die Münze aus den Screenshots oben |
-| `tests/` | Browser-Test-Suite — `tests/run.html` führt alle `*.test.js` aus (228 Tests) |
-| `docs/superpowers/specs/` · `docs/superpowers/plans/` | Design- & Umsetzungs-Dokumente je Feature |
+| `index.html` | Markup: topbar, three panels, stage, export dialog, favicon |
+| `styles.css` | "Paper & ink" workshop look, three-column layout, layers dock |
+| `js/editor.js` | Unified editor: DOM & state, canvas rendering, selection/drag/snapping, groups & scatter UI, undo, save/open, export dialog, 2D/3D/split |
+| `js/bookmark-model.js` | v2 document schema (`defaultDoc`, `makeElementV2`), serialization, migration from v1 |
+| `js/build-parts.js` | builds the geometry parts (plate, color bands, elements, frame, eyelet) for the 3D preview and export |
+| `js/geom-util.js` | rotated-rectangle math (corners, bounding boxes) shared by selection, transform, align, and scatter |
+| `js/selection-ops.js` | pure selection helpers (marquee hit testing) |
+| `js/transform-ops.js` | multi-select/group transform math (move, uniform scale, rotate) |
+| `js/align-ops.js` | align/distribute math |
+| `js/scatter.js` | seeded scatter generator |
+| `js/geometry.js` | extrusion & triangulation (earcut), plate-shape distance fields, 3MF/STL generation |
+| `js/image-ops.js` | pure pixel operations: threshold, islands, median cut, … |
+| `js/sources.js` | text & QR input → ImageData |
+| `js/bg-removal.js` | AI background removal (u2netp via onnxruntime-web) |
+| `js/preview3d.js` | live 3D preview (three.js, scene built from `buildParts()`) |
+| `js/trace.js` · `js/vendor/potrace.js` | potrace contouring: masks → smooth curves for all 3D parts and the SVG export |
+| `js/bookmark-export.js` | palette helpers (median cut, color mapping); plus the old v1 export path, kept as the reference for parity tests |
+| `js/example-project.js` | the built-in example coin (mirrors `examples/ukibori-coin.json`, so it also works over `file://`) |
+| `js/coachmarks.js` | first-run tour (coach marks) |
+| `vendor/` | bundled locally: three.js, onnxruntime-web (+ WASM) with `u2netp.onnx`, QR encoder |
+| `examples/` | example projects to open — including the coin from the screenshots above |
+| `tests/` | browser test suite — `tests/run.html` runs all `*.test.js` files (255 tests) |
 
-Reines HTML/CSS/JavaScript, **kein Build-Schritt und kein CDN**. Einige Funktionen
-(3D-Vorschau, KI-Freistellung, QR, SVG-Tracing) nutzen Bibliotheken, die **lokal
-mitgeliefert** werden — zur Laufzeit wird nichts aus dem Netz nachgeladen.
-
----
-
-## 🔒 Datenschutz
-
-Die gesamte Verarbeitung passiert lokal im Browser. Bilder werden **nicht**
-hochgeladen, gespeichert oder an Dritte gesendet — auch die **KI-Freistellung**
-läuft mit einem lokal mitgelieferten Modell direkt im Browser. Die App funktioniert
-vollständig offline.
+Plain HTML/CSS/JavaScript, **no build step and no CDN**. Some features (3D
+preview, AI cutout, QR, SVG tracing) use libraries that are **bundled locally**
+— nothing is fetched from the network at runtime.
 
 ---
 
-## 📚 Mehr
+## 🔒 Privacy
 
-Die Entwurfs-/Design-Dokumente früher Meilensteine liegen unter
-[`docs/superpowers/specs/`](docs/superpowers/specs/) — von der ersten
-Schwarz-Weiß-Konvertierung über die glatte Kontur bis zum einheitlichen
-v2-Editor und zur Freiform-Platte.
+All processing happens locally in the browser. Images are **not** uploaded,
+stored, or sent to third parties — the **AI cutout**, too, runs on a locally
+bundled model right in the browser. The app works fully offline.
 
 <div align="center">
-<sub>Komplett lokal im Browser gebaut · 浮彫</sub>
+<sub>Built entirely locally in the browser · 浮彫</sub>
 </div>
