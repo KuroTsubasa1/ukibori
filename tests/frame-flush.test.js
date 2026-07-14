@@ -235,7 +235,7 @@
     assertEqual(rt.elements[0].depth.colorLayerStyle, "bands", "colorLayerStyle round-trips");
   });
 
-  // ---- free-form body + frame: der Rahmen folgt der freien Kontur ----
+  // ---- free-form body + frame: the frame follows the free-form contour ----
   // True iff the part's horizontal cap at height z covers point (x,y) — barycentric
   // test over facets whose three vertices all sit at z.
   function faceCovers(part, x, y, z) {

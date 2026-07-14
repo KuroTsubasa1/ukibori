@@ -50,8 +50,8 @@
     <div class="panel-head">Dokument</div>
     <div class="adv-scroll">
 
-      <!-- 1. Werkstueck: alles, was die Platte/das Objekt selbst beschreibt -->
-      <details class="acc" id="accWerkstueck" open>
+      <!-- 1. "Werkstück": everything describing the plate/object itself -->
+      <details class="acc" id="accWorkpiece" open>
         <summary>Werkstück</summary>
         <div class="acc-body adv-section">
           <div class="adv-field">
@@ -108,8 +108,8 @@
         </div>
       </details>
 
-      <!-- Stapelung: doc-weite Farb-/Höhen-Politik des Ebenen-Stapels -->
-      <details class="acc" id="accStapelung" open>
+      <!-- "Stapelung": doc-wide color/height policy of the layer stack -->
+      <details class="acc" id="accStacking" open>
         <summary>Stapelung</summary>
         <div class="acc-body adv-section">
           <div class="adv-field">
@@ -141,8 +141,8 @@
         </div>
       </details>
 
-      <!-- 4. Druck (Parameter; Export sitzt in der Topbar) -->
-      <details class="acc" id="accDruck" open>
+      <!-- 4. "Druck": print parameters (export lives in the topbar) -->
+      <details class="acc" id="accPrint" open>
         <summary>Druck</summary>
         <div class="acc-body adv-section">
           <div class="adv-field">
@@ -194,9 +194,9 @@
   <aside id="sidebarElement" class="sidebar">
     <div class="panel-head">Element</div>
     <div class="adv-scroll">
-      <!-- Hinzufuegen: neue Elemente entstehen dort, wo sie bearbeitet werden -->
+      <!-- Add dock: new elements are created where they are edited -->
       <div class="adv-section add-dock"><div class="sp-add-row"><button type="button" id="addImageBtn" class="btn" title="Bild hinzufügen">+ Bild</button><button type="button" id="addTextBtn" class="btn" title="Text hinzufügen">+ Text</button><button type="button" id="addQrBtn" class="btn" title="QR-Code hinzufügen">+ QR</button></div><div class="sp-add-row"><button type="button" id="addRectBtn" class="btn" title="Rechteck hinzufügen">+ Rechteck</button><button type="button" id="addCircleBtn" class="btn" title="Kreis hinzufügen (frei skalierbar zur Ellipse)">+ Kreis</button></div></div>
-      <!-- 3. Element: alles am ausgewählten Element -->
+      <!-- 3. "Element": everything about the selected element -->
       <div id="accElement">
         <div class="acc-body adv-section">
           <p class="element-empty hint">Kein Element ausgewählt.<br>Füge oben eines hinzu oder klicke ein Element auf der Arbeitsfläche an.</p>
@@ -218,7 +218,7 @@
               <button type="button" id="advShapeCircle" class="seg" style="flex:1" title="Kreis — wird zur Ellipse, wenn Breite ≠ Höhe">Kreis</button>
             </div>
           </div>
-            <div class="adv-field" id="simpleBildSection" hidden>
+            <div class="adv-field" id="simpleBgRemovalSection" hidden>
             <button type="button" id="removeBgBtn" class="btn" style="width:100%" title="Hintergrund per KI entfernen">Hintergrund entfernen (KI)</button>
             <div id="bgStatus" class="hint" aria-live="polite"></div>
           </div>
@@ -331,7 +331,7 @@
       </div>
     </div><!-- /adv-scroll -->
   </aside>
-  <aside id="sidebarEbenen" class="sidebar">
+  <aside id="sidebarLayers" class="sidebar">
     <div class="panel-head">Ebenen <span id="layerCount" class="panel-count" hidden>0</span></div>
     <div class="adv-scroll">
       <div class="acc-body adv-section">
@@ -373,7 +373,7 @@
 <!-- Hidden file inputs for add-image (button wired in Task 4) -->
 <input type="file" id="addImageInput" accept="image/*" hidden>
 <input type="file" id="fontUploadInput" accept=".ttf,.otf,.woff,.woff2" hidden>
-<!-- Hidden file input for Öffnen (Open project) -->
+<!-- Hidden file input for "Öffnen" (open project) -->
 <input type="file" id="openInput" accept="application/json,.json" hidden>
 
 <script src="vendor/qrcode.js"></script>

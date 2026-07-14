@@ -23,7 +23,7 @@
   // Degenerate loop (ringThicknessMm<=0 or diameterMm<=0) falls back to body box.
   // The element that defines a plate-free "Bild" object: body.freeOutlineFromElementId if set,
   // else the first image element, else the first element. null if the doc has no elements.
-  function __bildElement(doc) {
+  function __imageBodyElement(doc) {
     // Skip hidden elements so the 2D view (raw doc) and 3D/export (visibleDoc, which strips
     // _hidden) resolve the SAME defining element — otherwise hiding it silently resizes the object.
     const els = (doc.elements || []).filter(e => !e._hidden);
@@ -40,7 +40,7 @@
     // (its rectangle IS the object). No plate box; mount/washer handled by the normal path below
     // once the image element defines the extent.
     if (doc.body.shape === "image") {
-      const bel = __bildElement(doc);
+      const bel = __imageBodyElement(doc);
       if (bel) {
         const cx = bel.cxMm, cy = bel.cyMm, hw = (bel.wMm || 0) / 2, hh = (bel.hMm || 0) / 2;
         const a = (bel.rotationDeg || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
@@ -1352,7 +1352,7 @@
   // >0 inside the rectangle, in cell units. borderMm is ignored (the image IS the object).
   function imageFootprintField(doc, cols, rows, pitch, grid) {
     const x0 = grid ? grid.x0 : 0, y0 = grid ? grid.y0 : 0;
-    const el = __bildElement(doc);
+    const el = __imageBodyElement(doc);
     if (!el) return () => -1;
     const cx = el.cxMm, cy = el.cyMm, hw = (el.wMm || 0) / 2, hh = (el.hMm || 0) / 2;
     const a = -(el.rotationDeg || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a); // inverse rotate

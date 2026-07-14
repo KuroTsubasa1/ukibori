@@ -1234,7 +1234,7 @@
         src: dataURL, _img: img,
         cxMm: body.widthMm / 2, cyMm: body.heightMm / 2,
         wMm, hMm,
-        // Dateiname (ohne Endung) — beschriftet die Ebene und liefert den Export-Namen.
+        // File name (without extension) — labels the layer and feeds the export name.
         name: fileName ? String(fileName).replace(/\.[^.]+$/, "") : undefined,
       });
       el.depth.direction = defaultDirection;
@@ -2671,7 +2671,7 @@
     }
   }());
 
-  // ---- Löschen (Toolbar + Entf/Backspace auf der Arbeitsfläche) ----
+  // ---- Delete (toolbar + Entf/Backspace on the canvas) ----
   function deleteSelected() {
     var el = selectedEl();
     if (!el) return;
@@ -2684,7 +2684,7 @@
     scheduleRebuild3D();
   }
 
-  // ---- Duplizieren (Ebenen-Zeile, Strg/Cmd+D, Bühnen-Toolbar) ----
+  // ---- Duplicate (layer row, Ctrl/Cmd+D, stage toolbar) ----
   function duplicateElement(el) {
     if (!el) return;
     // Deep-copy the persisted fields; runtime caches are dropped and makeElementV2
@@ -2710,7 +2710,7 @@
     e.preventDefault();
     duplicateSelected();
   });
-  // ---- Relief-Höhe: "Auto" entfernt den manuellen Override ----
+  // ---- Relief height: the "Auto" button removes the manual override ----
   (function () {
     var b = document.getElementById("reliefAutoBtn");
     if (b) b.addEventListener("click", function () {
@@ -2724,10 +2724,10 @@
     });
   }());
 
-  // ---- Undo-Grenze für Nutzer-initiierte Dokument-Wechsel (Neu/Beispiel/Öffnen).
-  // Pusht den AKTUELLEN Stand sofort (der debounced Snapshot hängt sonst noch
-  // <500ms in der Luft) bzw. nach dem Wechsel den neuen — auch im Mute-Fenster
-  // direkt nach einem Undo, das nur die debounced Re-Snapshots unterdrücken soll.
+  // ---- Undo boundary for user-initiated document swaps ("Neu" / Beispiel / "Öffnen").
+  // Pushes the CURRENT state immediately (the debounced snapshot may still be
+  // pending <500ms) resp. the new state right after the swap — even inside the
+  // mute window after an undo, which should only suppress debounced re-snapshots.
   function undoBoundary(clearRedo) {
     clearTimeout(_undo.timer);
     var cur;
@@ -2739,7 +2739,7 @@
     if (clearRedo) _undo.redo = [];
   }
 
-  // ---- Beispiel laden: die eingebettete Ukibori-Münze (js/example-project.js) ----
+  // ---- Load example: the embedded Ukibori coin (js/example-project.js) ----
   // Embedded rather than fetched so it also works over file:// and offline.
   function loadExampleAction() {
     if (!window.EXAMPLE_PROJECT) {
@@ -2758,14 +2758,14 @@
     }
   }
 
-  // ---- Neu: leeres Projekt (Undo bringt das alte zurück) ----
+  // ---- "Neu": fresh empty project (undo brings the old one back) ----
   (function () {
     var btn = document.getElementById("newBtn");
     if (!btn) return;
     btn.addEventListener("click", function () {
       var nameField = document.getElementById("exportName");
-      // Nachfragen, sobald echter Inhalt verloren ginge — auch reine
-      // Werkstück-/Paletten-Änderungen ohne Elemente oder ein getippter Name.
+      // Confirm whenever real content would be lost — including plate/palette
+      // changes without any elements, or a typed export name.
       var dirty;
       try { dirty = window.serializeProject(doc) !== window.serializeProject(window.defaultDoc()); } catch (e) { dirty = true; }
       if (nameField && nameField.value.trim()) dirty = true;
@@ -2777,7 +2777,7 @@
     });
   }());
 
-  // ---- Bühnen-Hero: Klick öffnet den Bild-Dialog, Drops landen direkt ----
+  // ---- Stage hero: click opens the image dialog, drops land directly ----
   (function () {
     var hero = document.getElementById("stageHero");
     if (!hero) return;
@@ -2789,7 +2789,7 @@
     if (ex) ex.addEventListener("click", function (e) {
       e.stopPropagation(); // not a card click — don't open the image dialog
       loadExampleAction();
-      // Falls die Tour gerade diesen Knopf anleuchtet: weiter zum nächsten Schritt.
+      // If the tour is currently spotlighting this button, advance to the next step.
       if (window.coachmarks && window.coachmarks.refresh) window.coachmarks.refresh();
     });
   }());
