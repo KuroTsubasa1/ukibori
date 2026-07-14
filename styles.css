@@ -194,8 +194,8 @@
   #sidebarElement { flex: 1 1 auto; min-height: 0; }
   /* FIXED height: adding layers never reflows the column — the list scrolls inside.
      (#rightCol prefix out-ranks the #rightCol .sidebar basis reset above.) */
-  #rightCol #sidebarEbenen { flex: 0 0 42%; min-height: 235px; }
-  #sidebarEbenen .adv-scroll { padding-top: var(--sp-2); }
+  #rightCol #sidebarLayers { flex: 0 0 42%; min-height: 235px; }
+  #sidebarLayers .adv-scroll { padding-top: var(--sp-2); }
 
   /* Slim identity header per panel */
   .panel-head {
@@ -297,7 +297,7 @@
     transition: background .12s, color .12s;
   }
   #selToolbar button:hover { background: var(--surface2); color: var(--ink); }
-  /* Spiegeln ist ein Zustand, kein Einmal-Befehl: aktive Achse bleibt markiert. */
+  /* Mirroring is a state, not a one-shot command: the active axis stays marked. */
   #selToolbar button.tb-on { background: var(--ink); color: var(--panel); }
   #selToolbar button.tb-on:hover { background: var(--ink); color: var(--panel); }
   #selToolbar #selDelBtn:hover { background: var(--danger); color: #fff; }
@@ -737,7 +737,7 @@
     #editor { flex-direction: column; padding: var(--sp-2) var(--sp-2); }
     .sidebar { flex: 0 0 auto; width: 100%; max-height: none; }
     #rightCol { flex: 0 0 auto; width: 100%; }
-    #rightCol #sidebarEbenen { flex: 0 0 auto; height: 340px; }
+    #rightCol #sidebarLayers { flex: 0 0 auto; height: 340px; }
     #sidebarAdvanced { max-height: none; }
     #editor #preview { min-height: 420px; }
     #topbar { flex-wrap: wrap; height: auto; padding: var(--sp-2) var(--sp-2); gap: var(--sp-2); }
