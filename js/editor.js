@@ -231,6 +231,54 @@
     ctx.closePath();
   }
 
+  // Zierkante active? (rect/circle plates with a decorated outline)
+  function edgeActive() {
+    var e = doc.body.edge;
+    return !!(e && e.style && e.style !== "none" && e.sizeMm > 0 && e.periodMm > 0 &&
+      (doc.body.shape === "rect" || doc.body.shape === "circle") && window.platePerimeterMm);
+  }
+
+  // Decorated plate outline (Zierkante) as the current ctx path. Samples the
+  // analytic perimeter and offsets it inward by the same profile the SDF uses
+  // (geometry.js plateEdgeDecorator), so 2D and print agree. Returns the fill
+  // rule: perforation punches hole circles via "evenodd".
+  function decoratedPlatePath(ctx) {
+    var body = doc.body, e = body.edge;
+    var per = window.platePerimeterMm(body);
+    var L = per.length;
+    var n = Math.max(3, Math.round(L / e.periodMm));
+    var p = L / n;
+    ctx.beginPath();
+    if (e.style === "perforation") {
+      // nominal outline + punched circles at the repeat centers
+      var stepN = Math.min(1, L / 64);
+      for (var t = 0, i = 0; t < L; t += stepN, i++) {
+        var q = per.point(t);
+        if (i === 0) ctx.moveTo(mmX(q.x), mmY(q.y)); else ctx.lineTo(mmX(q.x), mmY(q.y));
+      }
+      ctx.closePath();
+      var r = (e.sizeMm / 2) * state.scale;
+      for (var k = 0; k < n; k++) {
+        var c = per.point(k * p);
+        ctx.moveTo(mmX(c.x) + r, mmY(c.y));
+        ctx.arc(mmX(c.x), mmY(c.y), r, 0, Math.PI * 2);
+      }
+      return "evenodd";
+    }
+    var depth = e.style === "teeth"
+      ? function (t) { var f = t / p - Math.floor(t / p); return e.sizeMm * (1 - Math.abs(2 * f - 1)); }
+      : function (t) { return e.sizeMm * 0.5 * (1 + Math.cos(2 * Math.PI * t / p)); };
+    var step = Math.min(p / 8, 1);
+    for (var t2 = 0, j = 0; t2 < L; t2 += step, j++) {
+      var q2 = per.point(t2);
+      var d = depth(t2);
+      var px = mmX(q2.x - q2.nx * d), py = mmY(q2.y - q2.ny * d);
+      if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    return "nonzero";
+  }
+
   // Rounded-rect path inset by insetMm on all sides (Rand-Rahmen 2D preview).
   // Returns false when the inset collapses the rect. Preview-approximation:
   // the inset corner radius is max(0, cornerRadius - inset); geometry is authoritative.
@@ -829,39 +877,53 @@
 
     if (shape === "rect") {
       // Rounded-rect plate: outline only (B5: no solid fill so elements/relief are visible).
-      // Clip elements inside the body outline.
-      ctx.save(); bodyPath(ctx); ctx.clip();
+      // Clip elements inside the body outline (decorated when a Zierkante is active).
+      const deco = edgeActive();
+      ctx.save();
+      if (deco) ctx.clip(decoratedPlatePath(ctx));
+      else { bodyPath(ctx); ctx.clip(); }
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
       ctx.restore();
       // Outline.
-      bodyPath(ctx); ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
+      if (deco) decoratedPlatePath(ctx); else bodyPath(ctx);
+      ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
       // Rand-Rahmen preview: stroke inset by widthMm/2 with lineWidth widthMm*s
       // (drawn over the content — "ring wins"; exact band comes from the engine).
+      // With a Zierkante the ring is clipped to the decorated outline so its
+      // outer edge follows the waves/teeth like the printed band does.
       const frame = body.frame;
-      if (frame && frame.widthMm > 0 && insetBodyPath(ctx, frame.widthMm / 2)) {
+      if (frame && frame.widthMm > 0) {
         ctx.save();
-        ctx.strokeStyle = frame.color || "#000000";
-        ctx.lineWidth = frame.widthMm * s;
-        ctx.stroke();
+        if (deco) ctx.clip(decoratedPlatePath(ctx));
+        if (insetBodyPath(ctx, frame.widthMm / 2)) {
+          ctx.strokeStyle = frame.color || "#000000";
+          ctx.lineWidth = frame.widthMm * s;
+          ctx.stroke();
+        }
         ctx.restore();
       }
     } else if (shape === "circle") {
       // Circle plate: outline only (B5: no solid fill so elements/relief are visible).
       const r = Math.min(body.widthMm, body.heightMm) / 2 * s;
       const cx = mmX(body.widthMm / 2), cy = mmY(body.heightMm / 2);
-      // Clip to circle.
+      const decoC = edgeActive();
+      // Clip to circle (decorated when a Zierkante is active).
       ctx.save();
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+      if (decoC) ctx.clip(decoratedPlatePath(ctx));
+      else { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip(); }
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
       ctx.restore();
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      if (decoC) decoratedPlatePath(ctx);
+      else { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); }
       ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
       // Rand-Rahmen preview: ring stroke at r - widthMm/2 ("ring wins" over content).
+      // Clipped to the decorated outline when a Zierkante is active (see rect).
       const frame = body.frame;
       if (frame && frame.widthMm > 0) {
         const fr = r - (frame.widthMm / 2) * s;
         if (fr > 0) {
           ctx.save();
+          if (decoC) ctx.clip(decoratedPlatePath(ctx));
           ctx.beginPath(); ctx.arc(cx, cy, fr, 0, Math.PI * 2);
           ctx.strokeStyle = frame.color || "#000000";
           ctx.lineWidth = frame.widthMm * s;
@@ -1878,6 +1940,7 @@
     setHidden("borderField", shape !== "free");
     setHidden("frameField", isImage); // rect/circle/free all support the Rand-Rahmen
     setHidden("cornerField", shape !== "rect");
+    setHidden("edgeField", shape !== "rect" && shape !== "circle"); // Zierkante needs the analytic outline
     setHidden("simpleSizeSection", isImage);
     // A Bild object has no plate → mount (Befestigung) and plate-centered "Ausrichten" are
     // meaningless. Force mount off (so 2D marker, hit-test, and 3D geometry all agree) and hide
@@ -1916,6 +1979,35 @@
   bindNum("cornerMm", 0, function (v) {
     doc.body.cornerRadiusMm = v; render2D(); scheduleRebuild3D();
   });
+
+  // Zierkante (rect/circle): style select + size/period fields
+  function syncEdgeFields() {
+    var e = doc.body.edge || { style: "none", sizeMm: 2, periodMm: 8 };
+    var st = document.getElementById("edgeStyle");
+    if (st) st.value = e.style || "none";
+    var params = document.getElementById("edgeParams");
+    if (params) params.hidden = !e.style || e.style === "none";
+    var sz = document.getElementById("edgeSizeMm");
+    if (sz) sz.value = e.sizeMm;
+    var pd = document.getElementById("edgePeriodMm");
+    if (pd) pd.value = e.periodMm;
+  }
+  (function () {
+    var st = document.getElementById("edgeStyle");
+    if (st) st.addEventListener("change", function () {
+      if (!doc.body.edge) doc.body.edge = window.defaultEdge();
+      doc.body.edge.style = st.value;
+      syncEdgeFields(); render2D(); scheduleRebuild3D();
+    });
+    bindNum("edgeSizeMm", 0.1, function (v) {
+      if (!doc.body.edge) doc.body.edge = window.defaultEdge();
+      doc.body.edge.sizeMm = v; render2D(); scheduleRebuild3D();
+    });
+    bindNum("edgePeriodMm", 0.5, function (v) {
+      if (!doc.body.edge) doc.body.edge = window.defaultEdge();
+      doc.body.edge.periodMm = v; render2D(); scheduleRebuild3D();
+    });
+  }());
 
   // Border (shown only for Free)
   bindNum("borderMm", 0, function (v) {
@@ -2163,6 +2255,8 @@
     document.getElementById("borderMm").value = doc.body.borderMm != null ? doc.body.borderMm : 2;
     // Eckenradius (rectangle)
     document.getElementById("cornerMm").value = doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 4;
+    // Zierkante
+    syncEdgeFields();
     // Rahmen (Rand-Rahmen)
     var fr = doc.body.frame;
     document.getElementById("frameMm").value = fr && fr.widthMm != null ? fr.widthMm : 0;
