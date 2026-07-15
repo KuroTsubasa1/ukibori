@@ -260,6 +260,14 @@
             <label for="advArc" class="adv-label">Bogen°</label>
             <input type="number" id="advArc" class="text-input" min="-350" max="350" step="5" value="0" title="Text auf Kreisbogen: 0 = gerade, positiv = Bogen nach oben, negativ = nach unten">
           </div>
+            <div class="adv-field" id="advTextPathField" hidden>
+            <label class="adv-label">Pfadtext</label>
+            <div style="display:flex;gap:6px">
+              <button type="button" id="textPathDrawBtn" class="btn" style="flex:1" title="Freien Schwung auf der Fläche zeichnen — der Text folgt ihm">Pfad zeichnen</button>
+              <button type="button" id="textPathClearBtn" class="btn" hidden title="Pfad entfernen — Text wieder gerade bzw. auf Bogen">Entfernen</button>
+            </div>
+            <p class="hint" id="textPathHint" hidden>Zeichne jetzt einen Schwung auf der Fläche.</p>
+          </div>
             <div class="adv-field" id="advShapeField" hidden>
             <label class="adv-label">Form</label>
             <div id="advShapeSeg" class="seg-group seg-sm" style="width:100%">
@@ -444,6 +452,7 @@
 <script src="js/trace.js"></script>
 <script src="js/sources.js"></script>
 <script src="js/arc-text.js"></script>
+<script src="js/path-text.js"></script>
 <script src="js/shape-edge.js"></script>
 <script src="js/bg-removal.js"></script>
 <script src="js/bookmark-model.js"></script>

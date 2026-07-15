@@ -198,6 +198,7 @@ function migrateProject(doc) {
       if (el.type === "shape" && el.shape == null) el.shape = "rect";
       if (el.type === "shape" && el.edge == null) el.edge = { style: "none", sizeMm: 1.5, periodMm: 6 };
       if (el.type === "text" && el.arcDeg == null) el.arcDeg = 0;
+      if (el.type === "text" && el.textPath === undefined) el.textPath = null;
       if (el.groupId === undefined) el.groupId = null;
     }
     return doc;
@@ -246,7 +247,7 @@ function makeElementV2(type, props) {
     depth: defaultDepth(type),
   }, props);
   if (type === "image") { if (e.src == null) e.src = ""; e._img = e._img || null; }
-  if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; if (e.arcDeg == null) e.arcDeg = 0; }
+  if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; if (e.arcDeg == null) e.arcDeg = 0; if (e.textPath === undefined) e.textPath = null; }
   if (type === "shape") {
     if (e.shape == null) e.shape = "rect"; // 'rect' | 'circle' (ellipse when wMm ≠ hMm)
     if (e.edge == null) e.edge = { style: "none", sizeMm: 1.5, periodMm: 6 }; // Zierkante für Formen

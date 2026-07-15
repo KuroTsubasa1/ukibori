@@ -905,7 +905,11 @@
       ctx.fillStyle = el.color || "#ffffff";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = `${el.fontWeight || "normal"} ${Math.max(1, Math.round(h))}px ${el.fontFamily || "system-ui"}`;
-      if (el.arcDeg) window.drawArcText(ctx, el.text || "", el.arcDeg, Math.max(1, Math.round(h)));
+      if (el.textPath && el.textPath.length > 1 && window.drawPathText) {
+        window.drawPathText(ctx, el.text || "",
+          el.textPath.map(function (p) { return { x: p.x * s, y: p.y * s }; }),
+          Math.max(1, Math.round(h)));
+      } else if (el.arcDeg) window.drawArcText(ctx, el.text || "", el.arcDeg, Math.max(1, Math.round(h)));
       else ctx.fillText(el.text || "", 0, 0);
     } else if (el.type === "shape") {
       ctx.fillStyle = el.color || "#000000";
@@ -1116,7 +1120,7 @@
     }
 
     // Scatter path overlay: the stroke being drawn (px) or the stored path (mm→px).
-    var scPathPts = (drag && drag.handle === "scatterPath" && drag.ptsPx && drag.ptsPx.length > 1) ? drag.ptsPx
+    var scPathPts = (drag && (drag.handle === "scatterPath" || drag.handle === "textPath") && drag.ptsPx && drag.ptsPx.length > 1) ? drag.ptsPx
       : (scatter && scatter.mode === "path" && scatter.path && scatter.path.length > 1 && !(drag && drag.handle === "scatterPath"))
         ? scatter.path.map(function (p) { return { x: mmX(p.x), y: mmY(p.y) }; })
         : null;
@@ -1304,6 +1308,7 @@
   // ---- Pointer handlers (move / scale / rotate) ----
   let drag = null;
   var spacePan = false; // Space held → next canvas drag pans the view
+  var textPathDraw = null; // text-element id waiting for a Pfadtext drag
 
   // Mouse wheel zooms the workbench toward the cursor (same convention as the
   // 3D stage); ctrl+wheel is the trackpad pinch (finer deltas, larger factor).
@@ -1346,6 +1351,14 @@
       cv.setPointerCapture(e.pointerId);
       cv.style.cursor = "grabbing";
       e.preventDefault(); // suppress middle-click autoscroll
+      return;
+    }
+    // Pfadtext: the next canvas drag records the path for the waiting text element.
+    if (textPathDraw) {
+      const toMmT = function (p, v0) { return (p - state.marginPx) / state.scale + v0; };
+      drag = { handle: "textPath", px, py, ptsPx: [{ x: px, y: py }],
+               pathMm: [{ x: toMmT(px, state.viewX0), y: toMmT(py, state.viewY0) }] };
+      cv.setPointerCapture(e.pointerId);
       return;
     }
     // Scatter sub-mode: while the panel is open, a canvas drag defines the placement region.
@@ -1542,7 +1555,7 @@
       render2D();
       return;
     }
-    if (drag.handle === "scatterPath") {
+    if (drag.handle === "scatterPath" || drag.handle === "textPath") {
       // freehand path: sample a point every few pixels
       const last = drag.ptsPx[drag.ptsPx.length - 1];
       if (Math.hypot(px - last.x, py - last.y) >= 4) {
@@ -1619,6 +1632,29 @@
       drag = null;
       cv.style.cursor = spacePan ? "grab" : "";
       render2D();
+      return;
+    }
+    if (drag.handle === "textPath") {
+      // Pfadtext: store the smoothed path element-local (undo translate/rotate/flip).
+      var rawPath = drag.pathMm;
+      drag = null;
+      var tpEl = doc.elements.find(function (e2) { return e2.id === textPathDraw; });
+      textPathDraw = null;
+      if (tpEl && rawPath.length > 1) {
+        var smoothed = window.smoothPath ? window.smoothPath(rawPath, 2) : rawPath;
+        var ang = -(tpEl.rotationDeg || 0) * Math.PI / 180;
+        var ca = Math.cos(ang), sa = Math.sin(ang);
+        tpEl.textPath = smoothed.map(function (p) {
+          var dx = p.x - tpEl.cxMm, dy = p.y - tpEl.cyMm;
+          var lx = dx * ca - dy * sa, ly = dx * sa + dy * ca;
+          if (tpEl.flipH) lx = -lx;
+          if (tpEl.flipV) ly = -ly;
+          return { x: lx, y: ly };
+        });
+      }
+      refreshAdvancedForSelection();
+      render2D();
+      scheduleRebuild3D();
       return;
     }
     var wasScatter = drag.handle === "scatterRegion";
@@ -2900,7 +2936,17 @@
     var advArcField = document.getElementById("advArcField");
     if (advArcField) advArcField.hidden = !isText;
     var advArcNode = document.getElementById("advArc");
-    if (advArcNode) advArcNode.value = isText ? (el.arcDeg || 0) : 0;
+    if (advArcNode) {
+      advArcNode.value = isText ? (el.arcDeg || 0) : 0;
+      // a Pfadtext overrides the arc — grey the arc input out while one is set
+      advArcNode.disabled = !!(isText && el.textPath && el.textPath.length > 1);
+    }
+    var tpField = document.getElementById("advTextPathField");
+    if (tpField) tpField.hidden = !isText;
+    var tpClear = document.getElementById("textPathClearBtn");
+    if (tpClear) tpClear.hidden = !(isText && el.textPath && el.textPath.length > 1);
+    var tpHint = document.getElementById("textPathHint");
+    if (tpHint) tpHint.hidden = !(isText && textPathDraw === el.id);
     if (isText) {
       populateFontSelect(document.getElementById("advFontFamily"), el.fontFamily || "system-ui");
       var boldNode = document.getElementById("advFontBold");
@@ -3109,6 +3155,24 @@
     if (el.type !== "text") return false;
     var v = parseFloat(node.value);
     el.arcDeg = isNaN(v) ? 0 : Math.max(-350, Math.min(350, v));
+  });
+
+  // -- Pfadtext: record / clear the freehand path of a text element --
+  (function () {
+    var draw = document.getElementById("textPathDrawBtn");
+    if (draw) draw.addEventListener("click", function () {
+      var el = selectedEl();
+      if (!el || el.type !== "text") return;
+      textPathDraw = el.id;
+      refreshAdvancedForSelection();
+    });
+  }());
+  bindElementField("textPathClearBtn", "click", function (el) {
+    if (el.type !== "text") return false;
+    el.textPath = null;
+    textPathDraw = null;
+    refreshAdvancedForSelection();
+    renderLayers();
   });
 
   // -- Element-Zierkante (shape elements) --

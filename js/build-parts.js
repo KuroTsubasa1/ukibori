@@ -149,7 +149,11 @@
       ctx.fillStyle = el.color;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = `${el.fontWeight} ${Math.max(1, Math.round(h))}px ${el.fontFamily}`;
-      if (el.arcDeg) window.drawArcText(ctx, el.text, el.arcDeg, Math.max(1, Math.round(h)));
+      if (el.textPath && el.textPath.length > 1 && window.drawPathText) {
+        window.drawPathText(ctx, el.text,
+          el.textPath.map(function (p) { return { x: p.x * sx, y: p.y * sy }; }),
+          Math.max(1, Math.round(h)));
+      } else if (el.arcDeg) window.drawArcText(ctx, el.text, el.arcDeg, Math.max(1, Math.round(h)));
       else ctx.fillText(el.text, 0, 0);
     } else if (el.type === "shape") {
       ctx.fillStyle = el.color;
