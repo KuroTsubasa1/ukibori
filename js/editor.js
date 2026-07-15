@@ -1662,6 +1662,26 @@
     }
   });
 
+  // Pausen-Spickzettel: exact pause layers for manual color swaps (no AMS).
+  document.getElementById("exportPause").addEventListener("click", function () {
+    try {
+      setExportStatus("Berechne …");
+      const parts = window.buildParts(visibleDoc());
+      const sheet = window.buildPauseSheet(parts, doc.body.layerHeightMm);
+      if (sheet.swaps.length <= 1 && !sheet.mixed.length) {
+        setExportStatus("Nur eine Farbe — keine Pausen nötig.");
+        return;
+      }
+      const text = window.formatPauseSheet(sheet, { name: exportFileName(), layerHeightMm: doc.body.layerHeightMm });
+      downloadBlob(new Blob([text], { type: "text/plain;charset=utf-8" }), exportFileName() + "-pausen.txt");
+      setExportStatus(sheet.mixed.length
+        ? "Fertig — Achtung: enthält Zonen, die nur mit AMS druckbar sind (siehe Zettel)."
+        : "Fertig.");
+    } catch (e) {
+      setExportStatus("Fehler: " + e.message);
+    }
+  });
+
   // Render the DESIGN to an off-screen PNG canvas. MIRRORS buildDesignSVG (base plate color
   // filled, elements on top, then everything outside the real footprint — rounded corners /
   // circle / free silhouette / mount hole — blanked to transparent), so the PNG matches the
