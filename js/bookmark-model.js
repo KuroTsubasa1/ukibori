@@ -196,6 +196,7 @@ function migrateProject(doc) {
         el.depth.colorLayerStyle = el.depth.flush ? "bands" : "stepped";
       }
       if (el.type === "shape" && el.shape == null) el.shape = "rect";
+      if (el.type === "shape" && el.edge == null) el.edge = { style: "none", sizeMm: 1.5, periodMm: 6 };
       if (el.type === "text" && el.arcDeg == null) el.arcDeg = 0;
       if (el.groupId === undefined) el.groupId = null;
     }
@@ -246,7 +247,10 @@ function makeElementV2(type, props) {
   }, props);
   if (type === "image") { if (e.src == null) e.src = ""; e._img = e._img || null; }
   if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; if (e.arcDeg == null) e.arcDeg = 0; }
-  if (type === "shape") { if (e.shape == null) e.shape = "rect"; } // 'rect' | 'circle' (ellipse when wMm ≠ hMm)
+  if (type === "shape") {
+    if (e.shape == null) e.shape = "rect"; // 'rect' | 'circle' (ellipse when wMm ≠ hMm)
+    if (e.edge == null) e.edge = { style: "none", sizeMm: 1.5, periodMm: 6 }; // Zierkante für Formen
+  }
   return e;
 }
 

@@ -909,10 +909,12 @@
       else ctx.fillText(el.text || "", 0, 0);
     } else if (el.type === "shape") {
       ctx.fillStyle = el.color || "#000000";
-      ctx.beginPath();
-      if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
-      else ctx.rect(-w / 2, -h / 2, w, h);
-      ctx.fill();
+      if (!(window.drawShapeEdge && window.drawShapeEdge(ctx, el, w, h))) {
+        ctx.beginPath();
+        if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+        else ctx.rect(-w / 2, -h / 2, w, h);
+        ctx.fill();
+      }
     } else if (el.type === "image") {
       if (el._img) {
         // Use processed display canvas (threshold/invert/reduce applied) so 2D == print.
@@ -2913,6 +2915,18 @@
     var shapeCircle = document.getElementById("advShapeCircle");
     if (shapeRect) shapeRect.classList.toggle("seg-active", !!(isShape && el.shape !== "circle"));
     if (shapeCircle) shapeCircle.classList.toggle("seg-active", !!(isShape && el.shape === "circle"));
+    // Element-Zierkante (shape elements): seed style + params, toggle param row.
+    if (isShape) {
+      var elEdge = el.edge || { style: "none", sizeMm: 1.5, periodMm: 6 };
+      var edgeSel = document.getElementById("advEdgeStyle");
+      if (edgeSel) edgeSel.value = elEdge.style || "none";
+      var edgeParams = document.getElementById("advEdgeParams");
+      if (edgeParams) edgeParams.hidden = !elEdge.style || elEdge.style === "none";
+      var edgeSz = document.getElementById("advEdgeSize");
+      if (edgeSz) edgeSz.value = elEdge.sizeMm;
+      var edgePd = document.getElementById("advEdgePeriod");
+      if (edgePd) edgePd.value = elEdge.periodMm;
+    }
 
     // Relief height (depth.heightMm): shown for Einfarbig (solid/text) and Farbebenen→Gestuft.
     // With "Höhe je Farbe" (doc.autoLayerHeights) on, the field is the per-element OVERRIDE for
@@ -3095,6 +3109,28 @@
     if (el.type !== "text") return false;
     var v = parseFloat(node.value);
     el.arcDeg = isNaN(v) ? 0 : Math.max(-350, Math.min(350, v));
+  });
+
+  // -- Element-Zierkante (shape elements) --
+  bindElementField("advEdgeStyle", "change", function (el, node) {
+    if (el.type !== "shape") return false;
+    if (!el.edge) el.edge = { style: "none", sizeMm: 1.5, periodMm: 6 };
+    el.edge.style = node.value;
+    var params = document.getElementById("advEdgeParams");
+    if (params) params.hidden = node.value === "none";
+    renderLayers();
+  });
+  bindElementField("advEdgeSize", "input", function (el, node) {
+    if (el.type !== "shape" || !el.edge) return false;
+    var v = parseFloat(node.value);
+    if (isNaN(v) || v <= 0) return false;
+    el.edge.sizeMm = v;
+  });
+  bindElementField("advEdgePeriod", "input", function (el, node) {
+    if (el.type !== "shape" || !el.edge) return false;
+    var v = parseFloat(node.value);
+    if (isNaN(v) || v <= 0) return false;
+    el.edge.periodMm = v;
   });
 
   // -- Shape kind (Rechteck / Kreis, shape elements) --

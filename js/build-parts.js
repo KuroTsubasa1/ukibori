@@ -153,10 +153,12 @@
       else ctx.fillText(el.text, 0, 0);
     } else if (el.type === "shape") {
       ctx.fillStyle = el.color;
-      ctx.beginPath();
-      if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
-      else ctx.rect(-w / 2, -h / 2, w, h);
-      ctx.fill();
+      if (!(window.drawShapeEdge && window.drawShapeEdge(ctx, el, w, h))) {
+        ctx.beginPath();
+        if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+        else ctx.rect(-w / 2, -h / 2, w, h);
+        ctx.fill();
+      }
     } else if (el._img) {
       ctx.drawImage(el._img, -w / 2, -h / 2, w, h);
     }

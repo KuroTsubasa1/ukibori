@@ -266,6 +266,17 @@
               <button type="button" id="advShapeRect" class="seg seg-active" style="flex:1" title="Rechteckige Fläche — füllt Breite × Höhe des Elements">Rechteck</button>
               <button type="button" id="advShapeCircle" class="seg" style="flex:1" title="Kreis — wird zur Ellipse, wenn Breite ≠ Höhe">Kreis</button>
             </div>
+            <label class="adv-label" for="advEdgeStyle" style="margin-top:6px">Zierkante</label>
+            <select id="advEdgeStyle" class="text-input" title="Zierkante am Rand der Form">
+              <option value="none" selected>Keine</option>
+              <option value="wave">Wellenrand</option>
+              <option value="teeth">Zackenrand</option>
+              <option value="perforation">Briefmarke</option>
+            </select>
+            <div id="advEdgeParams" style="display:flex;gap:6px;align-items:center;margin-top:4px" hidden>
+              <input type="number" id="advEdgeSize" class="sp-num" style="flex:1" min="0.4" max="10" step="0.2" value="1.5" title="Stärke in mm — Tiefe der Wellen/Zacken bzw. Lochdurchmesser (Briefmarke)" aria-label="Stärke der Element-Zierkante in mm">
+              <input type="number" id="advEdgePeriod" class="sp-num" style="flex:1" min="1" max="40" step="0.5" value="6" title="Abstand der Wiederholungen in mm entlang des Randes" aria-label="Abstand der Element-Zierkanten-Wiederholungen in mm">
+            </div>
           </div>
             <div class="adv-field" id="simpleBgRemovalSection" hidden>
             <button type="button" id="removeBgBtn" class="btn" style="width:100%" title="Hintergrund per KI entfernen">Hintergrund entfernen (KI)</button>
@@ -433,6 +444,7 @@
 <script src="js/trace.js"></script>
 <script src="js/sources.js"></script>
 <script src="js/arc-text.js"></script>
+<script src="js/shape-edge.js"></script>
 <script src="js/bg-removal.js"></script>
 <script src="js/bookmark-model.js"></script>
 <script src="js/example-project.js"></script>
