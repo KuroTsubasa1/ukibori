@@ -231,52 +231,97 @@
     ctx.closePath();
   }
 
-  // Zierkante active? (rect/circle plates with a decorated outline)
+  // Zierkante active? (rect/circle plates with a decorated outline; the
+  // perimeter must be constructible — degenerate saved plates fall back to
+  // the plain outline instead of crashing render2D)
   function edgeActive() {
     var e = doc.body.edge;
     return !!(e && e.style && e.style !== "none" && e.sizeMm > 0 && e.periodMm > 0 &&
-      (doc.body.shape === "rect" || doc.body.shape === "circle") && window.platePerimeterMm);
+      (doc.body.shape === "rect" || doc.body.shape === "circle") &&
+      window.platePerimeterMm && window.platePerimeterMm(doc.body));
   }
 
-  // Decorated plate outline (Zierkante) as the current ctx path. Samples the
+  // Decorated (wave/teeth) plate outline as the current ctx path. Samples the
   // analytic perimeter and offsets it inward by the same profile the SDF uses
-  // (geometry.js plateEdgeDecorator), so 2D and print agree. Returns the fill
-  // rule: perforation punches hole circles via "evenodd".
+  // (geometry.js plateEdgeDecorator), so 2D and print agree. Perforation is
+  // handled by clipDecoratedPlate/strokeDecoratedPlate instead.
   function decoratedPlatePath(ctx) {
-    var body = doc.body, e = body.edge;
-    var per = window.platePerimeterMm(body);
+    var e = doc.body.edge;
+    var per = window.platePerimeterMm(doc.body);
     var L = per.length;
     var n = Math.max(3, Math.round(L / e.periodMm));
     var p = L / n;
-    ctx.beginPath();
-    if (e.style === "perforation") {
-      // nominal outline + punched circles at the repeat centers
-      var stepN = Math.min(1, L / 64);
-      for (var t = 0, i = 0; t < L; t += stepN, i++) {
-        var q = per.point(t);
-        if (i === 0) ctx.moveTo(mmX(q.x), mmY(q.y)); else ctx.lineTo(mmX(q.x), mmY(q.y));
-      }
-      ctx.closePath();
-      var r = (e.sizeMm / 2) * state.scale;
-      for (var k = 0; k < n; k++) {
-        var c = per.point(k * p);
-        ctx.moveTo(mmX(c.x) + r, mmY(c.y));
-        ctx.arc(mmX(c.x), mmY(c.y), r, 0, Math.PI * 2);
-      }
-      return "evenodd";
-    }
     var depth = e.style === "teeth"
       ? function (t) { var f = t / p - Math.floor(t / p); return e.sizeMm * (1 - Math.abs(2 * f - 1)); }
       : function (t) { return e.sizeMm * 0.5 * (1 + Math.cos(2 * Math.PI * t / p)); };
     var step = Math.min(p / 8, 1);
-    for (var t2 = 0, j = 0; t2 < L; t2 += step, j++) {
-      var q2 = per.point(t2);
-      var d = depth(t2);
-      var px = mmX(q2.x - q2.nx * d), py = mmY(q2.y - q2.ny * d);
+    ctx.beginPath();
+    for (var t = 0, j = 0; t < L; t += step, j++) {
+      var q = per.point(t);
+      var d = depth(t);
+      var px = mmX(q.x - q.nx * d), py = mmY(q.y - q.ny * d);
       if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
     }
     ctx.closePath();
-    return "nonzero";
+  }
+
+  // Nominal (undecorated) plate outline, sampled from the same perimeter.
+  function plateNominalPath(ctx, per) {
+    var L = per.length, step = Math.min(1, L / 64);
+    ctx.beginPath();
+    for (var t = 0, i = 0; t < L; t += step, i++) {
+      var q = per.point(t);
+      if (i === 0) ctx.moveTo(mmX(q.x), mmY(q.y)); else ctx.lineTo(mmX(q.x), mmY(q.y));
+    }
+    ctx.closePath();
+  }
+
+  // Perforation hole circles, appended to the current path (begin starts one).
+  function plateHolesPath(ctx, per, e, begin) {
+    var L = per.length, n = Math.max(3, Math.round(L / e.periodMm)), p = L / n;
+    var r = (e.sizeMm / 2) * state.scale;
+    if (begin) ctx.beginPath();
+    for (var k = 0; k < n; k++) {
+      var c = per.point(k * p);
+      ctx.moveTo(mmX(c.x) + r, mmY(c.y));
+      ctx.arc(mmX(c.x), mmY(c.y), r, 0, Math.PI * 2);
+    }
+  }
+
+  // Establish the decorated-plate clip (inside the caller's save/restore).
+  // Perforation must be "outline MINUS holes" — a single evenodd path would
+  // also include the OUTER half of each hole circle, painting content outside
+  // the plate. Intersecting a nonzero outline clip with a canvas-minus-holes
+  // evenodd clip kills those half-discs.
+  function clipDecoratedPlate(ctx) {
+    var e = doc.body.edge;
+    if (e.style === "perforation") {
+      var per = window.platePerimeterMm(doc.body);
+      plateNominalPath(ctx, per); ctx.clip();
+      ctx.beginPath(); ctx.rect(0, 0, cv.width, cv.height);
+      plateHolesPath(ctx, per, e, false);
+      ctx.clip("evenodd");
+      return;
+    }
+    decoratedPlatePath(ctx); ctx.clip();
+  }
+
+  // Stroke the decorated outline with the current stroke style. Perforation:
+  // outline segments outside the hole mouths + the inner half of each circle.
+  function strokeDecoratedPlate(ctx) {
+    var e = doc.body.edge;
+    if (e.style !== "perforation") { decoratedPlatePath(ctx); ctx.stroke(); return; }
+    var per = window.platePerimeterMm(doc.body);
+    ctx.save(); // outline, suppressed where a hole mouth opens
+    ctx.beginPath(); ctx.rect(0, 0, cv.width, cv.height);
+    plateHolesPath(ctx, per, e, false);
+    ctx.clip("evenodd");
+    plateNominalPath(ctx, per); ctx.stroke();
+    ctx.restore();
+    ctx.save(); // the bite arcs: circles clipped to the plate interior
+    plateNominalPath(ctx, per); ctx.clip();
+    plateHolesPath(ctx, per, e, true); ctx.stroke();
+    ctx.restore();
   }
 
   // Rounded-rect path inset by insetMm on all sides (Rand-Rahmen 2D preview).
@@ -880,13 +925,14 @@
       // Clip elements inside the body outline (decorated when a Zierkante is active).
       const deco = edgeActive();
       ctx.save();
-      if (deco) ctx.clip(decoratedPlatePath(ctx));
+      if (deco) clipDecoratedPlate(ctx);
       else { bodyPath(ctx); ctx.clip(); }
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
       ctx.restore();
       // Outline.
-      if (deco) decoratedPlatePath(ctx); else bodyPath(ctx);
-      ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1;
+      if (deco) strokeDecoratedPlate(ctx);
+      else { bodyPath(ctx); ctx.stroke(); }
       // Rand-Rahmen preview: stroke inset by widthMm/2 with lineWidth widthMm*s
       // (drawn over the content — "ring wins"; exact band comes from the engine).
       // With a Zierkante the ring is clipped to the decorated outline so its
@@ -894,7 +940,7 @@
       const frame = body.frame;
       if (frame && frame.widthMm > 0) {
         ctx.save();
-        if (deco) ctx.clip(decoratedPlatePath(ctx));
+        if (deco) clipDecoratedPlate(ctx);
         if (insetBodyPath(ctx, frame.widthMm / 2)) {
           ctx.strokeStyle = frame.color || "#000000";
           ctx.lineWidth = frame.widthMm * s;
@@ -909,13 +955,13 @@
       const decoC = edgeActive();
       // Clip to circle (decorated when a Zierkante is active).
       ctx.save();
-      if (decoC) ctx.clip(decoratedPlatePath(ctx));
+      if (decoC) clipDecoratedPlate(ctx);
       else { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip(); }
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
       ctx.restore();
-      if (decoC) decoratedPlatePath(ctx);
-      else { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); }
-      ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1;
+      if (decoC) strokeDecoratedPlate(ctx);
+      else { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); }
       // Rand-Rahmen preview: ring stroke at r - widthMm/2 ("ring wins" over content).
       // Clipped to the decorated outline when a Zierkante is active (see rect).
       const frame = body.frame;
@@ -923,7 +969,7 @@
         const fr = r - (frame.widthMm / 2) * s;
         if (fr > 0) {
           ctx.save();
-          if (decoC) ctx.clip(decoratedPlatePath(ctx));
+          if (decoC) clipDecoratedPlate(ctx);
           ctx.beginPath(); ctx.arc(cx, cy, fr, 0, Math.PI * 2);
           ctx.strokeStyle = frame.color || "#000000";
           ctx.lineWidth = frame.widthMm * s;
@@ -3269,12 +3315,20 @@
     function setScatterMode(mode) {
       if (!scatter || scatter.mode === mode) return;
       scatter.mode = mode;
+      var rMin = document.getElementById("scRotMin"), rMax = document.getElementById("scRotMax");
       if (mode === "path") {
-        // Tangent alignment beats full random rotation: drop the 0–360° default
-        // jitter once, so the copies actually follow the drawn path.
-        var rMin = document.getElementById("scRotMin"), rMax = document.getElementById("scRotMax");
-        if (rMin && rMax && parseFloat(rMin.value) === 0 && parseFloat(rMax.value) === 360) { rMax.value = 0; }
+        // Tangent alignment beats full random rotation: park the rotation range
+        // while in path mode (restored on switching back to Bereich), so the
+        // copies actually follow the drawn path.
+        if (rMin && rMax) {
+          scatter.rotBackup = { min: rMin.value, max: rMax.value };
+          if (parseFloat(rMin.value) === 0 && parseFloat(rMax.value) === 360) rMax.value = 0;
+        }
         scatterClearPreview();
+      } else if (scatter.rotBackup && rMin && rMax) {
+        rMin.value = scatter.rotBackup.min;
+        rMax.value = scatter.rotBackup.max;
+        scatter.rotBackup = null;
       }
       scatterSyncMode();
       scatterGenerate();
