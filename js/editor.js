@@ -756,7 +756,8 @@
       ctx.fillStyle = el.color || "#ffffff";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = `${el.fontWeight || "normal"} ${Math.max(1, Math.round(h))}px ${el.fontFamily || "system-ui"}`;
-      ctx.fillText(el.text || "", 0, 0);
+      if (el.arcDeg) window.drawArcText(ctx, el.text || "", el.arcDeg, Math.max(1, Math.round(h)));
+      else ctx.fillText(el.text || "", 0, 0);
     } else if (el.type === "shape") {
       ctx.fillStyle = el.color || "#000000";
       ctx.beginPath();
@@ -2582,6 +2583,10 @@
     // Font controls (Schriftart + Fett + Upload): text elements only.
     var advFontField = document.getElementById("advFontField");
     if (advFontField) advFontField.hidden = !isText;
+    var advArcField = document.getElementById("advArcField");
+    if (advArcField) advArcField.hidden = !isText;
+    var advArcNode = document.getElementById("advArc");
+    if (advArcNode) advArcNode.value = isText ? (el.arcDeg || 0) : 0;
     if (isText) {
       populateFontSelect(document.getElementById("advFontFamily"), el.fontFamily || "system-ui");
       var boldNode = document.getElementById("advFontBold");
@@ -2771,6 +2776,13 @@
   bindElementField("advFontBold", "change", function (el, node) {
     if (el.type !== "text") return false;
     el.fontWeight = node.checked ? "bold" : "normal";
+  });
+
+  // -- Arc text (Bogen°, text elements): 0 = straight, ± bends up/down --
+  bindElementField("advArc", "input", function (el, node) {
+    if (el.type !== "text") return false;
+    var v = parseFloat(node.value);
+    el.arcDeg = isNaN(v) ? 0 : Math.max(-350, Math.min(350, v));
   });
 
   // -- Shape kind (Rechteck / Kreis, shape elements) --

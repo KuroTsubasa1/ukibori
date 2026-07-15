@@ -157,7 +157,7 @@ function migrateElement(el, doc, layerHmm) {
     cutout: !!el.cutout, color: el.color, groupId: el.groupId != null ? el.groupId : null, depth,
   };
   if (el.type === "image") { out.src = el.src; out._img = null; }
-  if (el.type === "text") { out.text = el.text; out.fontFamily = el.fontFamily; out.fontWeight = el.fontWeight; }
+  if (el.type === "text") { out.text = el.text; out.fontFamily = el.fontFamily; out.fontWeight = el.fontWeight; out.arcDeg = el.arcDeg != null ? el.arcDeg : 0; }
   if (el.type === "qr") { out.qrData = el.qrData; out.qrEcLevel = el.qrEcLevel; }
   return out;
 }
@@ -188,6 +188,7 @@ function migrateProject(doc) {
         el.depth.colorLayerStyle = el.depth.flush ? "bands" : "stepped";
       }
       if (el.type === "shape" && el.shape == null) el.shape = "rect";
+      if (el.type === "text" && el.arcDeg == null) el.arcDeg = 0;
       if (el.groupId === undefined) el.groupId = null;
     }
     return doc;
@@ -235,7 +236,7 @@ function makeElementV2(type, props) {
     depth: defaultDepth(type),
   }, props);
   if (type === "image") { if (e.src == null) e.src = ""; e._img = e._img || null; }
-  if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; }
+  if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; if (e.arcDeg == null) e.arcDeg = 0; }
   if (type === "shape") { if (e.shape == null) e.shape = "rect"; } // 'rect' | 'circle' (ellipse when wMm ≠ hMm)
   return e;
 }

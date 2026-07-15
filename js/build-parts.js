@@ -149,7 +149,8 @@
       ctx.fillStyle = el.color;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = `${el.fontWeight} ${Math.max(1, Math.round(h))}px ${el.fontFamily}`;
-      ctx.fillText(el.text, 0, 0);
+      if (el.arcDeg) window.drawArcText(ctx, el.text, el.arcDeg, Math.max(1, Math.round(h)));
+      else ctx.fillText(el.text, 0, 0);
     } else if (el.type === "shape") {
       ctx.fillStyle = el.color;
       ctx.beginPath();

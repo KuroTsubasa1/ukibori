@@ -236,6 +236,10 @@
               <button type="button" id="fontUploadBtn" class="btn" title="Eigene Schrift laden (.ttf/.otf/.woff)">Schrift laden…</button>
             </div>
           </div>
+            <div class="adv-field" id="advArcField" hidden>
+            <label for="advArc" class="adv-label">Bogen°</label>
+            <input type="number" id="advArc" class="text-input" min="-350" max="350" step="5" value="0" title="Text auf Kreisbogen: 0 = gerade, positiv = Bogen nach oben, negativ = nach unten">
+          </div>
             <div class="adv-field" id="advShapeField" hidden>
             <label class="adv-label">Form</label>
             <div id="advShapeSeg" class="seg-group seg-sm" style="width:100%">
@@ -407,6 +411,7 @@
 <script src="js/geometry.js"></script>
 <script src="js/trace.js"></script>
 <script src="js/sources.js"></script>
+<script src="js/arc-text.js"></script>
 <script src="js/bg-removal.js"></script>
 <script src="js/bookmark-model.js"></script>
 <script src="js/example-project.js"></script>
