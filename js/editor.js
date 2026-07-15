@@ -29,6 +29,7 @@
   var _snapLoaded = (function () { try { var v = JSON.parse(localStorage.getItem(SNAP_KEY)); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; } }());
   const state = {
     selectedId: null, selectionIds: [], scale: 1, ox: 0, oy: 0, viewX0: 0, viewY0: 0, marginPx: 48,
+    zoom: 1, // 2D workbench zoom factor: 1 = fit, up to 16 (view state, never saved)
     snap: {
       plate:    _snapLoaded.plate    !== undefined ? !!_snapLoaded.plate    : _snapDefault.plate,
       elements: _snapLoaded.elements !== undefined ? !!_snapLoaded.elements : _snapDefault.elements,
@@ -198,9 +199,6 @@
     // transform handles never clip. The engine/export keep using docDomain unchanged.
     var domain = (window.viewportDomain ? window.viewportDomain(doc)
       : (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm }));
-    state.viewX0 = domain.x0;
-    state.viewY0 = domain.y0;
-    state.marginPx = MARGIN_PX;
     // Subtract 2× margin from each dimension so the plate fits within the usable area.
     var uw = availW - 2 * MARGIN_PX;
     var uh = availH - 2 * MARGIN_PX;
@@ -209,9 +207,67 @@
     // produce Infinity → NaN canvas dimensions.
     const dw = Math.max(1e-3, domain.wMm), dh = Math.max(1e-3, domain.hMm);
     const s = Math.max(0.2, Math.min(uw / dw, uh / dh));
-    state.scale = s;
-    cv.width = Math.round(domain.wMm * s + 2 * MARGIN_PX);
-    cv.height = Math.round(domain.hMm * s + 2 * MARGIN_PX);
+    if (!(state.zoom > 1.0001)) {
+      // Fit view — byte-identical to the pre-zoom behavior.
+      state.zoom = 1;
+      state.viewX0 = domain.x0;
+      state.viewY0 = domain.y0;
+      state.marginPx = MARGIN_PX;
+      state.scale = s;
+      cv.width = Math.round(domain.wMm * s + 2 * MARGIN_PX);
+      cv.height = Math.round(domain.hMm * s + 2 * MARGIN_PX);
+      updateZoomChip();
+      return;
+    }
+    // Zoomed: the canvas caps at the pane, the view keeps its center across
+    // re-fits (resize, plate change, endDrag) and clamps onto the domain.
+    const oldScale = state.scale || s;
+    const cxMm = state.viewX0 + (cv.width - 2 * state.marginPx) / (2 * oldScale);
+    const cyMm = state.viewY0 + (cv.height - 2 * state.marginPx) / (2 * oldScale);
+    state.marginPx = MARGIN_PX;
+    state.scale = s * state.zoom;
+    cv.width = Math.round(Math.min(availW, domain.wMm * state.scale + 2 * MARGIN_PX));
+    cv.height = Math.round(Math.min(availH, domain.hMm * state.scale + 2 * MARGIN_PX));
+    const visW = (cv.width - 2 * MARGIN_PX) / state.scale;
+    const visH = (cv.height - 2 * MARGIN_PX) / state.scale;
+    const o = window.clampViewOrigin(
+      { x0: cxMm - visW / 2, y0: cyMm - visH / 2 }, domain, visW, visH);
+    state.viewX0 = o.x0;
+    state.viewY0 = o.y0;
+    updateZoomChip();
+  }
+
+  // ---- 2D zoom & pan ----
+  function viewDomain() {
+    return (window.viewportDomain ? window.viewportDomain(doc)
+      : (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm }));
+  }
+
+  function updateZoomChip() {
+    var chip = document.getElementById("zoom2dChip");
+    if (!chip) return;
+    chip.hidden = !(state.zoom > 1.0001);
+    if (!chip.hidden) chip.textContent = Math.round(state.zoom * 100) + " %";
+  }
+
+  // Set the workbench zoom; ax/ay (canvas-buffer px) anchor the point under
+  // the cursor, otherwise the view center is kept (fitScale does that).
+  function setZoom2d(z, ax, ay) {
+    z = Math.max(1, Math.min(16, z));
+    if (Math.abs(z - state.zoom) < 1e-6) return;
+    const oldScale = state.scale;
+    const oldOrigin = { x0: state.viewX0, y0: state.viewY0 };
+    state.zoom = z;
+    fitScale();
+    if (ax != null && state.zoom > 1.0001) {
+      const o = window.zoomAnchoredOrigin(oldOrigin, ax, ay, oldScale, state.scale, MARGIN_PX);
+      const visW = (cv.width - 2 * MARGIN_PX) / state.scale;
+      const visH = (cv.height - 2 * MARGIN_PX) / state.scale;
+      const c = window.clampViewOrigin(o, viewDomain(), visW, visH);
+      state.viewX0 = c.x0;
+      state.viewY0 = c.y0;
+    }
+    render2D();
   }
 
   // ---- Plate paths ----
@@ -1245,11 +1301,51 @@
 
   // ---- Pointer handlers (move / scale / rotate) ----
   let drag = null;
+  var spacePan = false; // Space held → next canvas drag pans the view
+
+  // Mouse wheel zooms the workbench toward the cursor (same convention as the
+  // 3D stage); ctrl+wheel is the trackpad pinch (finer deltas, larger factor).
+  cv.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    const rect = cv.getBoundingClientRect();
+    const scaleC = cv.width / rect.width;
+    const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+    const dy = e.deltaY * (e.deltaMode === 1 ? 33 : 1); // line-mode wheels (Firefox)
+    const factor = Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0015));
+    setZoom2d(state.zoom * factor, px, py);
+  }, { passive: false });
+
+  window.addEventListener("keydown", function (e) {
+    if (e.key !== " " || e.repeat) return;
+    var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || (t && t.isContentEditable)) return;
+    spacePan = true;
+    cv.style.cursor = "grab";
+    e.preventDefault(); // keep the page from scrolling while the canvas has focus
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.key !== " ") return;
+    spacePan = false;
+    if (!drag) cv.style.cursor = "";
+  });
+
+  (function () {
+    var chip = document.getElementById("zoom2dChip");
+    if (chip) chip.addEventListener("click", function () { setZoom2d(1); });
+  }());
 
   cv.addEventListener("pointerdown", function (e) {
     const rect = cv.getBoundingClientRect();
     const scaleC = cv.width / rect.width;
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+    // Pan: middle button always, left button while Space is held.
+    if (e.button === 1 || (e.button === 0 && spacePan)) {
+      drag = { handle: "pan", px, py, ox: state.viewX0, oy: state.viewY0 };
+      cv.setPointerCapture(e.pointerId);
+      cv.style.cursor = "grabbing";
+      e.preventDefault(); // suppress middle-click autoscroll
+      return;
+    }
     // Scatter sub-mode: while the panel is open, a canvas drag defines the placement region.
     if (scatter) {
       if (scatter.mode === "path") {
@@ -1433,6 +1529,17 @@
       scheduleRebuild3D();
       return;
     }
+    if (drag.handle === "pan") {
+      const visW = (cv.width - 2 * state.marginPx) / s;
+      const visH = (cv.height - 2 * state.marginPx) / s;
+      const o = window.clampViewOrigin(
+        { x0: drag.ox - (px - drag.px) / s, y0: drag.oy - (py - drag.py) / s },
+        viewDomain(), visW, visH);
+      state.viewX0 = o.x0;
+      state.viewY0 = o.y0;
+      render2D();
+      return;
+    }
     if (drag.handle === "scatterPath") {
       // freehand path: sample a point every few pixels
       const last = drag.ptsPx[drag.ptsPx.length - 1];
@@ -1505,6 +1612,13 @@
 
   function endDrag() {
     if (!drag) return;
+    if (drag.handle === "pan") {
+      // Pure view change: no re-fit, no 3D rebuild, no inspector refresh.
+      drag = null;
+      cv.style.cursor = spacePan ? "grab" : "";
+      render2D();
+      return;
+    }
     var wasScatter = drag.handle === "scatterRegion";
     var pathMm = drag.handle === "scatterPath" ? drag.pathMm : null;
     drag = null;

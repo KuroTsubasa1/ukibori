@@ -232,7 +232,7 @@
         <button type="button" id="heroExampleBtn" title="Lädt die Ukibori-Münze als Beispiel-Projekt">Beispiel öffnen: die Ukibori-Münze</button>
       </div>
     </div>
-    <div class="pane pane-2d"><canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf. Beim Skalieren an den Ecken hält Umschalt das Seitenverhältnis."></canvas></div>
+    <div class="pane pane-2d"><canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf. Beim Skalieren an den Ecken hält Umschalt das Seitenverhältnis. Mausrad zoomt, mittlere Taste oder Leertaste und Ziehen schwenkt."></canvas><button type="button" id="zoom2dChip" hidden title="Zoom zurücksetzen — Ansicht einpassen">100 %</button></div>
     <div class="pane pane-3d"><canvas id="preview3dCanvas" width="800" height="1000" hidden></canvas></div>
   </section>
   <div id="rightCol">
@@ -437,6 +437,7 @@
 <script src="js/bookmark-model.js"></script>
 <script src="js/example-project.js"></script>
 <script src="js/geom-util.js"></script>
+<script src="js/view2d.js"></script>
 <script src="js/selection-ops.js"></script>
 <script src="js/transform-ops.js"></script>
 <script src="js/align-ops.js"></script>
