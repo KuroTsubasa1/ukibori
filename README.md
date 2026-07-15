@@ -203,7 +203,7 @@ dialog sit in the topbar.
 | <kbd>⇧</kbd> while corner-scaling | Keep aspect ratio |
 | <kbd>Esc</kbd> | Clear the selection |
 
-**2D stage:** drag over empty canvas = marquee selection · <kbd>Shift</kbd>+click = add/remove an element.
+**2D stage:** drag over empty canvas = marquee selection · <kbd>Shift</kbd>+click = add/remove an element · mouse wheel = zoom toward the cursor · middle button or <kbd>Space</kbd>+drag = pan · the % chip resets to fit.
 
 **3D stage:** drag = rotate · right/middle button or <kbd>⇧</kbd>+drag = pan · mouse wheel = zoom.
 

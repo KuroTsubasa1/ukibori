@@ -149,14 +149,20 @@
       ctx.fillStyle = el.color;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = `${el.fontWeight} ${Math.max(1, Math.round(h))}px ${el.fontFamily}`;
-      if (el.arcDeg) window.drawArcText(ctx, el.text, el.arcDeg, Math.max(1, Math.round(h)));
+      if (el.textPath && el.textPath.length > 1 && window.drawPathText) {
+        window.drawPathText(ctx, el.text,
+          el.textPath.map(function (p) { return { x: p.x * sx, y: p.y * sy }; }),
+          Math.max(1, Math.round(h)));
+      } else if (el.arcDeg) window.drawArcText(ctx, el.text, el.arcDeg, Math.max(1, Math.round(h)));
       else ctx.fillText(el.text, 0, 0);
     } else if (el.type === "shape") {
       ctx.fillStyle = el.color;
-      ctx.beginPath();
-      if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
-      else ctx.rect(-w / 2, -h / 2, w, h);
-      ctx.fill();
+      if (!(window.drawShapeEdge && window.drawShapeEdge(ctx, el, w, h))) {
+        ctx.beginPath();
+        if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+        else ctx.rect(-w / 2, -h / 2, w, h);
+        ctx.fill();
+      }
     } else if (el._img) {
       ctx.drawImage(el._img, -w / 2, -h / 2, w, h);
     }
@@ -434,11 +440,14 @@
   // band: optional Rand-Rahmen mask (see __frameBand). Ring wins: band cells emit
   // no color floors/recesses — they are treated as full-height base instead (the
   // "rand" part sits on top of them). band == null => byte-identical to pre-band code.
-  function __engravedBaseAndFloors(doc, comp, cols, rows, pitch, footprint, band) {
+  function __engravedBaseAndFloors(doc, comp, cols, rows, pitch, footprint, band, grooveBand) {
     const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
     const baseHex = doc.body.baseColor.toUpperCase();
     const idx = (c, r) => r * cols + c;
     const inBand = band ? ((i) => band[i] === 1) : (() => false);
+    // Zierlinie (vertieft): groove depth carved into the plate top, clamped so a
+    // solid floor always remains. 0 = off → every emission below is unchanged.
+    const inGroove = grooveBand ? ((i) => grooveBand[i] === 1) : (() => false);
     const colorParts = [], baseParts = [];
     const tracedFacets = (member, thickness, z0) => window.orientOutward(
       window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
@@ -446,6 +455,9 @@
     const { floor, minBase, maxRecess } = __engravedBudget(doc.body);
     const recessOf = (d) => Math.max(0, Math.min(d, maxRecess));
     const baseUnder = (d) => T - recessOf(d) - floor;
+    const groove = grooveBand
+      ? Math.min(doc.body.line.depthMm, Math.max(0, T - minBase - layerH))
+      : 0;
 
     const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
 
@@ -658,12 +670,32 @@
       // cap in frame.color still sits on top of it, above T).
       if (interiorTop - minBase > 1e-6) baseAdd(surroundMember, interiorTop - minBase, minBase); // base below the bands
       // Rank k (1=darkest .. N=lightest) occupies [T-k*bandThick, T-(k-1)*bandThick].
+      // A Zierlinie groove carves the portion above T-groove out of the affected bands.
       for (let k = N; k >= 1; k--) {
         const zBot = T - k * bandThick;
         if (bandThick <= 1e-6) continue;
-        const facets = tracedFacets(surroundMember, bandThick, zBot);
-        if (facets.length) baseParts.push({ name: "grundplatte-band-" + k, color: window.hexToRgb(bandHexes[k - 1]), facets });
+        const zTop = zBot + bandThick;
+        const bandName = "grundplatte-band-" + k, bandColor = window.hexToRgb(bandHexes[k - 1]);
+        if (groove > 1e-6 && zTop > T - groove + 1e-9) {
+          const zCut = Math.max(zBot, T - groove);
+          if (zCut - zBot > 1e-6) {
+            const lower = tracedFacets(surroundMember, zCut - zBot, zBot);
+            if (lower.length) baseParts.push({ name: bandName, color: bandColor, facets: lower });
+          }
+          if (zTop - zCut > 1e-6) {
+            const upper = tracedFacets((c, r) => surroundMember(c, r) && !inGroove(idx(c, r)), zTop - zCut, zCut);
+            if (upper.length) baseParts.push({ name: bandName, color: bandColor, facets: upper });
+          }
+        } else {
+          const facets = tracedFacets(surroundMember, bandThick, zBot);
+          if (facets.length) baseParts.push({ name: bandName, color: bandColor, facets });
+        }
       }
+    } else if (groove > 1e-6) {
+      // Zierlinie (vertieft) on the plain plate: full slab up to the groove
+      // floor, top slab minus the groove band.
+      if (T - groove - minBase > 1e-6) baseAdd(surroundMember, T - groove - minBase, minBase);
+      baseAdd((c, r) => surroundMember(c, r) && !inGroove(idx(c, r)), groove, T - groove);
     } else {
       baseAdd(surroundMember, T - minBase, minBase);
     }
@@ -774,6 +806,12 @@
     // band === null => frame off => all content builders byte-identical (parity).
     const band = __frameBand(doc, grid, footprint, comp, domainExpanded);
 
+    // Zierlinie band (rect/circle only): footprint cells whose decorated-SDF
+    // distance to the plate edge falls into one of the line rings. Follows the
+    // Zierkante automatically (bodySdfMm is the decorated SDF). null = off.
+    const lineBand = __zierlinieBand(doc, grid, footprint, comp, band, domainExpanded);
+    const lineMode = lineBand ? doc.body.line.mode : "none";
+
     const isEngravedEi = (ei) => {
       const d = doc.elements[ei] && doc.elements[ei].depth;
       return !!(d && d.direction === "engraved" && d.mode !== "heightmap");
@@ -793,12 +831,59 @@
       }
     }
     return [
-      ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint, band),
+      ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint, band,
+        lineMode === "engraved" ? lineBand : null),
       ...buildRaisedParts(doc, footprint, comp, grid, band),
       ...buildHeightmapParts(doc, footprint, grid, band),
       ...buildFrameParts(doc, band, cols, rows, pitch),
+      ...buildZierlinieParts(doc, lineMode === "raised" ? lineBand : null, cols, rows, pitch),
       ...buildMountRingParts(doc),
     ];
+  }
+
+  // Zierlinie band mask (Uint8Array, 1 = line cell), or null when off. Cells
+  // whose decorated-SDF distance d lies in [inset_k, inset_k + widthMm] for one
+  // of the count lines (gap = 1.5 × width). Requires the analytic rect/circle
+  // SDF; excluded: cutouts, mount hole (footprint <= 0) and the Rand-Rahmen
+  // band (the line never runs under or onto the frame ring).
+  function __zierlinieBand(doc, grid, footprint, comp, frameBand, domainExpanded) {
+    const l = doc.body.line;
+    if (!l || !l.mode || l.mode === "none") return null;
+    if (!(l.widthMm > 0) || !(l.depthMm > 0) || !(l.insetMm >= 0)) return null;
+    if (doc.body.shape !== "rect" && doc.body.shape !== "circle") return null;
+    const { cols, rows, pitch } = grid;
+    const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
+    const sdf = window.bodySdfMm(doc.body);
+    const nLines = Math.max(1, Math.min(3, Math.round(l.count || 1)));
+    const gap = l.widthMm * 1.5;
+    const band = new Uint8Array(cols * rows);
+    let any = false;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const i = r * cols + c;
+      if (comp && comp.cutout[i]) continue;
+      if (frameBand && frameBand[i]) continue;
+      if (!(footprint(c, r) > 0)) continue;
+      const x = domainExpanded ? grid.x0 + (c + 0.5) * pitch : (c + 0.5) / sx;
+      const y = domainExpanded ? grid.y0 + (r + 0.5) * pitch : (r + 0.5) / sy;
+      const d = sdf(x, y);
+      for (let k = 0; k < nLines; k++) {
+        const lo = l.insetMm + k * (l.widthMm + gap);
+        if (d >= lo && d <= lo + l.widthMm) { band[i] = 1; any = true; break; }
+      }
+    }
+    return any ? band : null;
+  }
+
+  // The raised Zierlinie: the band extruded from the plate top by depthMm in
+  // line.color — a slim inset sibling of the Rand-Rahmen.
+  function buildZierlinieParts(doc, band, cols, rows, pitch) {
+    if (!band) return [];
+    const l = doc.body.line;
+    const facets = window.orientOutward(window.traceMaskToFacets(
+      (c, r) => band[r * cols + c] === 1, cols, rows, pitch, l.depthMm, doc.body.thicknessMm));
+    return facets.length
+      ? [{ name: "zierlinie", color: window.hexToRgb((l.color || "#000000").toUpperCase()), facets }]
+      : [];
   }
 
   // Compute the Rand-Rahmen band mask (Uint8Array[cols*rows], 1 = band cell), or

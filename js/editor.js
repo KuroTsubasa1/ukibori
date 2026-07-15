@@ -29,6 +29,7 @@
   var _snapLoaded = (function () { try { var v = JSON.parse(localStorage.getItem(SNAP_KEY)); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; } }());
   const state = {
     selectedId: null, selectionIds: [], scale: 1, ox: 0, oy: 0, viewX0: 0, viewY0: 0, marginPx: 48,
+    zoom: 1, // 2D workbench zoom factor: 1 = fit, up to 16 (view state, never saved)
     snap: {
       plate:    _snapLoaded.plate    !== undefined ? !!_snapLoaded.plate    : _snapDefault.plate,
       elements: _snapLoaded.elements !== undefined ? !!_snapLoaded.elements : _snapDefault.elements,
@@ -198,9 +199,6 @@
     // transform handles never clip. The engine/export keep using docDomain unchanged.
     var domain = (window.viewportDomain ? window.viewportDomain(doc)
       : (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm }));
-    state.viewX0 = domain.x0;
-    state.viewY0 = domain.y0;
-    state.marginPx = MARGIN_PX;
     // Subtract 2× margin from each dimension so the plate fits within the usable area.
     var uw = availW - 2 * MARGIN_PX;
     var uh = availH - 2 * MARGIN_PX;
@@ -209,9 +207,67 @@
     // produce Infinity → NaN canvas dimensions.
     const dw = Math.max(1e-3, domain.wMm), dh = Math.max(1e-3, domain.hMm);
     const s = Math.max(0.2, Math.min(uw / dw, uh / dh));
-    state.scale = s;
-    cv.width = Math.round(domain.wMm * s + 2 * MARGIN_PX);
-    cv.height = Math.round(domain.hMm * s + 2 * MARGIN_PX);
+    if (!(state.zoom > 1.0001)) {
+      // Fit view — byte-identical to the pre-zoom behavior.
+      state.zoom = 1;
+      state.viewX0 = domain.x0;
+      state.viewY0 = domain.y0;
+      state.marginPx = MARGIN_PX;
+      state.scale = s;
+      cv.width = Math.round(domain.wMm * s + 2 * MARGIN_PX);
+      cv.height = Math.round(domain.hMm * s + 2 * MARGIN_PX);
+      updateZoomChip();
+      return;
+    }
+    // Zoomed: the canvas caps at the pane, the view keeps its center across
+    // re-fits (resize, plate change, endDrag) and clamps onto the domain.
+    const oldScale = state.scale || s;
+    const cxMm = state.viewX0 + (cv.width - 2 * state.marginPx) / (2 * oldScale);
+    const cyMm = state.viewY0 + (cv.height - 2 * state.marginPx) / (2 * oldScale);
+    state.marginPx = MARGIN_PX;
+    state.scale = s * state.zoom;
+    cv.width = Math.round(Math.min(availW, domain.wMm * state.scale + 2 * MARGIN_PX));
+    cv.height = Math.round(Math.min(availH, domain.hMm * state.scale + 2 * MARGIN_PX));
+    const visW = (cv.width - 2 * MARGIN_PX) / state.scale;
+    const visH = (cv.height - 2 * MARGIN_PX) / state.scale;
+    const o = window.clampViewOrigin(
+      { x0: cxMm - visW / 2, y0: cyMm - visH / 2 }, domain, visW, visH);
+    state.viewX0 = o.x0;
+    state.viewY0 = o.y0;
+    updateZoomChip();
+  }
+
+  // ---- 2D zoom & pan ----
+  function viewDomain() {
+    return (window.viewportDomain ? window.viewportDomain(doc)
+      : (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm }));
+  }
+
+  function updateZoomChip() {
+    var chip = document.getElementById("zoom2dChip");
+    if (!chip) return;
+    chip.hidden = !(state.zoom > 1.0001);
+    if (!chip.hidden) chip.textContent = Math.round(state.zoom * 100) + " %";
+  }
+
+  // Set the workbench zoom; ax/ay (canvas-buffer px) anchor the point under
+  // the cursor, otherwise the view center is kept (fitScale does that).
+  function setZoom2d(z, ax, ay) {
+    z = Math.max(1, Math.min(16, z));
+    if (Math.abs(z - state.zoom) < 1e-6) return;
+    const oldScale = state.scale;
+    const oldOrigin = { x0: state.viewX0, y0: state.viewY0 };
+    state.zoom = z;
+    fitScale();
+    if (ax != null && state.zoom > 1.0001) {
+      const o = window.zoomAnchoredOrigin(oldOrigin, ax, ay, oldScale, state.scale, MARGIN_PX);
+      const visW = (cv.width - 2 * MARGIN_PX) / state.scale;
+      const visH = (cv.height - 2 * MARGIN_PX) / state.scale;
+      const c = window.clampViewOrigin(o, viewDomain(), visW, visH);
+      state.viewX0 = c.x0;
+      state.viewY0 = c.y0;
+    }
+    render2D();
   }
 
   // ---- Plate paths ----
@@ -321,6 +377,53 @@
     ctx.save(); // the bite arcs: circles clipped to the plate interior
     plateNominalPath(ctx, per); ctx.clip();
     plateHolesPath(ctx, per, e, true); ctx.stroke();
+    ctx.restore();
+  }
+
+  // Zierlinie 2D preview: stroke the contour-following line(s). The engine
+  // band mask is authoritative; on decorated edges this offsets the decorated
+  // outline along the nominal normals (a close preview approximation).
+  function strokeZierlinie(ctx, s) {
+    var l = doc.body.line;
+    var nLines = Math.max(1, Math.min(3, Math.round(l.count || 1)));
+    var gap = l.widthMm * 1.5;
+    ctx.save();
+    ctx.strokeStyle = l.mode === "raised" ? (l.color || "#000000") : "#3a3a44";
+    ctx.lineWidth = Math.max(1, l.widthMm * s);
+    if (l.mode === "engraved") ctx.globalAlpha = 0.55; // a groove reads lighter than ink
+    var per = edgeActive() ? window.platePerimeterMm(doc.body) : null;
+    var depthFn = function () { return 0; };
+    if (per) {
+      var e = doc.body.edge;
+      if (e.style === "wave" || e.style === "teeth") {
+        var deco = window.plateEdgeDecorator(e, per.length);
+        if (deco) depthFn = function (t) { return -deco(0, t); };
+      }
+    }
+    for (var k = 0; k < nLines; k++) {
+      var insetK = l.insetMm + k * (l.widthMm + gap) + l.widthMm / 2;
+      if (per) {
+        var L = per.length, step = Math.min(1, L / 128);
+        ctx.beginPath();
+        for (var t = 0, j = 0; t < L; t += step, j++) {
+          var q = per.point(t);
+          var off = insetK + depthFn(t);
+          var X = mmX(q.x - q.nx * off), Y = mmY(q.y - q.ny * off);
+          if (j) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      } else if (doc.body.shape === "circle") {
+        var r0 = Math.min(doc.body.widthMm, doc.body.heightMm) / 2 - insetK;
+        if (r0 * s > 1) {
+          ctx.beginPath();
+          ctx.arc(mmX(doc.body.widthMm / 2), mmY(doc.body.heightMm / 2), r0 * s, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      } else if (insetBodyPath(ctx, insetK)) {
+        ctx.stroke();
+      }
+    }
     ctx.restore();
   }
 
@@ -849,14 +952,20 @@
       ctx.fillStyle = el.color || "#ffffff";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = `${el.fontWeight || "normal"} ${Math.max(1, Math.round(h))}px ${el.fontFamily || "system-ui"}`;
-      if (el.arcDeg) window.drawArcText(ctx, el.text || "", el.arcDeg, Math.max(1, Math.round(h)));
+      if (el.textPath && el.textPath.length > 1 && window.drawPathText) {
+        window.drawPathText(ctx, el.text || "",
+          el.textPath.map(function (p) { return { x: p.x * s, y: p.y * s }; }),
+          Math.max(1, Math.round(h)));
+      } else if (el.arcDeg) window.drawArcText(ctx, el.text || "", el.arcDeg, Math.max(1, Math.round(h)));
       else ctx.fillText(el.text || "", 0, 0);
     } else if (el.type === "shape") {
       ctx.fillStyle = el.color || "#000000";
-      ctx.beginPath();
-      if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
-      else ctx.rect(-w / 2, -h / 2, w, h);
-      ctx.fill();
+      if (!(window.drawShapeEdge && window.drawShapeEdge(ctx, el, w, h))) {
+        ctx.beginPath();
+        if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+        else ctx.rect(-w / 2, -h / 2, w, h);
+        ctx.fill();
+      }
     } else if (el.type === "image") {
       if (el._img) {
         // Use processed display canvas (threshold/invert/reduce applied) so 2D == print.
@@ -1004,6 +1113,12 @@
       }
     }
 
+    // Zierlinie preview (rect/circle plates only — mirrors the engine's scope).
+    if ((shape === "rect" || shape === "circle") && doc.body.line &&
+        doc.body.line.mode !== "none" && doc.body.line.widthMm > 0) {
+      strokeZierlinie(ctx, s);
+    }
+
     // Mount marker: visible draggable circle + crosshair.
     const mount = doc.mount;
     if (mount && mount.type !== "none") {
@@ -1058,7 +1173,7 @@
     }
 
     // Scatter path overlay: the stroke being drawn (px) or the stored path (mm→px).
-    var scPathPts = (drag && drag.handle === "scatterPath" && drag.ptsPx && drag.ptsPx.length > 1) ? drag.ptsPx
+    var scPathPts = (drag && (drag.handle === "scatterPath" || drag.handle === "textPath") && drag.ptsPx && drag.ptsPx.length > 1) ? drag.ptsPx
       : (scatter && scatter.mode === "path" && scatter.path && scatter.path.length > 1 && !(drag && drag.handle === "scatterPath"))
         ? scatter.path.map(function (p) { return { x: mmX(p.x), y: mmY(p.y) }; })
         : null;
@@ -1245,11 +1360,60 @@
 
   // ---- Pointer handlers (move / scale / rotate) ----
   let drag = null;
+  var spacePan = false; // Space held → next canvas drag pans the view
+  var textPathDraw = null; // text-element id waiting for a Pfadtext drag
+
+  // Mouse wheel zooms the workbench toward the cursor (same convention as the
+  // 3D stage); ctrl+wheel is the trackpad pinch (finer deltas, larger factor).
+  cv.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    const rect = cv.getBoundingClientRect();
+    const scaleC = cv.width / rect.width;
+    const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+    const dy = e.deltaY * (e.deltaMode === 1 ? 33 : 1); // line-mode wheels (Firefox)
+    const factor = Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0015));
+    setZoom2d(state.zoom * factor, px, py);
+  }, { passive: false });
+
+  window.addEventListener("keydown", function (e) {
+    if (e.key !== " " || e.repeat) return;
+    var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || (t && t.isContentEditable)) return;
+    spacePan = true;
+    cv.style.cursor = "grab";
+    e.preventDefault(); // keep the page from scrolling while the canvas has focus
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.key !== " ") return;
+    spacePan = false;
+    if (!drag) cv.style.cursor = "";
+  });
+
+  (function () {
+    var chip = document.getElementById("zoom2dChip");
+    if (chip) chip.addEventListener("click", function () { setZoom2d(1); });
+  }());
 
   cv.addEventListener("pointerdown", function (e) {
     const rect = cv.getBoundingClientRect();
     const scaleC = cv.width / rect.width;
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+    // Pan: middle button always, left button while Space is held.
+    if (e.button === 1 || (e.button === 0 && spacePan)) {
+      drag = { handle: "pan", px, py, ox: state.viewX0, oy: state.viewY0 };
+      cv.setPointerCapture(e.pointerId);
+      cv.style.cursor = "grabbing";
+      e.preventDefault(); // suppress middle-click autoscroll
+      return;
+    }
+    // Pfadtext: the next canvas drag records the path for the waiting text element.
+    if (textPathDraw) {
+      const toMmT = function (p, v0) { return (p - state.marginPx) / state.scale + v0; };
+      drag = { handle: "textPath", px, py, ptsPx: [{ x: px, y: py }],
+               pathMm: [{ x: toMmT(px, state.viewX0), y: toMmT(py, state.viewY0) }] };
+      cv.setPointerCapture(e.pointerId);
+      return;
+    }
     // Scatter sub-mode: while the panel is open, a canvas drag defines the placement region.
     if (scatter) {
       if (scatter.mode === "path") {
@@ -1433,7 +1597,18 @@
       scheduleRebuild3D();
       return;
     }
-    if (drag.handle === "scatterPath") {
+    if (drag.handle === "pan") {
+      const visW = (cv.width - 2 * state.marginPx) / s;
+      const visH = (cv.height - 2 * state.marginPx) / s;
+      const o = window.clampViewOrigin(
+        { x0: drag.ox - (px - drag.px) / s, y0: drag.oy - (py - drag.py) / s },
+        viewDomain(), visW, visH);
+      state.viewX0 = o.x0;
+      state.viewY0 = o.y0;
+      render2D();
+      return;
+    }
+    if (drag.handle === "scatterPath" || drag.handle === "textPath") {
       // freehand path: sample a point every few pixels
       const last = drag.ptsPx[drag.ptsPx.length - 1];
       if (Math.hypot(px - last.x, py - last.y) >= 4) {
@@ -1505,6 +1680,36 @@
 
   function endDrag() {
     if (!drag) return;
+    if (drag.handle === "pan") {
+      // Pure view change: no re-fit, no 3D rebuild, no inspector refresh.
+      drag = null;
+      cv.style.cursor = spacePan ? "grab" : "";
+      render2D();
+      return;
+    }
+    if (drag.handle === "textPath") {
+      // Pfadtext: store the smoothed path element-local (undo translate/rotate/flip).
+      var rawPath = drag.pathMm;
+      drag = null;
+      var tpEl = doc.elements.find(function (e2) { return e2.id === textPathDraw; });
+      textPathDraw = null;
+      if (tpEl && rawPath.length > 1) {
+        var smoothed = window.smoothPath ? window.smoothPath(rawPath, 2) : rawPath;
+        var ang = -(tpEl.rotationDeg || 0) * Math.PI / 180;
+        var ca = Math.cos(ang), sa = Math.sin(ang);
+        tpEl.textPath = smoothed.map(function (p) {
+          var dx = p.x - tpEl.cxMm, dy = p.y - tpEl.cyMm;
+          var lx = dx * ca - dy * sa, ly = dx * sa + dy * ca;
+          if (tpEl.flipH) lx = -lx;
+          if (tpEl.flipV) ly = -ly;
+          return { x: lx, y: ly };
+        });
+      }
+      refreshAdvancedForSelection();
+      render2D();
+      scheduleRebuild3D();
+      return;
+    }
     var wasScatter = drag.handle === "scatterRegion";
     var pathMm = drag.handle === "scatterPath" ? drag.pathMm : null;
     drag = null;
@@ -2025,6 +2230,7 @@
     setHidden("frameField", isImage); // rect/circle/free all support the Rand-Rahmen
     setHidden("cornerField", shape !== "rect");
     setHidden("edgeField", shape !== "rect" && shape !== "circle"); // Zierkante needs the analytic outline
+    setHidden("lineField", shape !== "rect" && shape !== "circle"); // Zierlinie too
     setHidden("simpleSizeSection", isImage);
     // A Bild object has no plate → mount (Befestigung) and plate-centered "Ausrichten" are
     // meaningless. Force mount off (so 2D marker, hit-test, and 3D geometry all agree) and hide
@@ -2091,6 +2297,34 @@
       if (!doc.body.edge) doc.body.edge = window.defaultEdge();
       doc.body.edge.periodMm = v; render2D(); scheduleRebuild3D();
     });
+  }());
+
+  // Zierlinie (rect/circle): contour-following groove/ridge
+  function syncLineFields() {
+    var l = doc.body.line || window.defaultLine();
+    var md = document.getElementById("lineMode");
+    if (md) md.value = l.mode || "none";
+    var params = document.getElementById("lineParams");
+    if (params) params.hidden = !l.mode || l.mode === "none";
+    var set = function (id, v) { var n = document.getElementById(id); if (n) n.value = v; };
+    set("lineInset", l.insetMm); set("lineWidth", l.widthMm);
+    set("lineDepth", l.depthMm); set("lineCount", l.count);
+    set("lineColor", l.color || "#000000");
+    var col = document.getElementById("lineColor");
+    if (col) col.hidden = l.mode !== "raised"; // groove floor keeps the plate color
+  }
+  (function () {
+    var ensure = function () { if (!doc.body.line) doc.body.line = window.defaultLine(); return doc.body.line; };
+    var md = document.getElementById("lineMode");
+    if (md) md.addEventListener("change", function () {
+      ensure().mode = md.value;
+      syncLineFields(); render2D(); scheduleRebuild3D();
+    });
+    bindNum("lineInset", 0, function (v) { ensure().insetMm = v; render2D(); scheduleRebuild3D(); });
+    bindNum("lineWidth", 0.1, function (v) { ensure().widthMm = v; render2D(); scheduleRebuild3D(); });
+    bindNum("lineDepth", 0.1, function (v) { ensure().depthMm = v; render2D(); scheduleRebuild3D(); });
+    bindNum("lineCount", 1, function (v) { ensure().count = Math.max(1, Math.min(3, Math.round(v))); render2D(); scheduleRebuild3D(); });
+    bindColor("lineColor", function (v) { ensure().color = v; render2D(); scheduleRebuild3D(); });
   }());
 
   // Border (shown only for Free)
@@ -2338,9 +2572,10 @@
     // Border
     document.getElementById("borderMm").value = doc.body.borderMm != null ? doc.body.borderMm : 2;
     // Eckenradius (rectangle)
-    document.getElementById("cornerMm").value = doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 4;
-    // Zierkante
+    document.getElementById("cornerMm").value = doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 6.5;
+    // Zierkante + Zierlinie
     syncEdgeFields();
+    syncLineFields();
     // Rahmen (Rand-Rahmen)
     var fr = doc.body.frame;
     document.getElementById("frameMm").value = fr && fr.widthMm != null ? fr.widthMm : 0;
@@ -2784,7 +3019,17 @@
     var advArcField = document.getElementById("advArcField");
     if (advArcField) advArcField.hidden = !isText;
     var advArcNode = document.getElementById("advArc");
-    if (advArcNode) advArcNode.value = isText ? (el.arcDeg || 0) : 0;
+    if (advArcNode) {
+      advArcNode.value = isText ? (el.arcDeg || 0) : 0;
+      // a Pfadtext overrides the arc — grey the arc input out while one is set
+      advArcNode.disabled = !!(isText && el.textPath && el.textPath.length > 1);
+    }
+    var tpField = document.getElementById("advTextPathField");
+    if (tpField) tpField.hidden = !isText;
+    var tpClear = document.getElementById("textPathClearBtn");
+    if (tpClear) tpClear.hidden = !(isText && el.textPath && el.textPath.length > 1);
+    var tpHint = document.getElementById("textPathHint");
+    if (tpHint) tpHint.hidden = !(isText && textPathDraw === el.id);
     if (isText) {
       populateFontSelect(document.getElementById("advFontFamily"), el.fontFamily || "system-ui");
       var boldNode = document.getElementById("advFontBold");
@@ -2799,6 +3044,18 @@
     var shapeCircle = document.getElementById("advShapeCircle");
     if (shapeRect) shapeRect.classList.toggle("seg-active", !!(isShape && el.shape !== "circle"));
     if (shapeCircle) shapeCircle.classList.toggle("seg-active", !!(isShape && el.shape === "circle"));
+    // Element-Zierkante (shape elements): seed style + params, toggle param row.
+    if (isShape) {
+      var elEdge = el.edge || { style: "none", sizeMm: 1.5, periodMm: 6 };
+      var edgeSel = document.getElementById("advEdgeStyle");
+      if (edgeSel) edgeSel.value = elEdge.style || "none";
+      var edgeParams = document.getElementById("advEdgeParams");
+      if (edgeParams) edgeParams.hidden = !elEdge.style || elEdge.style === "none";
+      var edgeSz = document.getElementById("advEdgeSize");
+      if (edgeSz) edgeSz.value = elEdge.sizeMm;
+      var edgePd = document.getElementById("advEdgePeriod");
+      if (edgePd) edgePd.value = elEdge.periodMm;
+    }
 
     // Relief height (depth.heightMm): shown for Einfarbig (solid/text) and Farbebenen→Gestuft.
     // With "Höhe je Farbe" (doc.autoLayerHeights) on, the field is the per-element OVERRIDE for
@@ -2981,6 +3238,46 @@
     if (el.type !== "text") return false;
     var v = parseFloat(node.value);
     el.arcDeg = isNaN(v) ? 0 : Math.max(-350, Math.min(350, v));
+  });
+
+  // -- Pfadtext: record / clear the freehand path of a text element --
+  (function () {
+    var draw = document.getElementById("textPathDrawBtn");
+    if (draw) draw.addEventListener("click", function () {
+      var el = selectedEl();
+      if (!el || el.type !== "text") return;
+      textPathDraw = el.id;
+      refreshAdvancedForSelection();
+    });
+  }());
+  bindElementField("textPathClearBtn", "click", function (el) {
+    if (el.type !== "text") return false;
+    el.textPath = null;
+    textPathDraw = null;
+    refreshAdvancedForSelection();
+    renderLayers();
+  });
+
+  // -- Element-Zierkante (shape elements) --
+  bindElementField("advEdgeStyle", "change", function (el, node) {
+    if (el.type !== "shape") return false;
+    if (!el.edge) el.edge = { style: "none", sizeMm: 1.5, periodMm: 6 };
+    el.edge.style = node.value;
+    var params = document.getElementById("advEdgeParams");
+    if (params) params.hidden = node.value === "none";
+    renderLayers();
+  });
+  bindElementField("advEdgeSize", "input", function (el, node) {
+    if (el.type !== "shape" || !el.edge) return false;
+    var v = parseFloat(node.value);
+    if (isNaN(v) || v <= 0) return false;
+    el.edge.sizeMm = v;
+  });
+  bindElementField("advEdgePeriod", "input", function (el, node) {
+    if (el.type !== "shape" || !el.edge) return false;
+    var v = parseFloat(node.value);
+    if (isNaN(v) || v <= 0) return false;
+    el.edge.periodMm = v;
   });
 
   // -- Shape kind (Rechteck / Kreis, shape elements) --
@@ -3522,15 +3819,15 @@
   // -- Init Advanced panel doc-level values (also called by resetDocTo) --
   function initAdvancedUI() {
     var t = document.getElementById("advThickness");
-    if (t) t.value = doc.body.thicknessMm != null ? doc.body.thicknessMm : 3;
+    if (t) t.value = doc.body.thicknessMm != null ? doc.body.thicknessMm : 2;
     var bt = document.getElementById("advBaseThickness");
     if (bt) bt.value = doc.body.baseThicknessMm != null ? doc.body.baseThicknessMm : 0;
     var lh = document.getElementById("advLayerHeight");
-    if (lh) lh.value = doc.body.layerHeightMm != null ? doc.body.layerHeightMm : 0.2;
+    if (lh) lh.value = doc.body.layerHeightMm != null ? doc.body.layerHeightMm : 0.4;
     var res = document.getElementById("advResolution");
     if (res) res.value = doc.resolution != null ? doc.resolution : 1024;
     var cs = document.getElementById("advColorStep");
-    if (cs) cs.value = doc.colorStepLayers != null ? doc.colorStepLayers : 2;
+    if (cs) cs.value = doc.colorStepLayers != null ? doc.colorStepLayers : 4;
     var bc = document.getElementById("advBaseColor");
     if (bc) bc.value = doc.body.baseColor || "#000000";
     // Plate controls (canonical ids; seg states + field visibility come from
