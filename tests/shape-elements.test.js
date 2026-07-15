@@ -146,6 +146,8 @@
     const d = shapeDoc(el);
     d.autoLayerHeights = true;
     d.body.baseColor = "#ffffff";
+    d.colorStepLayers = 2;        // pin print params — the doc defaults may change
+    d.body.layerHeightMm = 0.2;
     assertClose(autoSolidHeightMm(d, el), 2 * 0.2, 1e-9, "rank 1 × colorStepLayers × layerH");
   });
 })();

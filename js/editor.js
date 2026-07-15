@@ -2572,7 +2572,7 @@
     // Border
     document.getElementById("borderMm").value = doc.body.borderMm != null ? doc.body.borderMm : 2;
     // Eckenradius (rectangle)
-    document.getElementById("cornerMm").value = doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 4;
+    document.getElementById("cornerMm").value = doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 6.5;
     // Zierkante + Zierlinie
     syncEdgeFields();
     syncLineFields();
@@ -3819,15 +3819,15 @@
   // -- Init Advanced panel doc-level values (also called by resetDocTo) --
   function initAdvancedUI() {
     var t = document.getElementById("advThickness");
-    if (t) t.value = doc.body.thicknessMm != null ? doc.body.thicknessMm : 3;
+    if (t) t.value = doc.body.thicknessMm != null ? doc.body.thicknessMm : 2;
     var bt = document.getElementById("advBaseThickness");
     if (bt) bt.value = doc.body.baseThicknessMm != null ? doc.body.baseThicknessMm : 0;
     var lh = document.getElementById("advLayerHeight");
-    if (lh) lh.value = doc.body.layerHeightMm != null ? doc.body.layerHeightMm : 0.2;
+    if (lh) lh.value = doc.body.layerHeightMm != null ? doc.body.layerHeightMm : 0.4;
     var res = document.getElementById("advResolution");
     if (res) res.value = doc.resolution != null ? doc.resolution : 1024;
     var cs = document.getElementById("advColorStep");
-    if (cs) cs.value = doc.colorStepLayers != null ? doc.colorStepLayers : 2;
+    if (cs) cs.value = doc.colorStepLayers != null ? doc.colorStepLayers : 4;
     var bc = document.getElementById("advBaseColor");
     if (bc) bc.value = doc.body.baseColor || "#000000";
     // Plate controls (canonical ids; seg states + field visibility come from

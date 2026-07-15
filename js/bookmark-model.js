@@ -112,8 +112,8 @@ function defaultDoc() {
     version: DOC_VERSION,
     body: {
       shape: "rect",
-      widthMm: 50, heightMm: 150, cornerRadiusMm: 4,
-      thicknessMm: 3, layerHeightMm: 0.2, baseColor: "#ffffff", borderMm: 2,
+      widthMm: 50, heightMm: 150, cornerRadiusMm: 6.5,
+      thicknessMm: 2, layerHeightMm: 0.4, baseColor: "#ffffff", borderMm: 2,
       // Solid base-plate floor thickness under engraved detail (0 = auto-derive from thickness).
       baseThicknessMm: 0,
       frame: defaultFrame(),
@@ -125,7 +125,7 @@ function defaultDoc() {
     // ringThicknessMm = in-plane loop wall thickness; ringHeightMm = how far the loop
     // ring stands proud above the base top face (mm). Both used only when type === 'loop'.
     mount: { type: "none", xMm: 25, yMm: 10.5, diameterMm: 5, ringThicknessMm: 0, ringHeightMm: 2, marginMm: 8 },
-    resolution: 1024, colorStepLayers: 2,
+    resolution: 1024, colorStepLayers: 4,
     // AMS shared filament palette: ordered UPPERCASE hex layers (index 0 = layer 1 = bottom,
     // darkest by default). Empty = not in use → legacy per-element bands behavior (parity).
     amsPalette: [],
