@@ -41,10 +41,17 @@
     <button type="button" id="newBtn" title="Neues, leeres Projekt beginnen (Strg/Cmd+Z bringt das alte zurück)">Neu</button>
     <div id="scatterPanel" class="popover" hidden>
       <div class="pop-row"><strong>Streuen</strong></div>
+      <div class="pop-row">
+        <div id="scModeSeg" class="seg-group seg-sm" style="width:100%">
+          <button type="button" id="scModeRegion" class="seg seg-active" style="flex:1" title="Zufällig in einem Bereich streuen">Bereich</button>
+          <button type="button" id="scModePath" class="seg" style="flex:1" title="Gleichmäßig entlang eines gezeichneten Pfads verteilen">Pfad</button>
+        </div>
+      </div>
       <label class="pop-row">Anzahl <input id="scCount" type="number" min="1" max="200" value="12"></label>
       <label class="pop-row">Drehung° <input id="scRotMin" type="number" value="0"> – <input id="scRotMax" type="number" value="360"></label>
       <label class="pop-row">Skalierung× <input id="scScaleMin" type="number" step="0.1" value="0.6"> – <input id="scScaleMax" type="number" step="0.1" value="1.4"></label>
-      <label class="pop-row"><input id="scAvoid" type="checkbox"> Überlappung vermeiden</label>
+      <label class="pop-row" id="scAvoidRow"><input id="scAvoid" type="checkbox"> Überlappung vermeiden</label>
+      <label class="pop-row" id="scAlignRow" hidden><input id="scAlign" type="checkbox" checked> An Pfad ausrichten</label>
       <p class="hint" id="scHint">Ziehe auf der Fläche einen Bereich auf (sonst ganze Platte).</p>
       <div class="pop-row">
         <button type="button" id="scReroll" class="btn">Neu würfeln</button>

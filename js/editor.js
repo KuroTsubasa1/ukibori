@@ -1011,6 +1011,21 @@
       ctx.restore();
     }
 
+    // Scatter path overlay: the stroke being drawn (px) or the stored path (mm→px).
+    var scPathPts = (drag && drag.handle === "scatterPath" && drag.ptsPx && drag.ptsPx.length > 1) ? drag.ptsPx
+      : (scatter && scatter.mode === "path" && scatter.path && scatter.path.length > 1 && !(drag && drag.handle === "scatterPath"))
+        ? scatter.path.map(function (p) { return { x: mmX(p.x), y: mmY(p.y) }; })
+        : null;
+    if (scPathPts) {
+      ctx.save();
+      ctx.strokeStyle = "#6b4fb0";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      scPathPts.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+      ctx.stroke();
+      ctx.restore();
+    }
     if (drag && (drag.handle === "marquee" || drag.handle === "scatterRegion") && drag.rectPx) {
       ctx.save();
       ctx.strokeStyle = "#6b4fb0"; ctx.fillStyle = "rgba(107,79,176,0.10)";
@@ -1191,6 +1206,13 @@
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
     // Scatter sub-mode: while the panel is open, a canvas drag defines the placement region.
     if (scatter) {
+      if (scatter.mode === "path") {
+        const toMm0 = function (p, v0) { return (p - state.marginPx) / state.scale + v0; };
+        drag = { handle: "scatterPath", px, py, ptsPx: [{ x: px, y: py }],
+                 pathMm: [{ x: toMm0(px, state.viewX0), y: toMm0(py, state.viewY0) }] };
+        cv.setPointerCapture(e.pointerId);
+        return;
+      }
       drag = { handle: "scatterRegion", px, py };
       cv.setPointerCapture(e.pointerId);
       return;
@@ -1365,6 +1387,17 @@
       scheduleRebuild3D();
       return;
     }
+    if (drag.handle === "scatterPath") {
+      // freehand path: sample a point every few pixels
+      const last = drag.ptsPx[drag.ptsPx.length - 1];
+      if (Math.hypot(px - last.x, py - last.y) >= 4) {
+        const toMmP = function (p, v0) { return (p - state.marginPx) / s + v0; };
+        drag.ptsPx.push({ x: px, y: py });
+        drag.pathMm.push({ x: toMmP(px, state.viewX0), y: toMmP(py, state.viewY0) });
+        render2D();
+      }
+      return;
+    }
     if (drag.handle === "scatterRegion") {
       const toMm = function (p, v0) { return (p - state.marginPx) / s + v0; };
       scatter.region = {
@@ -1427,8 +1460,13 @@
   function endDrag() {
     if (!drag) return;
     var wasScatter = drag.handle === "scatterRegion";
+    var pathMm = drag.handle === "scatterPath" ? drag.pathMm : null;
     drag = null;
     if (wasScatter && scatter) scatterGenerate(); // re-roll the preview into the new region
+    if (pathMm && scatter) {
+      if (pathMm.length > 1) { scatter.path = pathMm; scatterGenerate(); }
+      render2D();
+    }
     state.snapGuides = []; // clear transient guide lines
     // Re-fit the canvas: a move/scale/rotate (or mount move) may have pushed the element past
     // the old bounds. viewportDomain now includes element bboxes, so this keeps handles on-canvas.
@@ -3142,9 +3180,26 @@
   function scatterOpen() {
     var el = selectedEl();
     if (!el || state.selectionIds.length !== 1) return;
-    scatter = { sourceId: el.id, region: null, seed: (Date.now() >>> 0), previewIds: [] };
+    scatter = { sourceId: el.id, region: null, path: null, mode: "region", seed: (Date.now() >>> 0), previewIds: [] };
     var p = document.getElementById("scatterPanel"); if (p) p.hidden = false;
+    scatterSyncMode();
     scatterGenerate();
+  }
+
+  // Reflect scatter.mode in the panel: seg buttons, per-mode rows, hint text.
+  function scatterSyncMode() {
+    var isPath = !!(scatter && scatter.mode === "path");
+    var br = document.getElementById("scModeRegion"), bp = document.getElementById("scModePath");
+    if (br) br.classList.toggle("seg-active", !isPath);
+    if (bp) bp.classList.toggle("seg-active", isPath);
+    var alignRow = document.getElementById("scAlignRow");
+    if (alignRow) alignRow.hidden = !isPath;
+    var avoidRow = document.getElementById("scAvoidRow");
+    if (avoidRow) avoidRow.hidden = isPath; // even spacing needs no overlap avoidance
+    var hint = document.getElementById("scHint");
+    if (hint) hint.textContent = isPath
+      ? "Zeichne einen Pfad auf der Fläche — die Kopien folgen ihm gleichmäßig."
+      : "Ziehe auf der Fläche einen Bereich auf (sonst ganze Platte).";
   }
   function scatterClose(commit) {
     var p = document.getElementById("scatterPanel"); if (p) p.hidden = true;
@@ -3164,6 +3219,7 @@
       rotMin: num("scRotMin", 0), rotMax: num("scRotMax", 360),
       scaleMin: num("scScaleMin", 0.6), scaleMax: num("scScaleMax", 1.4),
       avoidOverlap: !!(document.getElementById("scAvoid") && document.getElementById("scAvoid").checked),
+      alignToPath: !!(document.getElementById("scAlign") && document.getElementById("scAlign").checked),
     };
   }
   function scatterGenerate() {
@@ -3171,8 +3227,14 @@
     scatterClearPreview();
     var src = doc.elements.find(function (e) { return e.id === scatter.sourceId; });
     if (!src) return;
-    var region = scatter.region || { x0: 0, y0: 0, x1: doc.body.widthMm, y1: doc.body.heightMm };
-    var transforms = window.scatterCopies({ wMm: src.wMm, hMm: src.hMm }, region, scatterParams(), scatter.seed);
+    var transforms;
+    if (scatter.mode === "path") {
+      if (!scatter.path || scatter.path.length < 2) { render2D(); scheduleRebuild3D(); return; }
+      transforms = window.scatterAlongPath({ wMm: src.wMm, hMm: src.hMm }, scatter.path, scatterParams(), scatter.seed);
+    } else {
+      var region = scatter.region || { x0: 0, y0: 0, x1: doc.body.widthMm, y1: doc.body.heightMm };
+      transforms = window.scatterCopies({ wMm: src.wMm, hMm: src.hMm }, region, scatterParams(), scatter.seed);
+    }
     var ids = [];
     transforms.forEach(function (t) {
       var drop = { _img: 1, _display: 1, _displayKey: 1, _hidden: 1, id: 1 };
@@ -3202,6 +3264,23 @@
       var n = document.getElementById(id); if (n) n.addEventListener("input", function () { if (scatter) scatterGenerate(); });
     });
     var av = document.getElementById("scAvoid"); if (av) av.addEventListener("change", function () { if (scatter) scatterGenerate(); });
+    var al = document.getElementById("scAlign"); if (al) al.addEventListener("change", function () { if (scatter) scatterGenerate(); });
+    // Mode toggle: Bereich (random in a region) vs Pfad (evenly along a drawn path).
+    function setScatterMode(mode) {
+      if (!scatter || scatter.mode === mode) return;
+      scatter.mode = mode;
+      if (mode === "path") {
+        // Tangent alignment beats full random rotation: drop the 0–360° default
+        // jitter once, so the copies actually follow the drawn path.
+        var rMin = document.getElementById("scRotMin"), rMax = document.getElementById("scRotMax");
+        if (rMin && rMax && parseFloat(rMin.value) === 0 && parseFloat(rMax.value) === 360) { rMax.value = 0; }
+        scatterClearPreview();
+      }
+      scatterSyncMode();
+      scatterGenerate();
+    }
+    wire("scModeRegion", function () { setScatterMode("region"); });
+    wire("scModePath", function () { setScatterMode("path"); });
   }());
   // ---- Relief height: the "Auto" button removes the manual override ----
   (function () {
