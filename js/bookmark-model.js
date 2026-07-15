@@ -94,6 +94,13 @@ function defaultEdge() {
   return { style: "none", sizeMm: 2, periodMm: 8 };
 }
 
+// Zierlinie: contour-following decorative line (rect/circle plates). mode
+// 'engraved' carves a groove into the plate top (epoxy/lacquer fill), 'raised'
+// prints a slim ridge; count 1-3 lines, gap = 1.5 × width.
+function defaultLine() {
+  return { mode: "none", insetMm: 2.5, widthMm: 0.8, depthMm: 0.6, count: 1, color: "#000000" };
+}
+
 // Rand-Rahmen (raised ring frame) default for rect/circle/free bodies.
 // widthMm 0 = OFF (parity); heightMm = extrusion above the base top face.
 function defaultFrame() {
@@ -111,6 +118,7 @@ function defaultDoc() {
       baseThicknessMm: 0,
       frame: defaultFrame(),
       edge: defaultEdge(),
+      line: defaultLine(),
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
     // xMm/yMm = hole/loop CENTER (see migrateProject); yMm = marginMm + diameterMm/2.
@@ -175,6 +183,7 @@ function migrateProject(doc) {
     // Already v2: fill fields added after the v2 schema shipped (older saves lack them).
     if (doc.body && doc.body.frame == null) doc.body.frame = defaultFrame();
     if (doc.body && doc.body.edge == null) doc.body.edge = defaultEdge();
+    if (doc.body && doc.body.line == null) doc.body.line = defaultLine();
     // AMS shared palette: backfill if missing, else normalize (uppercase / dedup / drop invalid)
     // so a hand-edited or older save can't feed the engine a lowercase or malformed layer color.
     if (!Array.isArray(doc.amsPalette)) doc.amsPalette = [];
@@ -216,6 +225,7 @@ function migrateProject(doc) {
       baseThicknessMm: 0,
       frame: defaultFrame(),
       edge: defaultEdge(),
+      line: defaultLine(),
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
     // mount.xMm/yMm are the hole/loop CENTER (matches js/geometry.js roundedRectHoleField:
@@ -468,6 +478,7 @@ window.DOC_VERSION = DOC_VERSION;
 window.defaultDepth = defaultDepth;
 window.defaultFrame = defaultFrame;
 window.defaultEdge = defaultEdge;
+window.defaultLine = defaultLine;
 window.defaultDoc = defaultDoc;
 window.migrateProject = migrateProject;
 window.makeElementV2 = makeElementV2;

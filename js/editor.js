@@ -380,6 +380,53 @@
     ctx.restore();
   }
 
+  // Zierlinie 2D preview: stroke the contour-following line(s). The engine
+  // band mask is authoritative; on decorated edges this offsets the decorated
+  // outline along the nominal normals (a close preview approximation).
+  function strokeZierlinie(ctx, s) {
+    var l = doc.body.line;
+    var nLines = Math.max(1, Math.min(3, Math.round(l.count || 1)));
+    var gap = l.widthMm * 1.5;
+    ctx.save();
+    ctx.strokeStyle = l.mode === "raised" ? (l.color || "#000000") : "#3a3a44";
+    ctx.lineWidth = Math.max(1, l.widthMm * s);
+    if (l.mode === "engraved") ctx.globalAlpha = 0.55; // a groove reads lighter than ink
+    var per = edgeActive() ? window.platePerimeterMm(doc.body) : null;
+    var depthFn = function () { return 0; };
+    if (per) {
+      var e = doc.body.edge;
+      if (e.style === "wave" || e.style === "teeth") {
+        var deco = window.plateEdgeDecorator(e, per.length);
+        if (deco) depthFn = function (t) { return -deco(0, t); };
+      }
+    }
+    for (var k = 0; k < nLines; k++) {
+      var insetK = l.insetMm + k * (l.widthMm + gap) + l.widthMm / 2;
+      if (per) {
+        var L = per.length, step = Math.min(1, L / 128);
+        ctx.beginPath();
+        for (var t = 0, j = 0; t < L; t += step, j++) {
+          var q = per.point(t);
+          var off = insetK + depthFn(t);
+          var X = mmX(q.x - q.nx * off), Y = mmY(q.y - q.ny * off);
+          if (j) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      } else if (doc.body.shape === "circle") {
+        var r0 = Math.min(doc.body.widthMm, doc.body.heightMm) / 2 - insetK;
+        if (r0 * s > 1) {
+          ctx.beginPath();
+          ctx.arc(mmX(doc.body.widthMm / 2), mmY(doc.body.heightMm / 2), r0 * s, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      } else if (insetBodyPath(ctx, insetK)) {
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
   // Rounded-rect path inset by insetMm on all sides (Rand-Rahmen 2D preview).
   // Returns false when the inset collapses the rect. Preview-approximation:
   // the inset corner radius is max(0, cornerRadius - inset); geometry is authoritative.
@@ -1064,6 +1111,12 @@
           ctx.restore();
         }
       }
+    }
+
+    // Zierlinie preview (rect/circle plates only — mirrors the engine's scope).
+    if ((shape === "rect" || shape === "circle") && doc.body.line &&
+        doc.body.line.mode !== "none" && doc.body.line.widthMm > 0) {
+      strokeZierlinie(ctx, s);
     }
 
     // Mount marker: visible draggable circle + crosshair.
@@ -2177,6 +2230,7 @@
     setHidden("frameField", isImage); // rect/circle/free all support the Rand-Rahmen
     setHidden("cornerField", shape !== "rect");
     setHidden("edgeField", shape !== "rect" && shape !== "circle"); // Zierkante needs the analytic outline
+    setHidden("lineField", shape !== "rect" && shape !== "circle"); // Zierlinie too
     setHidden("simpleSizeSection", isImage);
     // A Bild object has no plate → mount (Befestigung) and plate-centered "Ausrichten" are
     // meaningless. Force mount off (so 2D marker, hit-test, and 3D geometry all agree) and hide
@@ -2243,6 +2297,34 @@
       if (!doc.body.edge) doc.body.edge = window.defaultEdge();
       doc.body.edge.periodMm = v; render2D(); scheduleRebuild3D();
     });
+  }());
+
+  // Zierlinie (rect/circle): contour-following groove/ridge
+  function syncLineFields() {
+    var l = doc.body.line || window.defaultLine();
+    var md = document.getElementById("lineMode");
+    if (md) md.value = l.mode || "none";
+    var params = document.getElementById("lineParams");
+    if (params) params.hidden = !l.mode || l.mode === "none";
+    var set = function (id, v) { var n = document.getElementById(id); if (n) n.value = v; };
+    set("lineInset", l.insetMm); set("lineWidth", l.widthMm);
+    set("lineDepth", l.depthMm); set("lineCount", l.count);
+    set("lineColor", l.color || "#000000");
+    var col = document.getElementById("lineColor");
+    if (col) col.hidden = l.mode !== "raised"; // groove floor keeps the plate color
+  }
+  (function () {
+    var ensure = function () { if (!doc.body.line) doc.body.line = window.defaultLine(); return doc.body.line; };
+    var md = document.getElementById("lineMode");
+    if (md) md.addEventListener("change", function () {
+      ensure().mode = md.value;
+      syncLineFields(); render2D(); scheduleRebuild3D();
+    });
+    bindNum("lineInset", 0, function (v) { ensure().insetMm = v; render2D(); scheduleRebuild3D(); });
+    bindNum("lineWidth", 0.1, function (v) { ensure().widthMm = v; render2D(); scheduleRebuild3D(); });
+    bindNum("lineDepth", 0.1, function (v) { ensure().depthMm = v; render2D(); scheduleRebuild3D(); });
+    bindNum("lineCount", 1, function (v) { ensure().count = Math.max(1, Math.min(3, Math.round(v))); render2D(); scheduleRebuild3D(); });
+    bindColor("lineColor", function (v) { ensure().color = v; render2D(); scheduleRebuild3D(); });
   }());
 
   // Border (shown only for Free)
@@ -2491,8 +2573,9 @@
     document.getElementById("borderMm").value = doc.body.borderMm != null ? doc.body.borderMm : 2;
     // Eckenradius (rectangle)
     document.getElementById("cornerMm").value = doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 4;
-    // Zierkante
+    // Zierkante + Zierlinie
     syncEdgeFields();
+    syncLineFields();
     // Rahmen (Rand-Rahmen)
     var fr = doc.body.frame;
     document.getElementById("frameMm").value = fr && fr.widthMm != null ? fr.widthMm : 0;

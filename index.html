@@ -118,6 +118,21 @@
               <input type="number" id="edgePeriodMm" class="sp-num" style="flex:1" min="2" max="40" step="0.5" value="8" title="Abstand der Wiederholungen in mm entlang des Randes" aria-label="Abstand der Zierkanten-Wiederholungen in mm">
             </div>
           </div>
+          <div class="adv-field" id="lineField">
+            <label for="lineMode" class="adv-label">Zierlinie</label>
+            <select id="lineMode" class="text-input" title="Ziernaht, die dem Plattenrand in festem Abstand folgt — auch um Zierkante und runde Ecken">
+              <option value="none" selected>Keine</option>
+              <option value="engraved">Vertieft (Nut)</option>
+              <option value="raised">Erhaben</option>
+            </select>
+            <div id="lineParams" style="display:flex;gap:6px;align-items:center;margin-top:4px" hidden>
+              <input type="number" id="lineInset" class="sp-num" style="flex:1" min="0.5" max="30" step="0.5" value="2.5" title="Abstand vom Rand (mm)" aria-label="Abstand der Zierlinie vom Rand in mm">
+              <input type="number" id="lineWidth" class="sp-num" style="flex:1" min="0.3" max="5" step="0.1" value="0.8" title="Breite der Linie (mm)" aria-label="Breite der Zierlinie in mm">
+              <input type="number" id="lineDepth" class="sp-num" style="flex:1" min="0.2" max="5" step="0.1" value="0.6" title="Tiefe (vertieft) bzw. Höhe (erhaben) in mm" aria-label="Tiefe oder Höhe der Zierlinie in mm">
+              <input type="number" id="lineCount" class="sp-num" style="width:44px" min="1" max="3" step="1" value="1" title="Anzahl Linien (2 = Doppellinie)" aria-label="Anzahl der Zierlinien">
+              <input type="color" id="lineColor" value="#000000" title="Farbe der erhabenen Linie" aria-label="Farbe der Zierlinie">
+            </div>
+          </div>
           <div class="adv-field">
             <label for="advBaseColor" class="adv-label">Grundfarbe</label>
             <input type="color" id="advBaseColor" value="#ffffff" title="Farbe der Grundplatte">
