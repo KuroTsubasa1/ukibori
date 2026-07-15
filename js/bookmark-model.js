@@ -88,6 +88,12 @@ function defaultDepth(type) {
   };
 }
 
+// Zierkante: ornamental plate edge (rect/circle plates). style 'none' keeps
+// the classic outline; sizeMm = carve depth (wave/teeth) or hole Ø (perforation).
+function defaultEdge() {
+  return { style: "none", sizeMm: 2, periodMm: 8 };
+}
+
 // Rand-Rahmen (raised ring frame) default for rect/circle/free bodies.
 // widthMm 0 = OFF (parity); heightMm = extrusion above the base top face.
 function defaultFrame() {
@@ -104,6 +110,7 @@ function defaultDoc() {
       // Solid base-plate floor thickness under engraved detail (0 = auto-derive from thickness).
       baseThicknessMm: 0,
       frame: defaultFrame(),
+      edge: defaultEdge(),
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
     // xMm/yMm = hole/loop CENTER (see migrateProject); yMm = marginMm + diameterMm/2.
@@ -157,7 +164,7 @@ function migrateElement(el, doc, layerHmm) {
     cutout: !!el.cutout, color: el.color, groupId: el.groupId != null ? el.groupId : null, depth,
   };
   if (el.type === "image") { out.src = el.src; out._img = null; }
-  if (el.type === "text") { out.text = el.text; out.fontFamily = el.fontFamily; out.fontWeight = el.fontWeight; }
+  if (el.type === "text") { out.text = el.text; out.fontFamily = el.fontFamily; out.fontWeight = el.fontWeight; out.arcDeg = el.arcDeg != null ? el.arcDeg : 0; }
   if (el.type === "qr") { out.qrData = el.qrData; out.qrEcLevel = el.qrEcLevel; }
   return out;
 }
@@ -167,6 +174,7 @@ function migrateProject(doc) {
   if (doc.version === DOC_VERSION) {
     // Already v2: fill fields added after the v2 schema shipped (older saves lack them).
     if (doc.body && doc.body.frame == null) doc.body.frame = defaultFrame();
+    if (doc.body && doc.body.edge == null) doc.body.edge = defaultEdge();
     // AMS shared palette: backfill if missing, else normalize (uppercase / dedup / drop invalid)
     // so a hand-edited or older save can't feed the engine a lowercase or malformed layer color.
     if (!Array.isArray(doc.amsPalette)) doc.amsPalette = [];
@@ -188,6 +196,7 @@ function migrateProject(doc) {
         el.depth.colorLayerStyle = el.depth.flush ? "bands" : "stepped";
       }
       if (el.type === "shape" && el.shape == null) el.shape = "rect";
+      if (el.type === "text" && el.arcDeg == null) el.arcDeg = 0;
       if (el.groupId === undefined) el.groupId = null;
     }
     return doc;
@@ -204,6 +213,7 @@ function migrateProject(doc) {
       baseColor: doc.baseColor || "#000000", borderMm: 2,
       baseThicknessMm: 0,
       frame: defaultFrame(),
+      edge: defaultEdge(),
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
     // mount.xMm/yMm are the hole/loop CENTER (matches js/geometry.js roundedRectHoleField:
@@ -235,7 +245,7 @@ function makeElementV2(type, props) {
     depth: defaultDepth(type),
   }, props);
   if (type === "image") { if (e.src == null) e.src = ""; e._img = e._img || null; }
-  if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; }
+  if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; if (e.arcDeg == null) e.arcDeg = 0; }
   if (type === "shape") { if (e.shape == null) e.shape = "rect"; } // 'rect' | 'circle' (ellipse when wMm ≠ hMm)
   return e;
 }
@@ -452,6 +462,7 @@ window.deserializeProject = deserializeProject;
 window.DOC_VERSION = DOC_VERSION;
 window.defaultDepth = defaultDepth;
 window.defaultFrame = defaultFrame;
+window.defaultEdge = defaultEdge;
 window.defaultDoc = defaultDoc;
 window.migrateProject = migrateProject;
 window.makeElementV2 = makeElementV2;

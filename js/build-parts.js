@@ -149,7 +149,8 @@
       ctx.fillStyle = el.color;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = `${el.fontWeight} ${Math.max(1, Math.round(h))}px ${el.fontFamily}`;
-      ctx.fillText(el.text, 0, 0);
+      if (el.arcDeg) window.drawArcText(ctx, el.text, el.arcDeg, Math.max(1, Math.round(h)));
+      else ctx.fillText(el.text, 0, 0);
     } else if (el.type === "shape") {
       ctx.fillStyle = el.color;
       ctx.beginPath();
@@ -1327,6 +1328,21 @@
     const n = cols * rows;
     const mask = new Uint8Array(n);
     for (let i = 0; i < n; i++) mask[i] = (!comp.isBase[i] && !comp.cutout[i] && comp.owner[i] >= 0) ? 1 : 0;
+    // With a Zierkante the plate itself can pinch below the nozzle width
+    // (necks between perforation holes, teeth tips), which element-only
+    // probing never sees — union the decorated footprint. Undecorated plates
+    // keep the element-only mask (unchanged results for existing docs).
+    const edge = doc.body.edge;
+    const edgeOn = !!(edge && edge.style && edge.style !== "none" && edge.sizeMm > 0 && edge.periodMm > 0);
+    if (edgeOn && (doc.body.shape === "rect" || doc.body.shape === "circle")) {
+      const fp = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+      for (let r0 = 0; r0 < rows; r0++) {
+        for (let c0 = 0; c0 < cols; c0++) {
+          const i = r0 * cols + c0;
+          if (!comp.cutout[i] && fp(c0, r0) > 0) mask[i] = 1;
+        }
+      }
+    }
     const r = ((minWidthMm || 0.4) / 2) / pitch;   // radius in cells
     const inv = new Uint8Array(n);
     for (let i = 0; i < n; i++) inv[i] = mask[i] ? 0 : 1;

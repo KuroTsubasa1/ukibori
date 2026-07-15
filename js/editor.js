@@ -231,6 +231,99 @@
     ctx.closePath();
   }
 
+  // Zierkante active? (rect/circle plates with a decorated outline; the
+  // perimeter must be constructible — degenerate saved plates fall back to
+  // the plain outline instead of crashing render2D)
+  function edgeActive() {
+    var e = doc.body.edge;
+    return !!(e && e.style && e.style !== "none" && e.sizeMm > 0 && e.periodMm > 0 &&
+      (doc.body.shape === "rect" || doc.body.shape === "circle") &&
+      window.platePerimeterMm && window.platePerimeterMm(doc.body));
+  }
+
+  // Decorated (wave/teeth) plate outline as the current ctx path. Samples the
+  // analytic perimeter and offsets it inward by the same profile the SDF uses
+  // (geometry.js plateEdgeDecorator), so 2D and print agree. Perforation is
+  // handled by clipDecoratedPlate/strokeDecoratedPlate instead.
+  function decoratedPlatePath(ctx) {
+    var e = doc.body.edge;
+    var per = window.platePerimeterMm(doc.body);
+    var L = per.length;
+    var n = Math.max(3, Math.round(L / e.periodMm));
+    var p = L / n;
+    var depth = e.style === "teeth"
+      ? function (t) { var f = t / p - Math.floor(t / p); return e.sizeMm * (1 - Math.abs(2 * f - 1)); }
+      : function (t) { return e.sizeMm * 0.5 * (1 + Math.cos(2 * Math.PI * t / p)); };
+    var step = Math.min(p / 8, 1);
+    ctx.beginPath();
+    for (var t = 0, j = 0; t < L; t += step, j++) {
+      var q = per.point(t);
+      var d = depth(t);
+      var px = mmX(q.x - q.nx * d), py = mmY(q.y - q.ny * d);
+      if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  }
+
+  // Nominal (undecorated) plate outline, sampled from the same perimeter.
+  function plateNominalPath(ctx, per) {
+    var L = per.length, step = Math.min(1, L / 64);
+    ctx.beginPath();
+    for (var t = 0, i = 0; t < L; t += step, i++) {
+      var q = per.point(t);
+      if (i === 0) ctx.moveTo(mmX(q.x), mmY(q.y)); else ctx.lineTo(mmX(q.x), mmY(q.y));
+    }
+    ctx.closePath();
+  }
+
+  // Perforation hole circles, appended to the current path (begin starts one).
+  function plateHolesPath(ctx, per, e, begin) {
+    var L = per.length, n = Math.max(3, Math.round(L / e.periodMm)), p = L / n;
+    var r = (e.sizeMm / 2) * state.scale;
+    if (begin) ctx.beginPath();
+    for (var k = 0; k < n; k++) {
+      var c = per.point(k * p);
+      ctx.moveTo(mmX(c.x) + r, mmY(c.y));
+      ctx.arc(mmX(c.x), mmY(c.y), r, 0, Math.PI * 2);
+    }
+  }
+
+  // Establish the decorated-plate clip (inside the caller's save/restore).
+  // Perforation must be "outline MINUS holes" — a single evenodd path would
+  // also include the OUTER half of each hole circle, painting content outside
+  // the plate. Intersecting a nonzero outline clip with a canvas-minus-holes
+  // evenodd clip kills those half-discs.
+  function clipDecoratedPlate(ctx) {
+    var e = doc.body.edge;
+    if (e.style === "perforation") {
+      var per = window.platePerimeterMm(doc.body);
+      plateNominalPath(ctx, per); ctx.clip();
+      ctx.beginPath(); ctx.rect(0, 0, cv.width, cv.height);
+      plateHolesPath(ctx, per, e, false);
+      ctx.clip("evenodd");
+      return;
+    }
+    decoratedPlatePath(ctx); ctx.clip();
+  }
+
+  // Stroke the decorated outline with the current stroke style. Perforation:
+  // outline segments outside the hole mouths + the inner half of each circle.
+  function strokeDecoratedPlate(ctx) {
+    var e = doc.body.edge;
+    if (e.style !== "perforation") { decoratedPlatePath(ctx); ctx.stroke(); return; }
+    var per = window.platePerimeterMm(doc.body);
+    ctx.save(); // outline, suppressed where a hole mouth opens
+    ctx.beginPath(); ctx.rect(0, 0, cv.width, cv.height);
+    plateHolesPath(ctx, per, e, false);
+    ctx.clip("evenodd");
+    plateNominalPath(ctx, per); ctx.stroke();
+    ctx.restore();
+    ctx.save(); // the bite arcs: circles clipped to the plate interior
+    plateNominalPath(ctx, per); ctx.clip();
+    plateHolesPath(ctx, per, e, true); ctx.stroke();
+    ctx.restore();
+  }
+
   // Rounded-rect path inset by insetMm on all sides (Rand-Rahmen 2D preview).
   // Returns false when the inset collapses the rect. Preview-approximation:
   // the inset corner radius is max(0, cornerRadius - inset); geometry is authoritative.
@@ -756,7 +849,8 @@
       ctx.fillStyle = el.color || "#ffffff";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = `${el.fontWeight || "normal"} ${Math.max(1, Math.round(h))}px ${el.fontFamily || "system-ui"}`;
-      ctx.fillText(el.text || "", 0, 0);
+      if (el.arcDeg) window.drawArcText(ctx, el.text || "", el.arcDeg, Math.max(1, Math.round(h)));
+      else ctx.fillText(el.text || "", 0, 0);
     } else if (el.type === "shape") {
       ctx.fillStyle = el.color || "#000000";
       ctx.beginPath();
@@ -828,39 +922,54 @@
 
     if (shape === "rect") {
       // Rounded-rect plate: outline only (B5: no solid fill so elements/relief are visible).
-      // Clip elements inside the body outline.
-      ctx.save(); bodyPath(ctx); ctx.clip();
+      // Clip elements inside the body outline (decorated when a Zierkante is active).
+      const deco = edgeActive();
+      ctx.save();
+      if (deco) clipDecoratedPlate(ctx);
+      else { bodyPath(ctx); ctx.clip(); }
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
       ctx.restore();
       // Outline.
-      bodyPath(ctx); ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1;
+      if (deco) strokeDecoratedPlate(ctx);
+      else { bodyPath(ctx); ctx.stroke(); }
       // Rand-Rahmen preview: stroke inset by widthMm/2 with lineWidth widthMm*s
       // (drawn over the content — "ring wins"; exact band comes from the engine).
+      // With a Zierkante the ring is clipped to the decorated outline so its
+      // outer edge follows the waves/teeth like the printed band does.
       const frame = body.frame;
-      if (frame && frame.widthMm > 0 && insetBodyPath(ctx, frame.widthMm / 2)) {
+      if (frame && frame.widthMm > 0) {
         ctx.save();
-        ctx.strokeStyle = frame.color || "#000000";
-        ctx.lineWidth = frame.widthMm * s;
-        ctx.stroke();
+        if (deco) clipDecoratedPlate(ctx);
+        if (insetBodyPath(ctx, frame.widthMm / 2)) {
+          ctx.strokeStyle = frame.color || "#000000";
+          ctx.lineWidth = frame.widthMm * s;
+          ctx.stroke();
+        }
         ctx.restore();
       }
     } else if (shape === "circle") {
       // Circle plate: outline only (B5: no solid fill so elements/relief are visible).
       const r = Math.min(body.widthMm, body.heightMm) / 2 * s;
       const cx = mmX(body.widthMm / 2), cy = mmY(body.heightMm / 2);
-      // Clip to circle.
+      const decoC = edgeActive();
+      // Clip to circle (decorated when a Zierkante is active).
       ctx.save();
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+      if (decoC) clipDecoratedPlate(ctx);
+      else { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip(); }
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
       ctx.restore();
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1;
+      if (decoC) strokeDecoratedPlate(ctx);
+      else { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); }
       // Rand-Rahmen preview: ring stroke at r - widthMm/2 ("ring wins" over content).
+      // Clipped to the decorated outline when a Zierkante is active (see rect).
       const frame = body.frame;
       if (frame && frame.widthMm > 0) {
         const fr = r - (frame.widthMm / 2) * s;
         if (fr > 0) {
           ctx.save();
+          if (decoC) clipDecoratedPlate(ctx);
           ctx.beginPath(); ctx.arc(cx, cy, fr, 0, Math.PI * 2);
           ctx.strokeStyle = frame.color || "#000000";
           ctx.lineWidth = frame.widthMm * s;
@@ -948,6 +1057,21 @@
       ctx.restore();
     }
 
+    // Scatter path overlay: the stroke being drawn (px) or the stored path (mm→px).
+    var scPathPts = (drag && drag.handle === "scatterPath" && drag.ptsPx && drag.ptsPx.length > 1) ? drag.ptsPx
+      : (scatter && scatter.mode === "path" && scatter.path && scatter.path.length > 1 && !(drag && drag.handle === "scatterPath"))
+        ? scatter.path.map(function (p) { return { x: mmX(p.x), y: mmY(p.y) }; })
+        : null;
+    if (scPathPts) {
+      ctx.save();
+      ctx.strokeStyle = "#6b4fb0";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      scPathPts.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+      ctx.stroke();
+      ctx.restore();
+    }
     if (drag && (drag.handle === "marquee" || drag.handle === "scatterRegion") && drag.rectPx) {
       ctx.save();
       ctx.strokeStyle = "#6b4fb0"; ctx.fillStyle = "rgba(107,79,176,0.10)";
@@ -1128,6 +1252,13 @@
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
     // Scatter sub-mode: while the panel is open, a canvas drag defines the placement region.
     if (scatter) {
+      if (scatter.mode === "path") {
+        const toMm0 = function (p, v0) { return (p - state.marginPx) / state.scale + v0; };
+        drag = { handle: "scatterPath", px, py, ptsPx: [{ x: px, y: py }],
+                 pathMm: [{ x: toMm0(px, state.viewX0), y: toMm0(py, state.viewY0) }] };
+        cv.setPointerCapture(e.pointerId);
+        return;
+      }
       drag = { handle: "scatterRegion", px, py };
       cv.setPointerCapture(e.pointerId);
       return;
@@ -1302,6 +1433,17 @@
       scheduleRebuild3D();
       return;
     }
+    if (drag.handle === "scatterPath") {
+      // freehand path: sample a point every few pixels
+      const last = drag.ptsPx[drag.ptsPx.length - 1];
+      if (Math.hypot(px - last.x, py - last.y) >= 4) {
+        const toMmP = function (p, v0) { return (p - state.marginPx) / s + v0; };
+        drag.ptsPx.push({ x: px, y: py });
+        drag.pathMm.push({ x: toMmP(px, state.viewX0), y: toMmP(py, state.viewY0) });
+        render2D();
+      }
+      return;
+    }
     if (drag.handle === "scatterRegion") {
       const toMm = function (p, v0) { return (p - state.marginPx) / s + v0; };
       scatter.region = {
@@ -1364,8 +1506,13 @@
   function endDrag() {
     if (!drag) return;
     var wasScatter = drag.handle === "scatterRegion";
+    var pathMm = drag.handle === "scatterPath" ? drag.pathMm : null;
     drag = null;
     if (wasScatter && scatter) scatterGenerate(); // re-roll the preview into the new region
+    if (pathMm && scatter) {
+      if (pathMm.length > 1) { scatter.path = pathMm; scatterGenerate(); }
+      render2D();
+    }
     state.snapGuides = []; // clear transient guide lines
     // Re-fit the canvas: a move/scale/rotate (or mount move) may have pushed the element past
     // the old bounds. viewportDomain now includes element bboxes, so this keeps handles on-canvas.
@@ -1661,6 +1808,26 @@
     }
   });
 
+  // Pausen-Spickzettel: exact pause layers for manual color swaps (no AMS).
+  document.getElementById("exportPause").addEventListener("click", function () {
+    try {
+      setExportStatus("Berechne …");
+      const parts = window.buildParts(visibleDoc());
+      const sheet = window.buildPauseSheet(parts, doc.body.layerHeightMm);
+      if (sheet.swaps.length <= 1 && !sheet.mixed.length) {
+        setExportStatus("Nur eine Farbe — keine Pausen nötig.");
+        return;
+      }
+      const text = window.formatPauseSheet(sheet, { name: exportFileName(), layerHeightMm: doc.body.layerHeightMm });
+      downloadBlob(new Blob([text], { type: "text/plain;charset=utf-8" }), exportFileName() + "-pausen.txt");
+      setExportStatus(sheet.mixed.length
+        ? "Fertig — Achtung: enthält Zonen, die nur mit AMS druckbar sind (siehe Zettel)."
+        : "Fertig.");
+    } catch (e) {
+      setExportStatus("Fehler: " + e.message);
+    }
+  });
+
   // Render the DESIGN to an off-screen PNG canvas. MIRRORS buildDesignSVG (base plate color
   // filled, elements on top, then everything outside the real footprint — rounded corners /
   // circle / free silhouette / mount hole — blanked to transparent), so the PNG matches the
@@ -1857,6 +2024,7 @@
     setHidden("borderField", shape !== "free");
     setHidden("frameField", isImage); // rect/circle/free all support the Rand-Rahmen
     setHidden("cornerField", shape !== "rect");
+    setHidden("edgeField", shape !== "rect" && shape !== "circle"); // Zierkante needs the analytic outline
     setHidden("simpleSizeSection", isImage);
     // A Bild object has no plate → mount (Befestigung) and plate-centered "Ausrichten" are
     // meaningless. Force mount off (so 2D marker, hit-test, and 3D geometry all agree) and hide
@@ -1895,6 +2063,35 @@
   bindNum("cornerMm", 0, function (v) {
     doc.body.cornerRadiusMm = v; render2D(); scheduleRebuild3D();
   });
+
+  // Zierkante (rect/circle): style select + size/period fields
+  function syncEdgeFields() {
+    var e = doc.body.edge || { style: "none", sizeMm: 2, periodMm: 8 };
+    var st = document.getElementById("edgeStyle");
+    if (st) st.value = e.style || "none";
+    var params = document.getElementById("edgeParams");
+    if (params) params.hidden = !e.style || e.style === "none";
+    var sz = document.getElementById("edgeSizeMm");
+    if (sz) sz.value = e.sizeMm;
+    var pd = document.getElementById("edgePeriodMm");
+    if (pd) pd.value = e.periodMm;
+  }
+  (function () {
+    var st = document.getElementById("edgeStyle");
+    if (st) st.addEventListener("change", function () {
+      if (!doc.body.edge) doc.body.edge = window.defaultEdge();
+      doc.body.edge.style = st.value;
+      syncEdgeFields(); render2D(); scheduleRebuild3D();
+    });
+    bindNum("edgeSizeMm", 0.1, function (v) {
+      if (!doc.body.edge) doc.body.edge = window.defaultEdge();
+      doc.body.edge.sizeMm = v; render2D(); scheduleRebuild3D();
+    });
+    bindNum("edgePeriodMm", 0.5, function (v) {
+      if (!doc.body.edge) doc.body.edge = window.defaultEdge();
+      doc.body.edge.periodMm = v; render2D(); scheduleRebuild3D();
+    });
+  }());
 
   // Border (shown only for Free)
   bindNum("borderMm", 0, function (v) {
@@ -2142,6 +2339,8 @@
     document.getElementById("borderMm").value = doc.body.borderMm != null ? doc.body.borderMm : 2;
     // Eckenradius (rectangle)
     document.getElementById("cornerMm").value = doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 4;
+    // Zierkante
+    syncEdgeFields();
     // Rahmen (Rand-Rahmen)
     var fr = doc.body.frame;
     document.getElementById("frameMm").value = fr && fr.widthMm != null ? fr.widthMm : 0;
@@ -2582,6 +2781,10 @@
     // Font controls (Schriftart + Fett + Upload): text elements only.
     var advFontField = document.getElementById("advFontField");
     if (advFontField) advFontField.hidden = !isText;
+    var advArcField = document.getElementById("advArcField");
+    if (advArcField) advArcField.hidden = !isText;
+    var advArcNode = document.getElementById("advArc");
+    if (advArcNode) advArcNode.value = isText ? (el.arcDeg || 0) : 0;
     if (isText) {
       populateFontSelect(document.getElementById("advFontFamily"), el.fontFamily || "system-ui");
       var boldNode = document.getElementById("advFontBold");
@@ -2771,6 +2974,13 @@
   bindElementField("advFontBold", "change", function (el, node) {
     if (el.type !== "text") return false;
     el.fontWeight = node.checked ? "bold" : "normal";
+  });
+
+  // -- Arc text (Bogen°, text elements): 0 = straight, ± bends up/down --
+  bindElementField("advArc", "input", function (el, node) {
+    if (el.type !== "text") return false;
+    var v = parseFloat(node.value);
+    el.arcDeg = isNaN(v) ? 0 : Math.max(-350, Math.min(350, v));
   });
 
   // -- Shape kind (Rechteck / Kreis, shape elements) --
@@ -3016,9 +3226,26 @@
   function scatterOpen() {
     var el = selectedEl();
     if (!el || state.selectionIds.length !== 1) return;
-    scatter = { sourceId: el.id, region: null, seed: (Date.now() >>> 0), previewIds: [] };
+    scatter = { sourceId: el.id, region: null, path: null, mode: "region", seed: (Date.now() >>> 0), previewIds: [] };
     var p = document.getElementById("scatterPanel"); if (p) p.hidden = false;
+    scatterSyncMode();
     scatterGenerate();
+  }
+
+  // Reflect scatter.mode in the panel: seg buttons, per-mode rows, hint text.
+  function scatterSyncMode() {
+    var isPath = !!(scatter && scatter.mode === "path");
+    var br = document.getElementById("scModeRegion"), bp = document.getElementById("scModePath");
+    if (br) br.classList.toggle("seg-active", !isPath);
+    if (bp) bp.classList.toggle("seg-active", isPath);
+    var alignRow = document.getElementById("scAlignRow");
+    if (alignRow) alignRow.hidden = !isPath;
+    var avoidRow = document.getElementById("scAvoidRow");
+    if (avoidRow) avoidRow.hidden = isPath; // even spacing needs no overlap avoidance
+    var hint = document.getElementById("scHint");
+    if (hint) hint.textContent = isPath
+      ? "Zeichne einen Pfad auf der Fläche — die Kopien folgen ihm gleichmäßig."
+      : "Ziehe auf der Fläche einen Bereich auf (sonst ganze Platte).";
   }
   function scatterClose(commit) {
     var p = document.getElementById("scatterPanel"); if (p) p.hidden = true;
@@ -3038,6 +3265,7 @@
       rotMin: num("scRotMin", 0), rotMax: num("scRotMax", 360),
       scaleMin: num("scScaleMin", 0.6), scaleMax: num("scScaleMax", 1.4),
       avoidOverlap: !!(document.getElementById("scAvoid") && document.getElementById("scAvoid").checked),
+      alignToPath: !!(document.getElementById("scAlign") && document.getElementById("scAlign").checked),
     };
   }
   function scatterGenerate() {
@@ -3045,8 +3273,14 @@
     scatterClearPreview();
     var src = doc.elements.find(function (e) { return e.id === scatter.sourceId; });
     if (!src) return;
-    var region = scatter.region || { x0: 0, y0: 0, x1: doc.body.widthMm, y1: doc.body.heightMm };
-    var transforms = window.scatterCopies({ wMm: src.wMm, hMm: src.hMm }, region, scatterParams(), scatter.seed);
+    var transforms;
+    if (scatter.mode === "path") {
+      if (!scatter.path || scatter.path.length < 2) { render2D(); scheduleRebuild3D(); return; }
+      transforms = window.scatterAlongPath({ wMm: src.wMm, hMm: src.hMm }, scatter.path, scatterParams(), scatter.seed);
+    } else {
+      var region = scatter.region || { x0: 0, y0: 0, x1: doc.body.widthMm, y1: doc.body.heightMm };
+      transforms = window.scatterCopies({ wMm: src.wMm, hMm: src.hMm }, region, scatterParams(), scatter.seed);
+    }
     var ids = [];
     transforms.forEach(function (t) {
       var drop = { _img: 1, _display: 1, _displayKey: 1, _hidden: 1, id: 1 };
@@ -3076,6 +3310,31 @@
       var n = document.getElementById(id); if (n) n.addEventListener("input", function () { if (scatter) scatterGenerate(); });
     });
     var av = document.getElementById("scAvoid"); if (av) av.addEventListener("change", function () { if (scatter) scatterGenerate(); });
+    var al = document.getElementById("scAlign"); if (al) al.addEventListener("change", function () { if (scatter) scatterGenerate(); });
+    // Mode toggle: Bereich (random in a region) vs Pfad (evenly along a drawn path).
+    function setScatterMode(mode) {
+      if (!scatter || scatter.mode === mode) return;
+      scatter.mode = mode;
+      var rMin = document.getElementById("scRotMin"), rMax = document.getElementById("scRotMax");
+      if (mode === "path") {
+        // Tangent alignment beats full random rotation: park the rotation range
+        // while in path mode (restored on switching back to Bereich), so the
+        // copies actually follow the drawn path.
+        if (rMin && rMax) {
+          scatter.rotBackup = { min: rMin.value, max: rMax.value };
+          if (parseFloat(rMin.value) === 0 && parseFloat(rMax.value) === 360) rMax.value = 0;
+        }
+        scatterClearPreview();
+      } else if (scatter.rotBackup && rMin && rMax) {
+        rMin.value = scatter.rotBackup.min;
+        rMax.value = scatter.rotBackup.max;
+        scatter.rotBackup = null;
+      }
+      scatterSyncMode();
+      scatterGenerate();
+    }
+    wire("scModeRegion", function () { setScatterMode("region"); });
+    wire("scModePath", function () { setScatterMode("path"); });
   }());
   // ---- Relief height: the "Auto" button removes the manual override ----
   (function () {
