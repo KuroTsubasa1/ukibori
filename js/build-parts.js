@@ -915,9 +915,47 @@
     const SEAM_CLEARANCE_MM = 0.2;
     const out = [];
 
+    // B: minimum border around a rim object on its own plate.
+    const B = Math.max(2, inset);
+    // pmm: pixel size in mm (average of x and y pitch).
+    const pmm = (1 / sx + 1 / sy) / 2;
+
+    // Collect rim elements once (before the plate loop). Each entry carries
+    // the raw silhouette mask, the resolved level, and a signed-mm distance
+    // field dC (positive = inside the rim object, negative = outside).
+    // dC[i] = mask[i] ? +dIn[i]*pmm : -dOut[i]*pmm
+    // Two chamfer DT passes (same cost class as the drawn opening field).
+    const rims = [];
+    if (f) {
+      const dk0rim = Object.assign({}, doc, { shadowbox: null });
+      for (const el of doc.elements) {
+        if (modeOf(el) !== "rim") continue;
+        if (el.type === "image" && !el._img) continue;
+        const level = layerOf(el);
+        const rendered = __renderElementV2(el, dk0rim, cols, rows, grid);
+        if (!rendered || !rendered.mask) continue;
+        const mask = rendered.mask;
+        // Build inside/outside masks for two DT passes.
+        const inv = new Uint8Array(cols * rows);
+        for (let i = 0; i < inv.length; i++) inv[i] = mask[i] ? 0 : 1;
+        const dIn = window.__chamferDT(inv, cols, rows);   // distance inward (from outside edge)
+        const dOut = window.__chamferDT(mask, cols, rows); // distance outward (from inside edge)
+        const dC = new Float32Array(cols * rows);
+        for (let i = 0; i < dC.length; i++) {
+          dC[i] = mask[i] ? -dIn[i] * pmm : dOut[i] * pmm;
+        }
+        // Sign: inside rim dC < 0, outside dC > 0 (mm from rim edge).
+        // openAt requires dC > B+delta+seam → only holds far outside the rim.
+        // Cut term: B+delta-dC > 0 when cell is inside or within B+delta of rim
+        // → max() makes it plate material (protected ring around the object).
+        rims.push({ el, level, mask, dC });
+      }
+    }
+
     // Collect float elements once (before the plate loop). Each entry carries
     // the clipped silhouette mask and the resolved level (clamped to n-2 so
     // the back plate — which has no opening — is never a float target).
+    // Floats are collected AFTER rims so their masks can use rim dC fields.
     const floats = [];
     if (f) {
       for (const el of doc.elements) {
@@ -929,13 +967,22 @@
         const dk0 = Object.assign({}, doc, { shadowbox: null });
         const rendered = __renderElementV2(el, dk0, cols, rows, grid);
         if (!rendered || !rendered.mask) continue;
-        // Clip silhouette to the opening at this level: {f > level*inset}.
+        // Clip silhouette to the adapted opening at this level (includes rim terms).
+        // openAt(level, c, r, SEAM_CLEARANCE_MM): f > level*inset+seam AND all rims with
+        // level<=level have dC > B + (level-rm.level)*inset + seam.
         const raw = rendered.mask;
         const mask = new Uint8Array(cols * rows);
         for (let i = 0; i < mask.length; i++) {
           if (!raw[i]) continue;
-          const c = i % cols, r = (i / cols) | 0;
-          if (f(c, r) > levelInset + SEAM_CLEARANCE_MM) mask[i] = 1;
+          const c = i % cols, r2 = (i / cols) | 0;
+          if (f(c, r2) <= levelInset + SEAM_CLEARANCE_MM) continue;
+          // Check all rim terms at this level.
+          let blocked = false;
+          for (const rm of rims) {
+            if (rm.level > level) continue;
+            if (rm.dC[i] <= B + (level - rm.level) * inset + SEAM_CLEARANCE_MM) { blocked = true; break; }
+          }
+          if (!blocked) mask[i] = 1;
         }
         floats.push({ el, level, mask });
       }
@@ -990,36 +1037,42 @@
       const base = window.shapeFootprintField(cols, rows, dk.body, dk.mount);
       let fp = base;
       if (!isBack && f) {
+        // Adapted opening footprint: plate material where NOT openAt(k, c, r, 0).
+        // openAt(j, c, r, seam) := f > j*inset+seam AND all rims with level<=j have
+        // dC > B + (j-level)*inset + seam.
+        // Implemented as: fp = min(base, s * max(cutF, max_rims cutC))
+        //   cutF = k*inset - f(c,r)  (positive → inside opening → cut)
+        //   cutC_rm = B + (k-rm.level)*inset - rm.dC[i]  (positive → inside rim zone → cut)
+        // The max over all cuts: if any cut is positive the cell is hollow.
+        // Back plate: skip (isBack guard above keeps fp = base).
         const insetK = k * inset;
-        fp = (c, r) => Math.min(base(c, r), (insetK - f(c, r)) * s);
+        const rimsAtOrBelow = rims.filter((rm) => rm.level <= k);
+        if (rimsAtOrBelow.length === 0) {
+          // No rim terms: same as old opening cut.
+          fp = (c, r) => Math.min(base(c, r), (insetK - f(c, r)) * s);
+        } else {
+          fp = (c, r) => {
+            const bv = base(c, r);
+            if (bv <= 0) return bv;
+            const i = r * cols + c;
+            let cut = insetK - f(c, r); // f-term (positive → open)
+            for (const rm of rimsAtOrBelow) {
+              const rimCut = B + (k - rm.level) * inset - rm.dC[i];
+              if (rimCut > cut) cut = rimCut;
+            }
+            return Math.min(bv, cut * s);
+          };
+        }
       }
-      // Rim elements: union their silhouettes into the plate footprint so they
-      // jut into the opening (clouds on the rim). Clipped to the plate outline.
-      // Unloaded images are silently skipped; el.cutout is inert here (flag
-      // only applies to Auf-Platte content — rim/float always render silhouette).
-      const rimEls = doc.elements.filter((el) => layerOf(el) === k && modeOf(el) === "rim" && !(el.type === "image" && !el._img));
-      const rimMasks = [];
-      let over = null;
-      for (const el of rimEls) {
-        const rendered = __renderElementV2(el, dk, cols, rows, grid);
-        if (!rendered || !rendered.mask) continue;
-        if (!over) over = new Uint8Array(cols * rows);
-        const m = rendered.mask;
-        for (let i = 0; i < m.length; i++) if (m[i]) over[i] = 1;
-        rimMasks.push({ el, mask: m });
-      }
-      if (over) {
-        const inner = fp;
-        fp = (c, r) => {
-          if (over[r * cols + c] && base(c, r) > 0) return Math.max(inner(c, r), 0.5);
-          return inner(c, r);
-        };
-      }
+      // Collect rim masks for this plate (for rand prism pieces).
+      // The old 'over' union block is removed — the adapted fp above subsumes it.
+      const rimMasks = rims
+        .filter((rm) => rm.level === k)
+        .map((rm) => ({ el: rm.el, mask: rm.mask }));
       const comp = composeDesignV2(dk, cols, rows, grid);
-      // fp is the opening-cut footprint for tunnel plates (base for the back plate).
-      // __contentParts clips all content — engraved, raised, heightmap — to fp, so
-      // nothing is emitted over the hollow ring; rim elements extend the footprint
-      // via the union above and become standalone pieces (not pushed into plateParts).
+      // fp is the adapted opening footprint for tunnel plates (base for the back plate).
+      // __contentParts clips all content to fp; rim objects extend plate material via
+      // the B-border cut term (no separate union needed).
       const plateParts = __contentParts(dk, comp, grid, fp, null, null);
 
       // flatTop: cells no element owns → plain plate face at exactly T. Used to
@@ -1035,14 +1088,28 @@
       // piece records. Pegs (when pins on) land on flat cells of this plate
       // (plateParts, after rename, before shift); hole spots travel with the piece
       // record for emission later.
+      // Adapted prism clip: keep cell iff base > 0 AND (k===0 OR openAt(k-1, c, r, SEAM)).
+      // openAt(k-1,...): f > (k-1)*inset+seam AND all rims with level<=k-1 have
+      // dC > B + (k-1-rm.level)*inset + seam. A rim at level k never fires at k-1
+      // (level > k-1), so the object's own term never clips it here (correct).
       const insetFront = (k - 1) * inset;
+      const rimsFront = f ? rims.filter((rm) => rm.level <= k - 1) : [];
       const randPegsThisPlate = []; // buffered; appended after rename, before shift
       for (const rm of rimMasks) {
         const prismMask = new Uint8Array(cols * rows);
         for (let i = 0; i < prismMask.length; i++) {
           const c = i % cols, r = (i / cols) | 0;
           if (!rm.mask[i] || base(c, r) <= 0) continue;
-          if (k !== 0 && f && f(c, r) <= insetFront + SEAM_CLEARANCE_MM) continue;
+          if (k !== 0 && f) {
+            // Must satisfy openAt(k-1): f term
+            if (f(c, r) <= insetFront + SEAM_CLEARANCE_MM) continue;
+            // Rim terms at levels <= k-1
+            let blocked = false;
+            for (const rr of rimsFront) {
+              if (rr.dC[i] <= B + (k - 1 - rr.level) * inset + SEAM_CLEARANCE_MM) { blocked = true; break; }
+            }
+            if (blocked) continue;
+          }
           prismMask[i] = 1;
         }
         let holeSpots = [];

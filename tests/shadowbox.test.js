@@ -588,4 +588,53 @@
       "no back peg lands on the engraved face");
     assert(parts.some((p) => p.name.indexOf("ebene-4-schwebeteil-") === 0), "float piece still emitted");
   });
+
+  function rimAdaptDoc() {
+    const d = sbDoc(); // 60x40, T=2, 4 layers, inset 3
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 8; // openings: j*3+8 from edge
+    const cloud = window.makeElementV2("shape", { cxMm: 30, cyMm: 13, wMm: 10, hMm: 6, color: "#FFFFFF" });
+    cloud.sbLayer = 1; cloud.sbMode = "rim"; // on plate 2 of 4, bulging into the tunnel
+    d.elements.push(cloud);
+    return d;
+  }
+  function grundArea(parts, name) {
+    const p = parts.find((q) => q.name === name);
+    if (!p) return 0;
+    const zTop = zbounds(p.facets)[1];
+    let a = 0;
+    for (const f2 of p.facets) if (f2.every((v) => Math.abs(v[2] - zTop) < 1e-6)) {
+      a += Math.abs((f2[1][0] - f2[0][0]) * (f2[2][1] - f2[0][1])
+                  - (f2[2][0] - f2[0][0]) * (f2[1][1] - f2[0][1])) / 2;
+    }
+    return a;
+  }
+
+  test("schaukasten-v3: deeper plates wrap the rim object; front plates untouched", () => {
+    const withCloud = window.buildParts(rimAdaptDoc());
+    const bare = rimAdaptDoc(); bare.elements = [];
+    const without = window.buildParts(bare);
+    // own plate grows around the object (border B)
+    assert(grundArea(withCloud, "ebene-2-grundplatte") > grundArea(without, "ebene-2-grundplatte") + 10,
+      "own plate grows around the object");
+    // deeper plate wraps it one inset step wider
+    const gain2 = grundArea(withCloud, "ebene-2-grundplatte") - grundArea(without, "ebene-2-grundplatte");
+    const gain3 = grundArea(withCloud, "ebene-3-grundplatte") - grundArea(without, "ebene-3-grundplatte");
+    assert(gain3 > gain2 + 5, "deeper ring wraps wider (one more inset step)");
+    // plates in FRONT are byte-identical
+    const pick = (parts, pre) => JSON.stringify(parts.filter((p) => p.name.indexOf(pre) === 0 && p.name.indexOf("grundplatte") >= 0));
+    assertEqual(pick(withCloud, "ebene-1-"), pick(without, "ebene-1-"), "front plate unaffected");
+  });
+
+  test("schaukasten-v3: floats are clipped by the adapted opening", () => {
+    const d = rimAdaptDoc();
+    const fl = window.makeElementV2("shape", { cxMm: 30, cyMm: 16, wMm: 16, hMm: 8, color: "#00AA00" });
+    fl.sbLayer = 2; fl.sbMode = "float"; // overlaps the cloud's wrap region on level 2
+    d.elements.push(fl);
+    const withCloud = window.buildParts(d);
+    const noCloud = rimAdaptDoc(); noCloud.elements = [JSON.parse(JSON.stringify(fl))];
+    const without = window.buildParts(window.migrateProject(noCloud));
+    const area = (parts) => parts.filter((p) => p.name.indexOf("schwebeteil") >= 0)
+      .reduce((a, p) => a + p.facets.length, 0);
+    assert(area(withCloud) < area(without), "float loses the region claimed by the wrap");
+  });
 })();
