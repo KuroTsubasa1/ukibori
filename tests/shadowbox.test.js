@@ -470,8 +470,9 @@
     d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 6; d.shadowbox.insetPerLayerMm = 2;
     const lo = window.makeElementV2("shape", { cxMm: 26, cyMm: 20, wMm: 8, hMm: 8, color: "#00AA00" });
     lo.sbLayer = 3; lo.sbMode = "float";
-    const up = window.makeElementV2("shape", { cxMm: 34.5, cyMm: 20, wMm: 8, hMm: 8, color: "#FF7700" });
-    up.sbLayer = 2; up.sbMode = "float"; // ~0.5mm sliver overlap with lo
+    const up = window.makeElementV2("shape", { cxMm: 33.5, cyMm: 20, wMm: 8, hMm: 8, color: "#FF7700" });
+    up.sbLayer = 2; up.sbMode = "float"; // true 0.5mm sliver overlap (x 29.5..30 vs lo 22..30):
+    // the overlap is non-empty, so the pin is rejected by the clearance check, not the empty gate
     d.elements.push(lo, up);
     const parts = window.buildParts(d);
     assert(!parts.some((p) => p.name.indexOf("ebene-4-stift-") === 0), "sliver overlap -> no piece-piece pin");
