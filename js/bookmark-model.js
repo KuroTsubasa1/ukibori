@@ -107,6 +107,21 @@ function defaultFrame() {
   return { widthMm: 0, heightMm: 2, color: "#000000" };
 }
 
+// Schaukasten: layered paper-cut stack. One opening field drives all plates;
+// plate k's opening = {field > k*insetPerLayerMm}. layers includes the solid
+// back plate. enabled=false keeps buildParts byte-identical (parity).
+function defaultShadowbox() {
+  return {
+    enabled: false,
+    layers: 6,
+    insetPerLayerMm: 4,
+    opening: { source: "auto", marginMm: 12, waviness: 0.5, periodMm: 40, seed: 1, points: null },
+    colorFront: "#DDEEFA",
+    colorBack: "#1B5E9E",
+    stand: { enabled: true, heightMm: 15, slotDepthMm: 8, railMm: 5, tolMm: 0.4, color: "#C8BBAE" },
+  };
+}
+
 function defaultDoc() {
   return {
     version: DOC_VERSION,
@@ -141,6 +156,7 @@ function defaultDoc() {
     // workpiece's face — engraved: topmost plate band; raised: full-face slab under the
     // motif stack), pushing element colors one step further. null = off.
     topLayerColor: null,
+    shadowbox: defaultShadowbox(),
     elements: [], groups: [], fonts: {},
   };
 }
@@ -169,7 +185,8 @@ function migrateElement(el, doc, layerHmm) {
     id: el.id, type: el.type,
     cxMm: el.cxMm, cyMm: el.cyMm, wMm: el.wMm, hMm: el.hMm, rotationDeg: el.rotationDeg || 0,
     flipH: false, flipV: false,
-    cutout: !!el.cutout, color: el.color, groupId: el.groupId != null ? el.groupId : null, depth,
+    cutout: !!el.cutout, color: el.color, groupId: el.groupId != null ? el.groupId : null,
+    sbLayer: null, sbOverhang: false, depth,
   };
   if (el.type === "image") { out.src = el.src; out._img = null; }
   if (el.type === "text") { out.text = el.text; out.fontFamily = el.fontFamily; out.fontWeight = el.fontWeight; out.arcDeg = el.arcDeg != null ? el.arcDeg : 0; }
@@ -193,6 +210,12 @@ function migrateProject(doc) {
     if (doc.autoLayerHeights == null) doc.autoLayerHeights = false;
     if (doc.topLayerColor === undefined) doc.topLayerColor = null;
     if (doc.body && doc.body.baseThicknessMm == null) doc.body.baseThicknessMm = 0;
+    if (doc.shadowbox == null) doc.shadowbox = defaultShadowbox();
+    else {
+      const sd = defaultShadowbox();
+      if (doc.shadowbox.opening == null) doc.shadowbox.opening = sd.opening;
+      if (doc.shadowbox.stand == null) doc.shadowbox.stand = sd.stand;
+    }
     if (!Array.isArray(doc.groups)) doc.groups = [];
     for (const el of doc.elements || []) {
       if (el.flipH == null) el.flipH = false;
@@ -209,6 +232,8 @@ function migrateProject(doc) {
       if (el.type === "text" && el.arcDeg == null) el.arcDeg = 0;
       if (el.type === "text" && el.textPath === undefined) el.textPath = null;
       if (el.groupId === undefined) el.groupId = null;
+      if (el.sbLayer === undefined) el.sbLayer = null;
+      if (el.sbOverhang == null) el.sbOverhang = false;
     }
     return doc;
   }
@@ -239,6 +264,7 @@ function migrateProject(doc) {
     colorStepLayers: doc.colorStepLayers != null ? doc.colorStepLayers : 2,
     amsPalette: [], amsSolidBase: false,
     autoLayerHeights: false, topLayerColor: null, // v1 saves predate the feature: keep manual heights
+    shadowbox: defaultShadowbox(),
     elements: (doc.elements || []).map(el => migrateElement(el, doc, layerH)),
     groups: [],
     fonts: doc.fonts || {},
@@ -254,6 +280,7 @@ function makeElementV2(type, props) {
     cxMm: 25, cyMm: 75, wMm: 30, hMm: 30, rotationDeg: 0,
     flipH: false, flipV: false,
     cutout: false, color: "#000000", groupId: null,
+    sbLayer: null, sbOverhang: false,
     depth: defaultDepth(type),
   }, props);
   if (type === "image") { if (e.src == null) e.src = ""; e._img = e._img || null; }
