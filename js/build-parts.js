@@ -1468,6 +1468,8 @@
 
   window.freeFootprintField = freeFootprintField;
   window.imageFootprintField = imageFootprintField;
+  // Shared with js/shadowbox.js (drawn-opening signed field). Engine-internal.
+  window.__chamferDT = __chamferDT;
   // Test-only: expose __renderElementV2 so island-removal.test.js can inspect mask/r/g/b
   // directly without going through full buildParts. Not called by production code.
   window.__renderElementV2ForTest = __renderElementV2;

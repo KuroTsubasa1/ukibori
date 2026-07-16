@@ -83,4 +83,47 @@
     const { grid } = window.docGridAndFootprint(d);
     assertEqual(window.shadowboxOpeningField(d, grid), null, "no analytic perimeter");
   });
+
+  test("schaukasten: drawn opening — polygon mask + signed field", () => {
+    const d = sbDoc();
+    d.shadowbox.opening.source = "drawn";
+    // diamond centered on the plate (60x40): well inside, area ~200 mm^2
+    d.shadowbox.opening.points = [
+      { xMm: 30, yMm: 8 }, { xMm: 50, yMm: 20 }, { xMm: 30, yMm: 32 }, { xMm: 10, yMm: 20 },
+    ];
+    const { grid } = window.docGridAndFootprint(d);
+    const f = window.shadowboxOpeningField(d, grid);
+    const sx = grid.cols / 60, sy = grid.rows / 40;
+    const at = (x, y) => f(Math.round(x * sx - 0.5), Math.round(y * sy - 0.5));
+    assert(at(30, 20) > 0, "diamond center inside");
+    assert(at(4, 4) < 0, "plate corner outside");
+    assert(at(30, 20) > at(38, 20), "distance decreases toward diamond rim");
+  });
+
+  test("schaukasten: degenerate drawn path falls back to auto", () => {
+    const a = sbDoc();
+    const b = sbDoc();
+    b.shadowbox.opening.source = "drawn";
+    b.shadowbox.opening.points = [{ xMm: 30, yMm: 20 }, { xMm: 31, yMm: 20 }]; // < 3 points
+    const { grid } = window.docGridAndFootprint(a);
+    const fa = window.shadowboxOpeningField(a, grid);
+    const fb = window.shadowboxOpeningField(b, grid);
+    assertClose(fa(48, 48), fb(48, 48), 1e-9, "same as auto at a probe cell");
+  });
+
+  test("schaukasten: opening loops are closed and nested", () => {
+    const d = sbDoc();
+    const l0 = window.shadowboxOpeningLoops(d, 0);
+    const l2 = window.shadowboxOpeningLoops(d, 2);
+    assert(l0.length >= 1 && l2.length >= 1, "loops exist");
+    const span = (loops) => {
+      let min = Infinity, max = -Infinity;
+      for (const lp of loops) for (const p of lp) { min = Math.min(min, p.xMm); max = Math.max(max, p.xMm); }
+      return max - min;
+    };
+    assert(span(l2) < span(l0), "deeper opening is smaller");
+    for (const p of l0[0]) {
+      assert(p.xMm > 0 && p.xMm < 60 && p.yMm > 0 && p.yMm < 40, "loop inside plate");
+    }
+  });
 })();
