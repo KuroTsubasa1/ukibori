@@ -812,12 +812,26 @@
     const lineBand = __zierlinieBand(doc, grid, footprint, comp, band, domainExpanded);
     const lineMode = lineBand ? doc.body.line.mode : "none";
 
+    return [
+      ...__contentParts(doc, comp, grid, footprint, band,
+        lineMode === "engraved" ? lineBand : null),
+      ...buildFrameParts(doc, band, cols, rows, pitch),
+      ...buildZierlinieParts(doc, lineMode === "raised" ? lineBand : null, cols, rows, pitch),
+      ...buildMountRingParts(doc),
+    ];
+  }
+
+  // Content assembly shared by buildParts and buildShadowboxParts: reclassifies
+  // non-engraved pixels as base for the engraved pass, then concatenates the
+  // three content builders. Extracted verbatim — order and output byte-identical.
+  function __contentParts(doc, comp, grid, footprint, band, grooveBand) {
+    const { cols, rows, pitch } = grid;
     const isEngravedEi = (ei) => {
       const d = doc.elements[ei] && doc.elements[ei].depth;
       return !!(d && d.direction === "engraved" && d.mode !== "heightmap");
     };
     const base = window.hexToRgb(doc.body.baseColor);
-    // depthMm and cutout are shared read-only (alias intentional; only r/g/b/isBase/owner are sliced because only they are rewritten).
+    // depthMm and cutout are shared read-only (alias intentional; only r/g/b/isBase/owner are rewritten).
     const engComp = {
       r: comp.r.slice(), g: comp.g.slice(), b: comp.b.slice(),
       depthMm: comp.depthMm, cutout: comp.cutout,
@@ -831,13 +845,9 @@
       }
     }
     return [
-      ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint, band,
-        lineMode === "engraved" ? lineBand : null),
+      ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint, band, grooveBand),
       ...buildRaisedParts(doc, footprint, comp, grid, band),
       ...buildHeightmapParts(doc, footprint, grid, band),
-      ...buildFrameParts(doc, band, cols, rows, pitch),
-      ...buildZierlinieParts(doc, lineMode === "raised" ? lineBand : null, cols, rows, pitch),
-      ...buildMountRingParts(doc),
     ];
   }
 
