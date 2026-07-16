@@ -1990,7 +1990,7 @@
   document.getElementById("exportMf").addEventListener("click", function () {
     try {
       setExportStatus("Exportiere …");
-      const parts = window.buildParts(visibleDoc());
+      const parts = window.buildParts(visibleDoc(), { layout: "bed" });
       const blob = window.build3MF(parts);
       downloadBlob(blob, exportFileName() + ".3mf");
       setExportStatus("Fertig.");
@@ -2002,7 +2002,7 @@
   document.getElementById("exportStl").addEventListener("click", function () {
     try {
       setExportStatus("Exportiere …");
-      const parts = window.buildParts(visibleDoc());
+      const parts = window.buildParts(visibleDoc(), { layout: "bed" });
       const facets = parts.flatMap(function (p) { return p.facets; });
       const u8 = window.facetsToBinarySTL(facets);
       const blob = new Blob([u8], { type: "application/octet-stream" });
@@ -2016,8 +2016,13 @@
   // Pausen-Spickzettel: exact pause layers for manual color swaps (no AMS).
   document.getElementById("exportPause").addEventListener("click", function () {
     try {
+      const doc = visibleDoc();
+      if (doc.shadowbox && doc.shadowbox.enabled) {
+        setExportStatus("Im Schaukasten-Modus nicht verfügbar — jede Platte wird einzeln und einfarbig gedruckt.");
+        return;
+      }
       setExportStatus("Berechne …");
-      const parts = window.buildParts(visibleDoc());
+      const parts = window.buildParts(doc);
       const sheet = window.buildPauseSheet(parts, doc.body.layerHeightMm);
       if (sheet.swaps.length <= 1 && !sheet.mixed.length) {
         setExportStatus("Nur eine Farbe — keine Pausen nötig.");
