@@ -886,6 +886,7 @@
     const { cols, rows, pitch } = grid;
     const f = window.shadowboxOpeningField(doc, grid);
     const layerOf = (el) => el.sbLayer == null ? n - 1 : Math.max(0, Math.min(n - 1, el.sbLayer | 0));
+    const modeOf = (el) => el.sbMode || (el.sbOverhang ? "rim" : "plate");
     const sx = cols / W, sy = rows / H, s = (sx + sy) / 2;
     const gapMm = 5;
     const out = [];
@@ -901,7 +902,7 @@
         topLayerColor: null,
         // back plate keeps a hanging hole; 'loop' (Öse) is not supported in v1
         mount: (isBack && doc.mount && doc.mount.type === "hole") ? doc.mount : __SB_MOUNT_NONE,
-        elements: doc.elements.filter((el) => layerOf(el) === k),
+        elements: doc.elements.filter((el) => layerOf(el) === k && modeOf(el) === "plate"),
         shadowbox: null,
       });
       const base = window.shapeFootprintField(cols, rows, dk.body, dk.mount);
@@ -910,17 +911,19 @@
         const insetK = k * inset;
         fp = (c, r) => Math.min(base(c, r), (insetK - f(c, r)) * s);
       }
-      // Overhang: union flagged elements' silhouettes into the plate so they
+      // Rim elements: union their silhouettes into the plate footprint so they
       // jut into the opening (clouds on the rim). Clipped to the plate outline.
+      // Cutout rim elements and unloaded images are silently skipped.
+      const rimEls = doc.elements.filter((el) => layerOf(el) === k && modeOf(el) === "rim" && !el.cutout && !(el.type === "image" && !el._img));
+      const rimMasks = [];
       let over = null;
-      for (const el of dk.elements) {
-        if (!el.sbOverhang || el.cutout) continue;
-        if (el.type === "image" && !el._img) continue;
+      for (const el of rimEls) {
         const rendered = __renderElementV2(el, dk, cols, rows, grid);
         if (!rendered || !rendered.mask) continue;
         if (!over) over = new Uint8Array(cols * rows);
         const m = rendered.mask;
         for (let i = 0; i < m.length; i++) if (m[i]) over[i] = 1;
+        rimMasks.push({ el, mask: m });
       }
       if (over) {
         const inner = fp;
@@ -932,8 +935,24 @@
       const comp = composeDesignV2(dk, cols, rows, grid);
       // fp is the opening-cut footprint for tunnel plates (base for the back plate).
       // __contentParts clips all content — engraved, raised, heightmap — to fp, so
-      // nothing is emitted over the hollow ring; the sanctioned way to place content over the opening is the per-element sbOverhang footprint union (see the overhang block above).
+      // nothing is emitted over the hollow ring; rim elements extend the footprint
+      // via the union above and emit prism parts instead of ordinary content.
       const plateParts = __contentParts(dk, comp, grid, fp, null, null);
+
+      // Rand-Wolken: prism one level forward in the element color, clipped to
+      // the front plate's opening so the closed stack never collides.
+      let rimIdx = 0;
+      for (const rm of rimMasks) {
+        rimIdx++;
+        const insetFront = (k - 1) * inset;
+        const clip = (c, r) => {
+          if (!rm.mask[r * cols + c] || base(c, r) <= 0) return false;
+          return k === 0 || !f || f(c, r) > insetFront;
+        };
+        const facets = window.traceMaskToFacets(clip, cols, rows, pitch, T, T);
+        if (facets.length) plateParts.push({ name: "rand-" + rimIdx, color: window.hexToRgb(rm.el.color || "#FFFFFF"), facets });
+      }
+
       for (const p of plateParts) p.name = "ebene-" + (k + 1) + "-" + p.name;
       if (layout === "stack") __shiftFacets(plateParts, 0, 0, (n - 1 - k) * T);
       else __shiftFacets(plateParts, k * (W + gapMm), 0, 0);

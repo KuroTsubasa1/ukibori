@@ -261,10 +261,10 @@
   });
 
   test("schaukasten: overhang element extends the plate into the opening", () => {
-    const mk = (overhang) => {
+    const mk = (rim) => {
       const d = sbDoc();
       const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 14, hMm: 10, color: "#FFFFFF" });
-      el.sbLayer = 1; el.sbOverhang = overhang;
+      el.sbLayer = 1; if (rim) el.sbMode = "rim";
       d.elements.push(el);
       return window.buildParts(d).filter((p) => p.name === "ebene-2-grundplatte")[0];
     };
@@ -345,6 +345,45 @@
     const sliver = blobMask(cols, rows, sx, sy, [{ x: 30, y: 20, r: 1.2 }]);
     assertEqual(window.shadowboxPinSpots(sliver, cols, rows, sx, sy, 2.5, 12).length, 0, "sliver skipped");
     assertEqual(window.shadowboxPinSpots(new Uint8Array(cols * rows), cols, rows, sx, sy, 2.5, 12).length, 0, "empty mask");
+  });
+
+  test("schaukasten-v2: rim element — prism one level forward, footprint kept", () => {
+    const d = sbDoc();
+    const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 12, hMm: 8, color: "#FFFFFF" });
+    el.sbLayer = 1; el.sbMode = "rim";
+    d.elements.push(el);
+    const parts = window.buildParts(d); // stack layout; plate 2 slab = [4,6]
+    const prism = parts.find((p) => p.name === "ebene-2-rand-1");
+    assert(!!prism, "prism part exists");
+    const zb = zbounds(prism.facets);
+    assertClose(zb[0], 6, 1e-6, "prism starts at plate top");
+    assertClose(zb[1], 8, 1e-6, "prism ends one level forward");
+    assert(!parts.some((p) => /^ebene-2-(farbe|erhaben|farbschicht)/.test(p.name)),
+      "rim element emits no ordinary content");
+  });
+
+  test("schaukasten-v2: rim prism is clipped by the front plate's opening", () => {
+    const mk = (cx) => {
+      const d = sbDoc();
+      const el = window.makeElementV2("shape", { cxMm: cx, cyMm: 20, wMm: 10, hMm: 8, color: "#FFFFFF" });
+      el.sbLayer = 2; el.sbMode = "rim"; // front plate above is k=1 (opening threshold 3mm)
+      d.elements.push(el);
+      const p = window.buildParts(d).find((q) => q.name === "ebene-3-rand-1");
+      return p ? p.facets.length : 0;
+    };
+    // near the plate edge the front plate is solid above -> heavy clipping
+    assert(mk(9) < mk(30), "edge-hugging prism is clipped harder than a centered one");
+  });
+
+  test("schaukasten-v2: rim on the front plate is unclipped decorative relief", () => {
+    const d = sbDoc();
+    const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 10, hMm: 8, color: "#FFFFFF" });
+    el.sbLayer = 0; el.sbMode = "rim";
+    d.elements.push(el);
+    const prism = window.buildParts(d).find((p) => p.name === "ebene-1-rand-1");
+    assert(!!prism, "front-plate prism exists");
+    // front plate slab [6,8] in a 4x2mm stack; the prism adds one more level
+    assertClose(zbounds(prism.facets)[1], 4 * 2 + 2, 1e-6, "pokes above the whole stack");
   });
 
   test("schaukasten: content-parts refactor keeps a plain doc byte-identical", () => {
