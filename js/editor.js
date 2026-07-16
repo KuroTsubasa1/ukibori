@@ -1922,6 +1922,11 @@
     }
 
     if (e.key === "Escape") {                         // deselect + release focus
+      if (sbOpeningDraw) {                            // cancel an armed opening draw
+        sbOpeningDraw = false;
+        var sbHint = document.getElementById("sbDrawHint");
+        if (sbHint) sbHint.hidden = true;
+      }
       if (state.selectedId != null) {
         clearSelection(); refreshAdvancedForSelection(); renderLayers(); render2D();
       }
@@ -3995,7 +4000,12 @@
       const v = parseFloat(this.value);
       if (!isNaN(v) && v > 0) { sbState().insetPerLayerMm = v; sbChanged(); }
     });
-    on("sbOpeningAuto", "click", function () { sbState().opening.source = "auto"; sbChanged(); });
+    on("sbOpeningAuto", "click", function () {
+      sbState().opening.source = "auto";
+      sbOpeningDraw = false;                          // switching to Auto cancels an armed draw
+      document.getElementById("sbDrawHint").hidden = true;
+      sbChanged();
+    });
     on("sbOpeningDrawn", "click", function () { sbState().opening.source = "drawn"; sbChanged(); });
     on("sbDrawBtn", "click", function () {
       sbOpeningDraw = true;
