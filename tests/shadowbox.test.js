@@ -63,7 +63,7 @@
     const sx = grid.cols / d.body.widthMm, sy = grid.rows / d.body.heightMm;
     const at = (xMm, yMm) => f(Math.round(xMm * sx - 0.5), Math.round(yMm * sy - 0.5));
     assert(at(30, 20) > 0, "center inside opening");
-    assert(at(1, 20) < 0, "1mm from edge is outside (margin 8)");
+    assert(at(1, 20) < 0, "1mm from edge is outside (margin 14)");
     assert(at(30, 20) > at(15, 20), "field decreases toward the rim");
   });
 
@@ -153,14 +153,14 @@
   test("schaukasten: opening loops are closed and nested", () => {
     const d = sbDoc();
     const l0 = window.shadowboxOpeningLoops(d, 0);
-    const l2 = window.shadowboxOpeningLoops(d, 2);
-    assert(l0.length >= 1 && l2.length >= 1, "loops exist");
+    const l1 = window.shadowboxOpeningLoops(d, 1);
+    assert(l0.length >= 1 && l1.length >= 1, "loops exist");
     const span = (loops) => {
       let min = Infinity, max = -Infinity;
       for (const lp of loops) for (const p of lp) { min = Math.min(min, p.xMm); max = Math.max(max, p.xMm); }
       return max - min;
     };
-    assert(span(l2) < span(l0), "deeper opening is smaller");
+    assert(span(l1) < span(l0), "deeper opening is smaller");
     for (const p of l0[0]) {
       assert(p.xMm > 0 && p.xMm < 60 && p.yMm > 0 && p.yMm < 40, "loop inside plate");
     }
@@ -212,7 +212,8 @@
 
   test("schaukasten: element lands only on its assigned plate", () => {
     const d = sbDoc();
-    const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 10, hMm: 8, color: "#FF0000" });
+    // Element near the left edge of the plate (d∈[3,13] keeps it on the ring material)
+    const el = window.makeElementV2("shape", { cxMm: 8, cyMm: 20, wMm: 10, hMm: 8, color: "#FF0000" });
     el.sbLayer = 1;
     d.elements.push(el);
     const parts = window.buildParts(d);
@@ -220,6 +221,17 @@
     const others = parts.filter((p) => p.name.indexOf("ebene-2-") !== 0 && p.name.indexOf("ebene-") === 0);
     assert(withEl.some((p) => p.name !== "ebene-2-grundplatte"), "content part on plate 2");
     assert(!others.some((p) => /-(farbe|erhaben|farbschicht)/.test(p.name)), "no content elsewhere");
+  });
+
+  test("schaukasten: no floating content over a plate's own opening", () => {
+    const d = sbDoc();
+    d.shadowbox.opening.waviness = 0; // remove wobble so field is clean at center
+    const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 6, hMm: 6, color: "#FF0000" });
+    el.sbLayer = 1; // fully inside plate 2's opening (f(center)=8.4 > inset 3)
+    d.elements.push(el);
+    const parts = window.buildParts(d, { layout: "bed" });
+    const content = parts.filter((p) => p.name.indexOf("ebene-2-") === 0 && p.name !== "ebene-2-grundplatte");
+    assertEqual(content.length, 0, "no unsupported prisms in the opening");
   });
 
   test("schaukasten: engraved element carves the back plate (Vertieft)", () => {

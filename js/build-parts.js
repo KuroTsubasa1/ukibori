@@ -867,7 +867,7 @@
     return parts;
   }
 
-  const __SB_MOUNT_NONE = { type: "none", xMm: 0, yMm: 0, diameterMm: 0, ringThicknessMm: 0, ringHeightMm: 0, marginMm: 0 };
+  const __SB_MOUNT_NONE = Object.freeze({ type: "none", xMm: 0, yMm: 0, diameterMm: 0, ringThicknessMm: 0, ringHeightMm: 0, marginMm: 0 });
 
   // Schaukasten assembly: one plate per layer, shared opening field thresholded
   // at k*insetPerLayerMm, content via the standard per-plate pipeline.
@@ -910,33 +910,11 @@
         fp = (c, r) => Math.min(base(c, r), (insetK - f(c, r)) * s);
       }
       const comp = composeDesignV2(dk, cols, rows, grid);
-      // Base/floor/engraved use the opening-cut footprint (fp) so the plate is
-      // physically cut by the tunnel. Raised and heightmap elements use the full
-      // base footprint so scene content appears through the opening of the layers
-      // in front (elements sit on the plate surface regardless of the cut).
-      // Replicate __contentParts inline with split footprints to avoid double-counting.
-      const isEngravedEl = (ei) => {
-        const dep = dk.elements[ei] && dk.elements[ei].depth;
-        return !!(dep && dep.direction === "engraved" && dep.mode !== "heightmap");
-      };
-      const baseRgb = window.hexToRgb(dk.body.baseColor);
-      const engComp = {
-        r: comp.r.slice(), g: comp.g.slice(), b: comp.b.slice(),
-        depthMm: comp.depthMm, cutout: comp.cutout,
-        isBase: comp.isBase.slice(), owner: comp.owner.slice(),
-      };
-      for (let i = 0; i < cols * rows; i++) {
-        const ei = comp.owner[i];
-        if (ei >= 0 && !isEngravedEl(ei)) {
-          engComp.isBase[i] = 1; engComp.owner[i] = -1;
-          engComp.r[i] = baseRgb[0]; engComp.g[i] = baseRgb[1]; engComp.b[i] = baseRgb[2];
-        }
-      }
-      const plateParts = [
-        ...__engravedBaseAndFloors(dk, engComp, cols, rows, pitch, fp, null, null),
-        ...buildRaisedParts(dk, base, comp, grid, null),
-        ...buildHeightmapParts(dk, base, grid, null),
-      ];
+      // fp is the opening-cut footprint for tunnel plates (base for the back plate).
+      // __contentParts clips all content — engraved, raised, heightmap — to fp, so
+      // nothing is emitted over the hollow ring. Per-element sbOverhang footprint
+      // union (Task 7) is the sanctioned way to place content over the opening.
+      const plateParts = __contentParts(dk, comp, grid, fp, null, null);
       for (const p of plateParts) p.name = "ebene-" + (k + 1) + "-" + p.name;
       if (layout === "stack") __shiftFacets(plateParts, 0, 0, (n - 1 - k) * T);
       else __shiftFacets(plateParts, k * (W + gapMm), 0, 0);
