@@ -729,7 +729,14 @@
   // engraved colored floors + raised prisms + heightmap slabs. Mount ring no longer
   // emitted (Öse is now a flat tab via footprint union on the expanded domain).
   // Handles rect/circle/free bodies.
-  function buildParts(doc) {
+  function buildParts(doc, opts) {
+    // Schaukasten: stacked paper-cut plates — separate assembly path. Only
+    // rect/circle bodies (the opening field needs the analytic perimeter).
+    // Disabled or unsupported shapes fall through untouched (parity).
+    if (doc.shadowbox && doc.shadowbox.enabled &&
+        (doc.body.shape === "rect" || doc.body.shape === "circle")) {
+      return buildShadowboxParts(doc, opts && opts.layout === "bed" ? "bed" : "stack");
+    }
     // Compute a single shared grid over the expanded domain (expanded only when the
     // Öse washer overhangs the body box; default = body box, byte-identical path).
     const domain = docDomain(doc);
@@ -849,6 +856,99 @@
       ...buildRaisedParts(doc, footprint, comp, grid, band),
       ...buildHeightmapParts(doc, footprint, grid, band),
     ];
+  }
+
+  // Facet translation — creates new vertex arrays to avoid double-shifting
+  // shared vertices (extrudeLoops reuses corner arrays across wall quads).
+  function __shiftFacets(parts, dx, dy, dz) {
+    for (const p of parts) {
+      p.facets = p.facets.map(f => f.map(v => [v[0] + dx, v[1] + dy, v[2] + dz]));
+    }
+    return parts;
+  }
+
+  const __SB_MOUNT_NONE = { type: "none", xMm: 0, yMm: 0, diameterMm: 0, ringThicknessMm: 0, ringHeightMm: 0, marginMm: 0 };
+
+  // Schaukasten assembly: one plate per layer, shared opening field thresholded
+  // at k*insetPerLayerMm, content via the standard per-plate pipeline.
+  // layout 'stack' = assembled preview (front plate on top); 'bed' = print
+  // layout, every plate at z0=0 side-by-side, stand beside the plates.
+  function buildShadowboxParts(doc, layout) {
+    const sb = doc.shadowbox;
+    const n = window.__sbClampLayers(sb.layers);
+    const T = doc.body.thicknessMm;
+    const W = doc.body.widthMm, H = doc.body.heightMm;
+    const colors = window.shadowboxPlateColors(Object.assign({}, sb, { layers: n }));
+    const inset = Math.max(0.5, sb.insetPerLayerMm || 4);
+    // Domain never expands: mount is 'hole' at most (loop stripped below).
+    const domain = docDomain(Object.assign({}, doc, { mount: __SB_MOUNT_NONE }));
+    const grid = gridForDomain(domain, doc.resolution);
+    const { cols, rows, pitch } = grid;
+    const f = window.shadowboxOpeningField(doc, grid);
+    const layerOf = (el) => el.sbLayer == null ? n - 1 : Math.max(0, Math.min(n - 1, el.sbLayer | 0));
+    const sx = cols / W, sy = rows / H, s = (sx + sy) / 2;
+    const gapMm = 5;
+    const out = [];
+
+    for (let k = 0; k < n; k++) {
+      const isBack = k === n - 1;
+      const dk = Object.assign({}, doc, {
+        body: Object.assign({}, doc.body, {
+          baseColor: colors[k],
+          frame: { widthMm: 0, heightMm: 2, color: "#000000" },   // v1: off on all plates
+          line: { mode: "none", insetMm: 2.5, widthMm: 0.8, depthMm: 0.6, count: 1, color: "#000000" },
+        }),
+        // back plate keeps a hanging hole; 'loop' (Öse) is not supported in v1
+        mount: (isBack && doc.mount && doc.mount.type === "hole") ? doc.mount : __SB_MOUNT_NONE,
+        elements: doc.elements.filter((el) => layerOf(el) === k),
+        shadowbox: null,
+      });
+      const base = window.shapeFootprintField(cols, rows, dk.body, dk.mount);
+      let fp = base;
+      if (!isBack && f) {
+        const insetK = k * inset;
+        fp = (c, r) => Math.min(base(c, r), (insetK - f(c, r)) * s);
+      }
+      const comp = composeDesignV2(dk, cols, rows, grid);
+      // Base/floor/engraved use the opening-cut footprint (fp) so the plate is
+      // physically cut by the tunnel. Raised and heightmap elements use the full
+      // base footprint so scene content appears through the opening of the layers
+      // in front (elements sit on the plate surface regardless of the cut).
+      // Replicate __contentParts inline with split footprints to avoid double-counting.
+      const isEngravedEl = (ei) => {
+        const dep = dk.elements[ei] && dk.elements[ei].depth;
+        return !!(dep && dep.direction === "engraved" && dep.mode !== "heightmap");
+      };
+      const baseRgb = window.hexToRgb(dk.body.baseColor);
+      const engComp = {
+        r: comp.r.slice(), g: comp.g.slice(), b: comp.b.slice(),
+        depthMm: comp.depthMm, cutout: comp.cutout,
+        isBase: comp.isBase.slice(), owner: comp.owner.slice(),
+      };
+      for (let i = 0; i < cols * rows; i++) {
+        const ei = comp.owner[i];
+        if (ei >= 0 && !isEngravedEl(ei)) {
+          engComp.isBase[i] = 1; engComp.owner[i] = -1;
+          engComp.r[i] = baseRgb[0]; engComp.g[i] = baseRgb[1]; engComp.b[i] = baseRgb[2];
+        }
+      }
+      const plateParts = [
+        ...__engravedBaseAndFloors(dk, engComp, cols, rows, pitch, fp, null, null),
+        ...buildRaisedParts(dk, base, comp, grid, null),
+        ...buildHeightmapParts(dk, base, grid, null),
+      ];
+      for (const p of plateParts) p.name = "ebene-" + (k + 1) + "-" + p.name;
+      if (layout === "stack") __shiftFacets(plateParts, 0, 0, (n - 1 - k) * T);
+      else __shiftFacets(plateParts, k * (W + gapMm), 0, 0);
+      out.push(...plateParts);
+    }
+
+    const stand = window.buildStandParts(Object.assign({}, sb, { layers: n }), W, T);
+    if (stand.length) {
+      const dx = layout === "stack" ? W + 2 * gapMm : n * (W + gapMm) + gapMm;
+      out.push(...__shiftFacets(stand, dx, 0, 0));
+    }
+    return out;
   }
 
   // Zierlinie band mask (Uint8Array, 1 = line cell), or null when off. Cells

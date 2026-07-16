@@ -42,7 +42,7 @@
     d.shadowbox.enabled = true;
     d.shadowbox.layers = 4;
     d.shadowbox.insetPerLayerMm = 3;
-    d.shadowbox.opening.marginMm = 8;
+    d.shadowbox.opening.marginMm = 14;
     d.shadowbox.stand.enabled = false;
     return d;
   }
@@ -164,6 +164,85 @@
     for (const p of l0[0]) {
       assert(p.xMm > 0 && p.xMm < 60 && p.yMm > 0 && p.yMm < 40, "loop inside plate");
     }
+  });
+
+  test("schaukasten: enabling it changes output; disabling matches a doc without the field", () => {
+    const d = sbDoc();
+    const off = JSON.parse(JSON.stringify(d)); off.shadowbox.enabled = false;
+    const stripped = JSON.parse(JSON.stringify(off)); delete stripped.shadowbox;
+    stripped.elements = stripped.elements || [];
+    assertEqual(JSON.stringify(window.buildParts(off)),
+      JSON.stringify(window.buildParts(window.migrateProject(stripped))), "off == no field");
+    assert(JSON.stringify(window.buildParts(d)) !== JSON.stringify(window.buildParts(off)),
+      "enabled changes geometry");
+  });
+
+  test("schaukasten: stack — one plate per layer at its z-slab, front on top", () => {
+    const d = sbDoc(); // 4 layers, T=2
+    const parts = window.buildParts(d);
+    for (let k = 0; k < 4; k++) {
+      const plate = parts.filter((p) => p.name.indexOf("ebene-" + (k + 1) + "-") === 0);
+      assert(plate.length >= 1, "plate " + (k + 1) + " exists");
+      const zb = zbounds(plate.flatMap((p) => p.facets));
+      assertClose(zb[0], (4 - 1 - k) * 2, 1e-6, "plate " + (k + 1) + " bottom");
+      assertClose(zb[1], (4 - 1 - k) * 2 + 2, 1e-6, "plate " + (k + 1) + " top");
+    }
+  });
+
+  test("schaukasten: openings shrink toward the back; back plate is solid", () => {
+    const d = sbDoc();
+    const parts = window.buildParts(d);
+    const capArea = (k) => {
+      // top-cap triangle area of the grundplatte at its own zTop
+      const p = parts.find((q) => q.name === "ebene-" + (k + 1) + "-grundplatte");
+      const zTop = zbounds(p.facets)[1];
+      let a = 0;
+      for (const f of p.facets) {
+        if (Math.abs(f[0][2] - zTop) < 1e-6 && Math.abs(f[1][2] - zTop) < 1e-6 && Math.abs(f[2][2] - zTop) < 1e-6) {
+          a += Math.abs((f[1][0] - f[0][0]) * (f[2][1] - f[0][1])
+                      - (f[2][0] - f[0][0]) * (f[1][1] - f[0][1])) / 2;
+        }
+      }
+      return a;
+    };
+    assert(capArea(0) < capArea(1), "front opening largest");
+    assert(capArea(1) < capArea(2), "middle shrinks");
+    assert(capArea(3) > 60 * 40 * 0.95, "back plate solid (full face)");
+  });
+
+  test("schaukasten: element lands only on its assigned plate", () => {
+    const d = sbDoc();
+    const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 10, hMm: 8, color: "#FF0000" });
+    el.sbLayer = 1;
+    d.elements.push(el);
+    const parts = window.buildParts(d);
+    const withEl = parts.filter((p) => p.name.indexOf("ebene-2-") === 0);
+    const others = parts.filter((p) => p.name.indexOf("ebene-2-") !== 0 && p.name.indexOf("ebene-") === 0);
+    assert(withEl.some((p) => p.name !== "ebene-2-grundplatte"), "content part on plate 2");
+    assert(!others.some((p) => /-(farbe|erhaben|farbschicht)/.test(p.name)), "no content elsewhere");
+  });
+
+  test("schaukasten: engraved element carves the back plate (Vertieft)", () => {
+    const d = sbDoc();
+    const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 12, hMm: 10, color: "#00AA00" });
+    el.depth.direction = "engraved";
+    d.elements.push(el); // sbLayer null -> back plate (k=3, z 0..2)
+    const parts = window.buildParts(d);
+    const floors = parts.filter((p) => p.name.indexOf("ebene-4-") === 0 && p.name !== "ebene-4-grundplatte");
+    assert(floors.length >= 1, "engraved floor part exists on the back plate");
+    const zb = zbounds(floors.flatMap((p) => p.facets));
+    assert(zb[1] <= 2 + 1e-6, "carved below the back plate top");
+    assert(zb[0] >= 0 - 1e-6, "floor keeps a base");
+  });
+
+  test("schaukasten: cutout element punches through its plate", () => {
+    const a = sbDoc();
+    const b = sbDoc();
+    const el = window.makeElementV2("shape", { cxMm: 12, cyMm: 20, wMm: 6, hMm: 6, color: "#000000" });
+    el.sbLayer = 0; el.cutout = true;
+    b.elements.push(el);
+    assert(JSON.stringify(window.buildParts(a)) !== JSON.stringify(window.buildParts(b)),
+      "cutout changes the front plate");
   });
 
   test("schaukasten: content-parts refactor keeps a plain doc byte-identical", () => {
