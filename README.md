@@ -12,7 +12,7 @@ Image · Text · QR · Rectangle & Circle → Relief · Raised & Engraved · AMS
 ![Build](https://img.shields.io/badge/Build-none-16161a)
 ![offline](https://img.shields.io/badge/100%25-offline-2f8f6b)
 ![Vanilla JS](https://img.shields.io/badge/Vanilla-JS-f7df1e?logo=javascript&logoColor=000)
-![Tests](https://img.shields.io/badge/Tests-343%20%E2%9C%93-2f8f6b)
+![Tests](https://img.shields.io/badge/Tests-349%20%E2%9C%93-2f8f6b)
 ![Export](https://img.shields.io/badge/Export-PNG%20·%20.svg%20·%20.3mf%20·%20.stl-6b4fb0)
 
 <img src="assets/hero.png" width="900" alt="The Ukibori workshop: 2D workbench and dark 3D stage side by side, element inspector and layers dock on the right">
@@ -330,7 +330,7 @@ print.
 | `js/coachmarks.js` | first-run tour (coach marks) |
 | `vendor/` | bundled locally: three.js, onnxruntime-web (+ WASM) with `u2netp.onnx`, QR encoder |
 | `examples/` | example projects to open — including the coin from the screenshots above |
-| `tests/` | browser test suite — `tests/run.html` runs all `*.test.js` files (343 tests) |
+| `tests/` | browser test suite — `tests/run.html` runs all `*.test.js` files (349 tests) |
 
 Plain HTML/CSS/JavaScript, **no build step and no CDN**. Some features (3D
 preview, AI cutout, QR, SVG tracing) use libraries that are **bundled locally**
