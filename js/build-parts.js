@@ -908,9 +908,11 @@
     const { cols, rows, pitch } = grid;
     const f = window.shadowboxOpeningField(doc, grid);
     const layerOf = (el) => el.sbLayer == null ? n - 1 : Math.max(0, Math.min(n - 1, el.sbLayer | 0));
-    const modeOf = (el) => el.sbMode || (el.sbOverhang ? "rim" : "plate");
+    const modeOf = (el) => el.sbMode === "rim" || el.sbMode === "float" ? el.sbMode : (el.sbMode == null && el.sbOverhang ? "rim" : "plate");
     const sx = cols / W, sy = rows / H, s = (sx + sy) / 2;
     const gapMm = 5;
+    // Separately printed pieces need lateral air against the plate rings.
+    const SEAM_CLEARANCE_MM = 0.2;
     const out = [];
 
     // Collect float elements once (before the plate loop). Each entry carries
@@ -933,7 +935,7 @@
         for (let i = 0; i < mask.length; i++) {
           if (!raw[i]) continue;
           const c = i % cols, r = (i / cols) | 0;
-          if (f(c, r) > levelInset) mask[i] = 1;
+          if (f(c, r) > levelInset + SEAM_CLEARANCE_MM) mask[i] = 1;
         }
         floats.push({ el, level, mask });
       }
@@ -957,11 +959,8 @@
         const spots = window.shadowboxPinSpots(overlap, cols, rows, sx, sy, holeR + 1.0, 12);
         if (spots.length) pinList.push({ lower: lo, upper: up, spots });
       }
-      for (const up of floats) {
-        if (up.level !== n - 2) continue;
-        const spots = window.shadowboxPinSpots(up.mask, cols, rows, sx, sy, holeR + 1.0, 12);
-        if (spots.length) pinList.push({ lower: "back", upper: up, spots });
-      }
+      // Back-plate back-anchor spots are deferred into the plate loop (after comp/flatTop)
+      // so pegs only land on flat plate face (owner < 0 ⇒ no element → top at T).
     }
     // Rand-Wolken piece records collected during the plate loop (masks exist in-loop).
     const randPieces = [];
@@ -996,8 +995,9 @@
       }
       // Rim elements: union their silhouettes into the plate footprint so they
       // jut into the opening (clouds on the rim). Clipped to the plate outline.
-      // Cutout rim elements and unloaded images are silently skipped.
-      const rimEls = doc.elements.filter((el) => layerOf(el) === k && modeOf(el) === "rim" && !el.cutout && !(el.type === "image" && !el._img));
+      // Unloaded images are silently skipped; el.cutout is inert here (flag
+      // only applies to Auf-Platte content — rim/float always render silhouette).
+      const rimEls = doc.elements.filter((el) => layerOf(el) === k && modeOf(el) === "rim" && !(el.type === "image" && !el._img));
       const rimMasks = [];
       let over = null;
       for (const el of rimEls) {
@@ -1022,9 +1022,19 @@
       // via the union above and become standalone pieces (not pushed into plateParts).
       const plateParts = __contentParts(dk, comp, grid, fp, null, null);
 
+      // flatTop: cells no element owns → plain plate face at exactly T. Used to
+      // restrict peg spots to flat surface (owner < 0 ⇒ no raised/engraved content).
+      const flatTop = new Uint8Array(cols * rows);
+      if (pinsOn) {
+        for (let i = 0; i < flatTop.length; i++) flatTop[i] = comp.owner[i] < 0 ? 1 : 0;
+      }
+      // Local helper: bitwise AND of two same-length Uint8Arrays.
+      const __andMasks = (a, b) => { const r = new Uint8Array(a.length); for (let i = 0; i < r.length; i++) r[i] = a[i] & b[i]; return r; };
+
       // Rand-Wolken: compute clipped prism mask per rim element, collect as standalone
-      // piece records. Pegs (when pins on) land on this plate (plateParts, after rename,
-      // before shift); hole spots travel with the piece record for emission later.
+      // piece records. Pegs (when pins on) land on flat cells of this plate
+      // (plateParts, after rename, before shift); hole spots travel with the piece
+      // record for emission later.
       const insetFront = (k - 1) * inset;
       const randPegsThisPlate = []; // buffered; appended after rename, before shift
       for (const rm of rimMasks) {
@@ -1032,12 +1042,12 @@
         for (let i = 0; i < prismMask.length; i++) {
           const c = i % cols, r = (i / cols) | 0;
           if (!rm.mask[i] || base(c, r) <= 0) continue;
-          if (k !== 0 && f && f(c, r) <= insetFront) continue;
+          if (k !== 0 && f && f(c, r) <= insetFront + SEAM_CLEARANCE_MM) continue;
           prismMask[i] = 1;
         }
         let holeSpots = [];
         if (pinsOn) {
-          const spots = window.shadowboxPinSpots(prismMask, cols, rows, sx, sy, holeR + 1.0, 12);
+          const spots = window.shadowboxPinSpots(__andMasks(prismMask, flatTop), cols, rows, sx, sy, holeR + 1.0, 12);
           if (spots.length) {
             holeSpots = spots;
             randPegsThisPlate.push(...pegParts(spots, k, window.hexToRgb(colors[k])));
@@ -1050,11 +1060,16 @@
       // Rand pegs: already named by pegParts, appended after rename, before shift so
       // they travel with the plate as one unit (same pattern as back-plate pegs).
       plateParts.push(...randPegsThisPlate);
-      // Back-plate pegs: already named, append after rename, before shift so they
-      // travel with the back plate as one unit.
-      if (isBack) {
-        for (const pin of pinList) {
-          if (pin.lower === "back") plateParts.push(...pegParts(pin.spots, n - 1, window.hexToRgb(colors[n - 1])));
+      // Back-plate pegs: computed here (after comp/flatTop) so spots only land on
+      // flat plate top (owner < 0). Append after rename, before shift.
+      if (isBack && pinsOn) {
+        for (const up of floats) {
+          if (up.level !== n - 2) continue;
+          const spots = window.shadowboxPinSpots(__andMasks(up.mask, flatTop), cols, rows, sx, sy, holeR + 1.0, 12);
+          if (spots.length) {
+            pinList.push({ lower: "back", upper: up, spots });
+            plateParts.push(...pegParts(spots, n - 1, window.hexToRgb(colors[n - 1])));
+          }
         }
       }
       if (layout === "stack") __shiftFacets(plateParts, 0, 0, (n - 1 - k) * (T + g));

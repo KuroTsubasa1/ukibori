@@ -572,4 +572,20 @@
     assertEqual(JSON.stringify(window.buildParts(window.migrateProject(d2))),
       JSON.stringify(parts), "rebuild after serialize round-trip is identical");
   });
+
+  test("schaukasten-v2: back pegs avoid engraved back-plate content", () => {
+    const d = sbDoc();
+    d.shadowbox.layers = 5;
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 6; d.shadowbox.insetPerLayerMm = 2;
+    // engraved plate-mode element covering the whole central region of the back plate
+    const eng = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 40, hMm: 24, color: "#333333" });
+    eng.depth.direction = "engraved"; // sbLayer null -> back plate, mode plate
+    const fl = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 18, hMm: 12, color: "#00AA00" });
+    fl.sbLayer = 3; fl.sbMode = "float"; // deepest level, fully over the engraved region
+    d.elements.push(eng, fl);
+    const parts = window.buildParts(d);
+    assert(!parts.some((p) => p.name.indexOf("ebene-5-stift-") === 0),
+      "no back peg lands on the engraved face");
+    assert(parts.some((p) => p.name.indexOf("ebene-4-schwebeteil-") === 0), "float piece still emitted");
+  });
 })();

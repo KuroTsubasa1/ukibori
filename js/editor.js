@@ -3442,6 +3442,10 @@
   });
   bindElementField("sbModeFloat", "click", function (el) {
     el.sbMode = "float"; el.sbOverhang = false;
+    if (el.sbLayer == null) {
+      var sb = doc.shadowbox, n = sb ? Math.max(3, Math.min(10, sb.layers)) : 6;
+      el.sbLayer = n - 2;
+    }
     refreshAdvancedForSelection();
   });
 

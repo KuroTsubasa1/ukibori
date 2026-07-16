@@ -114,6 +114,10 @@ In `buildShadowboxParts`:
 Raised/engraved content ON floating pieces (flat slabs only, el.color);
 pin size UI; pins between rim clouds and anything; collision warnings when a
 floating piece outgrows the next opening; per-piece print orientation.
+Same-slab collisions between floats and between a float and a rand cloud from
+the plate behind are user-controlled (visible in the 3D preview). Float chains
+whose deepest level is above n-2 have no anchor to the back wall (decision
+pending: warning vs spacer pegs).
 
 ---
 

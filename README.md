@@ -176,6 +176,20 @@ dialog sit in the topbar.
   - Can be turned off with a checkbox; old projects keep their manual heights.
   </details>
 
+### Schaukasten (shadowbox / diorama)
+
+Stacked tunnel plates share a single opening field that widens with depth,
+creating a layered paper-cut diorama. Per-element placement modes: **Auf
+Platte** (content printed onto a plate), **Mit Rand** (element silhouette
+projects as a standalone cloud into the opening and is pegged to its plate),
+and **Schwebend** (a separately printed floating slab suspended between plates
+via assembly pins). Pegs and blind holes are computed automatically; peg spots
+avoid engraved and raised surface features so every pin lands on flat plate
+face. The base includes a closed-pocket press-fit stand and a
+**Bett-Layout** (bed layout) export that places all plates and pieces side by
+side at z = 0 ready to slice. An **Explosionsansicht** (explode) slider
+spreads the stack in the 3D preview.
+
 ### Preview, save & export
 
 - **Live 3D preview** — a rotatable, zoomable, pannable three.js view of the
