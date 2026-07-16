@@ -3886,7 +3886,7 @@
     on("sbStand", "change", function () { sbState().stand.enabled = this.checked; sbChanged(); });
     on("sbStandHeight", "change", function () {
       const v = parseFloat(this.value);
-      if (!isNaN(v) && v >= 6) { sbState().stand.heightMm = v; sbChanged(); }
+      if (!isNaN(v) && v >= 8) { sbState().stand.heightMm = v; sbChanged(); }
     });
   }
   initShadowboxControls();
