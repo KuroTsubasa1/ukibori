@@ -3209,11 +3209,19 @@
     if (sbRow) {
       sbRow.hidden = !(sbOn && el);
       if (sbOn && el) {
-        sbPopulateLayerSelect();
+        var effectiveMode = el.sbMode || (el.sbOverhang ? "rim" : "plate");
+        var isFloat = effectiveMode === "float";
+        sbPopulateLayerSelect(isFloat);
         var sbN = Math.max(3, Math.min(10, doc.shadowbox.layers));
+        // For float mode, clamp to n-2 (last valid non-hinten index).
+        var sbMaxK = isFloat ? sbN - 2 : sbN - 1;
         var sbK = el.sbLayer == null ? sbN - 1 : Math.max(0, Math.min(sbN - 1, el.sbLayer));
+        if (sbK > sbMaxK) sbK = sbMaxK;
         document.getElementById("sbLayerSel").value = String(sbK);
-        document.getElementById("sbOverhangChk").checked = !!el.sbOverhang;
+        // Sync seg buttons.
+        document.getElementById("sbModePlate").classList.toggle("seg-active", effectiveMode === "plate");
+        document.getElementById("sbModeRim").classList.toggle("seg-active", effectiveMode === "rim");
+        document.getElementById("sbModeFloat").classList.toggle("seg-active", effectiveMode === "float");
       }
     }
   }
@@ -3395,15 +3403,22 @@
     el.edge.periodMm = v;
   });
 
-  // -- Schaukasten: plate assignment (Ebene) + overhang flag --
-  function sbPopulateLayerSelect() {
+  // -- Schaukasten: plate assignment (Ebene) + mode seg --
+  // excludeBack: when true, omit the last (hinten) option (float mode).
+  // Rebuilds whenever the option count OR excludeBack shape changes.
+  function sbPopulateLayerSelect(excludeBack) {
     var sel = document.getElementById("sbLayerSel");
     if (!sel) return;
     var sb = doc.shadowbox;
     var n = sb ? Math.max(3, Math.min(10, sb.layers)) : 6;
-    if (sel.options.length !== n) {
+    var shown = excludeBack ? n - 1 : n;
+    // Detect shape via a data attribute so we rebuild when excludeBack flips.
+    var prevShape = sel.getAttribute("data-excl") || "0";
+    var curShape = excludeBack ? "1" : "0";
+    if (sel.options.length !== shown || prevShape !== curShape) {
       sel.innerHTML = "";
-      for (var k = 0; k < n; k++) {
+      sel.setAttribute("data-excl", curShape);
+      for (var k = 0; k < shown; k++) {
         var opt = document.createElement("option");
         opt.value = String(k);
         opt.textContent = (k + 1) + (k === 0 ? " (vorne)" : k === n - 1 ? " (hinten)" : "");
@@ -3416,8 +3431,17 @@
     var v = parseInt(document.getElementById("sbLayerSel").value, 10);
     el.sbLayer = (isNaN(v) || v >= n - 1) ? null : v; // back plate stored as null
   });
-  bindElementField("sbOverhangChk", "change", function (el) {
-    el.sbOverhang = document.getElementById("sbOverhangChk").checked;
+  bindElementField("sbModePlate", "click", function (el) {
+    el.sbMode = "plate"; el.sbOverhang = false;
+    refreshAdvancedForSelection();
+  });
+  bindElementField("sbModeRim", "click", function (el) {
+    el.sbMode = "rim"; el.sbOverhang = false;
+    refreshAdvancedForSelection();
+  });
+  bindElementField("sbModeFloat", "click", function (el) {
+    el.sbMode = "float"; el.sbOverhang = false;
+    refreshAdvancedForSelection();
   });
 
   // -- Shape kind (Rechteck / Kreis, shape elements) --
@@ -3981,6 +4005,8 @@
     document.getElementById("sbColorBack").value = sb.colorBack;
     document.getElementById("sbStand").checked = !!sb.stand.enabled;
     document.getElementById("sbStandHeight").value = sb.stand.heightMm;
+    var sbPinsEl = document.getElementById("sbPins");
+    if (sbPinsEl) sbPinsEl.checked = sb.pins ? sb.pins.enabled !== false : true;
   }
 
   function sbChanged() {
@@ -4031,6 +4057,13 @@
     on("sbStandHeight", "change", function () {
       const v = parseFloat(this.value);
       if (!isNaN(v) && v >= 8) { sbState().stand.heightMm = v; sbChanged(); }
+    });
+    on("sbPins", "change", function () {
+      var sb = sbState();
+      if (!sb) return;
+      if (sb.pins == null) sb.pins = { enabled: true, diameterMm: 3, clearanceMm: 0.35 };
+      sb.pins.enabled = this.checked;
+      sbChanged();
     });
     window.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && sbOpeningDraw) {

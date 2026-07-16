@@ -225,6 +225,11 @@
               </label>
               <input type="number" id="sbStandHeight" class="sp-num" style="width:64px" min="8" max="40" step="1" value="15" title="Höhe des Ständers in mm">
             </div>
+            <div class="adv-field">
+              <label class="adv-label toggle">
+                <input type="checkbox" id="sbPins" checked title="Zapfen und Sacklöcher zwischen gestapelten Schwebeteilen (und zur Rückwand) mitdrucken — hilft beim Ausrichten und Verkleben"> Montagestifte
+              </label>
+            </div>
           </div>
         </div>
       </details>
@@ -484,11 +489,13 @@
           </div>
           <div class="adv-field" id="sbLayerRow" hidden>
             <label for="sbLayerSel" class="adv-label">Schaukasten-Ebene</label>
-            <div style="display:flex;gap:6px;align-items:center">
-              <select id="sbLayerSel" class="text-input" style="flex:1" title="Auf welcher Platte das Element liegt (1 = vorne)"></select>
-              <label class="adv-label toggle" style="white-space:nowrap" title="Die Silhouette des Elements ragt in die Öffnung seiner Platte (z. B. Wolken am Rand)">
-                <input type="checkbox" id="sbOverhangChk"> ragt hinein
-              </label>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <select id="sbLayerSel" class="text-input" style="width:100%" title="Auf welcher Platte das Element liegt (1 = vorne)"></select>
+              <div id="sbModeSeg" class="seg-group seg-sm" style="width:100%;margin-top:4px">
+                <button type="button" id="sbModePlate" class="seg seg-active" style="flex:1" title="Inhalt liegt auf der Platte und wird am Öffnungsrand beschnitten">Auf Platte</button>
+                <button type="button" id="sbModeRim" class="seg" style="flex:1" title="Mit dem Rand verbunden und ragt eine Ebene nach vorn (wie die Wolken im Beispiel)">Mit Rand</button>
+                <button type="button" id="sbModeFloat" class="seg" style="flex:1" title="Schwebt als eigenes Teil in der Öffnung — Kollision mit dem Rand wird abgeschnitten; Montagestifte verbinden gestapelte Teile">Schwebend</button>
+              </div>
             </div>
           </div>
           </div>
