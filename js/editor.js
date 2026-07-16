@@ -42,6 +42,22 @@
   // Streuen (scatter) sub-mode state: null unless the panel is open.
   var scatter = null; // { sourceId, region:{x0,y0,x1,y1}|null, seed, previewIds:[] }
 
+  // Schaukasten: cache for nested opening contour loops (invalidated by param key).
+  var sbLoopsCache = { key: "", loops: null };
+  function sbContourLoops() {
+    var sb = doc.shadowbox;
+    if (!sb || !sb.enabled) return null;
+    var key = JSON.stringify([sb.layers, sb.insetPerLayerMm, sb.opening,
+      doc.body.shape, doc.body.widthMm, doc.body.heightMm, doc.body.cornerRadiusMm]);
+    if (sbLoopsCache.key !== key) {
+      var n = Math.max(3, Math.min(10, sb.layers));
+      var all = [];
+      for (var k = 0; k < n - 1; k++) all.push(window.shadowboxOpeningLoops(doc, k));
+      sbLoopsCache = { key: key, loops: all };
+    }
+    return sbLoopsCache.loops;
+  }
+
   var MARGIN_PX = 48;
 
   // ---- mm↔px helpers — all drawing/hit-test coordinates go through these ----
@@ -1117,6 +1133,28 @@
     if ((shape === "rect" || shape === "circle") && doc.body.line &&
         doc.body.line.mode !== "none" && doc.body.line.widthMm > 0) {
       strokeZierlinie(ctx, s);
+    }
+
+    // Schaukasten: ghosted nested opening contours (front = strongest).
+    var sbLoops = sbContourLoops();
+    if (sbLoops) {
+      ctx.save();
+      ctx.setLineDash([]);
+      for (var sbk = 0; sbk < sbLoops.length; sbk++) {
+        ctx.strokeStyle = "rgba(30,90,158," + (0.55 - (0.4 * sbk) / Math.max(1, sbLoops.length - 1)) + ")";
+        ctx.lineWidth = sbk === 0 ? 1.5 : 1;
+        for (var sbi = 0; sbi < sbLoops[sbk].length; sbi++) {
+          var lp = sbLoops[sbk][sbi];
+          ctx.beginPath();
+          lp.forEach(function (p, i) {
+            var px = mmX(p.xMm), py = mmY(p.yMm);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          });
+          ctx.closePath();
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
     }
 
     // Mount marker: visible draggable circle + crosshair.
@@ -3107,6 +3145,20 @@
     renderPaletteSwatches(el);
     // Doc-level AMS filament palette (Ebenen group).
     renderAmsPaletteField();
+
+    // Schaukasten: plate assignment row — only when shadowbox is enabled and an element is selected.
+    var sbRow = document.getElementById("sbLayerRow");
+    var sbOn = doc.shadowbox && doc.shadowbox.enabled;
+    if (sbRow) {
+      sbRow.hidden = !(sbOn && el);
+      if (sbOn && el) {
+        sbPopulateLayerSelect();
+        var sbN = Math.max(3, Math.min(10, doc.shadowbox.layers));
+        var sbK = el.sbLayer == null ? sbN - 1 : Math.max(0, Math.min(sbN - 1, el.sbLayer));
+        document.getElementById("sbLayerSel").value = String(sbK);
+        document.getElementById("sbOverhangChk").checked = !!el.sbOverhang;
+      }
+    }
   }
 
   // AMS-Filament-Palette (Ebenen group, doc scope): visible whenever the shared
@@ -3284,6 +3336,31 @@
     var v = parseFloat(node.value);
     if (isNaN(v) || v <= 0) return false;
     el.edge.periodMm = v;
+  });
+
+  // -- Schaukasten: plate assignment (Ebene) + overhang flag --
+  function sbPopulateLayerSelect() {
+    var sel = document.getElementById("sbLayerSel");
+    if (!sel) return;
+    var sb = doc.shadowbox;
+    var n = sb ? Math.max(3, Math.min(10, sb.layers)) : 6;
+    if (sel.options.length !== n) {
+      sel.innerHTML = "";
+      for (var k = 0; k < n; k++) {
+        var opt = document.createElement("option");
+        opt.value = String(k);
+        opt.textContent = (k + 1) + (k === 0 ? " (vorne)" : k === n - 1 ? " (hinten)" : "");
+        sel.appendChild(opt);
+      }
+    }
+  }
+  bindElementField("sbLayerSel", "change", function (el) {
+    var sb = doc.shadowbox, n = sb ? Math.max(3, Math.min(10, sb.layers)) : 6;
+    var v = parseInt(document.getElementById("sbLayerSel").value, 10);
+    el.sbLayer = (isNaN(v) || v >= n - 1) ? null : v; // back plate stored as null
+  });
+  bindElementField("sbOverhangChk", "change", function (el) {
+    el.sbOverhang = document.getElementById("sbOverhangChk").checked;
   });
 
   // -- Shape kind (Rechteck / Kreis, shape elements) --
