@@ -922,8 +922,8 @@
 
     // Collect rim elements once (before the plate loop). Each entry carries
     // the raw silhouette mask, the resolved level, and a signed-mm distance
-    // field dC (positive = inside the rim object, negative = outside).
-    // dC[i] = mask[i] ? +dIn[i]*pmm : -dOut[i]*pmm
+    // field dC (NEGATIVE inside the rim object, POSITIVE outside — mm from
+    // the silhouette edge): dC[i] = mask[i] ? -dIn[i]*pmm : +dOut[i]*pmm.
     // Two chamfer DT passes (same cost class as the drawn opening field).
     const rims = [];
     if (f) {
@@ -1041,9 +1041,12 @@
         // openAt(j, c, r, seam) := f > j*inset+seam AND all rims with level<=j have
         // dC > B + (j-level)*inset + seam.
         // Implemented as: fp = min(base, s * max(cutF, max_rims cutC))
-        //   cutF = k*inset - f(c,r)  (positive → inside opening → cut)
-        //   cutC_rm = B + (k-rm.level)*inset - rm.dC[i]  (positive → inside rim zone → cut)
-        // The max over all cuts: if any cut is positive the cell is hollow.
+        //   cutF = k*inset - f(c,r)  (POSITIVE → outside the opening → plate MATERIAL)
+        //   cutC_rm = B + (k-rm.level)*inset - rm.dC[i]  (POSITIVE → inside the rim
+        //   protection zone → plate MATERIAL)
+        // A cell is hollow (open) only when ALL terms are <= 0; any positive
+        // term keeps it plate material — that is how a rim object grows its
+        // own plate and makes deeper rings wrap around it.
         // Back plate: skip (isBack guard above keeps fp = base).
         const insetK = k * inset;
         const rimsAtOrBelow = rims.filter((rm) => rm.level <= k);
@@ -1055,7 +1058,7 @@
             const bv = base(c, r);
             if (bv <= 0) return bv;
             const i = r * cols + c;
-            let cut = insetK - f(c, r); // f-term (positive → open)
+            let cut = insetK - f(c, r); // f-term (positive → plate material)
             for (const rm of rimsAtOrBelow) {
               const rimCut = B + (k - rm.level) * inset - rm.dC[i];
               if (rimCut > cut) cut = rimCut;
