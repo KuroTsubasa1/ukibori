@@ -2246,6 +2246,7 @@
     }
     setHidden("simpleMountSection", isImage);
     setHidden("simpleCenterSection", isImage);
+    syncShadowboxControls();
     render2D();
     scheduleRebuild3D();
   }
@@ -3821,6 +3822,75 @@
     var cv2 = document.getElementById("centerV"); if (cv2) cv2.addEventListener("click", centerV);
   }());
 
+  // ---- Schaukasten (shadowbox) doc controls ----
+  function sbState() { return doc.shadowbox; }
+
+  function syncShadowboxControls() {
+    const sb = sbState();
+    if (!sb) return;
+    const supported = doc.body.shape === "rect" || doc.body.shape === "circle";
+    document.getElementById("sbEnabled").checked = !!sb.enabled;
+    document.getElementById("sbEnabled").disabled = !supported;
+    document.getElementById("sbShapeHint").hidden = supported;
+    document.getElementById("sbParams").hidden = !sb.enabled || !supported;
+    document.getElementById("sbLayers").value = sb.layers;
+    document.getElementById("sbInset").value = sb.insetPerLayerMm;
+    const auto = sb.opening.source !== "drawn";
+    document.getElementById("sbOpeningAuto").classList.toggle("seg-active", auto);
+    document.getElementById("sbOpeningDrawn").classList.toggle("seg-active", !auto);
+    document.getElementById("sbAutoParams").hidden = !auto;
+    document.getElementById("sbDrawnParams").hidden = auto;
+    document.getElementById("sbMargin").value = sb.opening.marginMm;
+    document.getElementById("sbPeriod").value = sb.opening.periodMm;
+    document.getElementById("sbWaviness").value = sb.opening.waviness;
+    document.getElementById("sbColorFront").value = sb.colorFront;
+    document.getElementById("sbColorBack").value = sb.colorBack;
+    document.getElementById("sbStand").checked = !!sb.stand.enabled;
+    document.getElementById("sbStandHeight").value = sb.stand.heightMm;
+  }
+
+  function sbChanged() {
+    syncShadowboxControls();
+    render2D();
+    scheduleRebuild3D();
+  }
+
+  function initShadowboxControls() {
+    const on = (id, evt, fn) => document.getElementById(id).addEventListener(evt, fn);
+    on("sbEnabled", "change", function () { sbState().enabled = this.checked; sbChanged(); });
+    on("sbLayers", "change", function () {
+      const v = parseInt(this.value, 10);
+      if (!isNaN(v)) { sbState().layers = Math.max(3, Math.min(10, v)); sbChanged(); }
+    });
+    on("sbInset", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v > 0) { sbState().insetPerLayerMm = v; sbChanged(); }
+    });
+    on("sbOpeningAuto", "click", function () { sbState().opening.source = "auto"; sbChanged(); });
+    on("sbOpeningDrawn", "click", function () { sbState().opening.source = "drawn"; sbChanged(); });
+    on("sbMargin", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v >= 0.5) { sbState().opening.marginMm = v; sbChanged(); }
+    });
+    on("sbPeriod", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v >= 4) { sbState().opening.periodMm = v; sbChanged(); }
+    });
+    on("sbWaviness", "input", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v)) { sbState().opening.waviness = v; sbChanged(); }
+    });
+    on("sbReroll", "click", function () { sbState().opening.seed = (sbState().opening.seed | 0) + 1; sbChanged(); });
+    on("sbColorFront", "input", function () { sbState().colorFront = this.value.toUpperCase(); sbChanged(); });
+    on("sbColorBack", "input", function () { sbState().colorBack = this.value.toUpperCase(); sbChanged(); });
+    on("sbStand", "change", function () { sbState().stand.enabled = this.checked; sbChanged(); });
+    on("sbStandHeight", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v >= 6) { sbState().stand.heightMm = v; sbChanged(); }
+    });
+  }
+  initShadowboxControls();
+
   // -- Init Advanced panel doc-level values (also called by resetDocTo) --
   function initAdvancedUI() {
     var t = document.getElementById("advThickness");
@@ -3839,6 +3909,7 @@
     // applyShape/applyMount, called from initSimpleUI).
     refreshAdvancedForSelection();
     renderAdvancedLayers();
+    syncShadowboxControls();
   }
   initAdvancedUI();
 
