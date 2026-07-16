@@ -165,4 +165,20 @@
       assert(p.xMm > 0 && p.xMm < 60 && p.yMm > 0 && p.yMm < 40, "loop inside plate");
     }
   });
+
+  test("schaukasten: content-parts refactor keeps a plain doc byte-identical", () => {
+    const d = sbDoc();
+    d.shadowbox.enabled = false;
+    d.elements.push(window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 16, hMm: 12, color: "#FF0000" }));
+    d.elements.push(window.makeElementV2("text", { cxMm: 30, cyMm: 28, wMm: 20, hMm: 8, text: "Ukibori" }));
+    d.elements[1].depth.direction = "engraved";
+    const parts = window.buildParts(d);
+    assert(parts.length >= 2, "plate + content parts");
+    const names = parts.map((p) => p.name);
+    assert(names.includes("grundplatte"), "grundplatte present");
+    // structural snapshot so the refactor in this task cannot silently reorder parts
+    const d2 = JSON.parse(JSON.stringify(d));
+    assertEqual(JSON.stringify(window.buildParts(window.migrateProject(d2))),
+      JSON.stringify(parts), "rebuild after serialize round-trip is identical");
+  });
 })();
