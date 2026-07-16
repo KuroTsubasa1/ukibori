@@ -1130,15 +1130,48 @@
       // Rand pegs: already named by pegParts, appended after rename, before shift so
       // they travel with the plate as one unit (same pattern as back-plate pegs).
       plateParts.push(...randPegsThisPlate);
-      // Back-plate pegs: computed here (after comp/flatTop) so spots only land on
-      // flat plate top (owner < 0). Append after rename, before shift.
+      // Back-plate pegs (Abstands-Zapfen): computed here (after comp/flatTop) so spots
+      // only land on flat plate top (owner < 0). Append after rename, before shift.
+      // Eligible: every float that is NOT the upper member of any float-float pin
+      // (i.e., the chain's deepest member). spacer = (n-2-level)*T extends the peg
+      // through intermediate slabs. Spots are constrained to the adapted open(n-2)
+      // region so the spacer shaft clears all traversed rings.
       if (isBack && pinsOn) {
+        const hasFloatAbove = new Set(pinList.filter((p) => p.lower !== "back").map((p) => p.upper));
+        // openAt(n-2, SEAM) mask: cells where the opening is clear at the deepest tunnel level.
+        // Nested openings guarantee this is the tightest constraint for all traversed plates.
+        const insetBack = (n - 2) * inset;
+        const rimsForBack = f ? rims.filter((rm) => rm.level <= n - 2) : [];
+        const openN2 = new Uint8Array(cols * rows);
+        if (f) {
+          for (let i = 0; i < openN2.length; i++) {
+            const c = i % cols, r = (i / cols) | 0;
+            if (f(c, r) <= insetBack + SEAM_CLEARANCE_MM) continue;
+            let blocked = false;
+            for (const rm of rimsForBack) {
+              if (rm.dC[i] <= B + (n - 2 - rm.level) * inset + SEAM_CLEARANCE_MM) { blocked = true; break; }
+            }
+            if (!blocked) openN2[i] = 1;
+          }
+        } else {
+          openN2.fill(1);
+        }
+        const backColor = window.hexToRgb(colors[n - 1]);
         for (const up of floats) {
-          if (up.level !== n - 2) continue;
-          const spots = window.shadowboxPinSpots(__andMasks(up.mask, flatTop), cols, rows, sx, sy, holeR + 1.0, 12);
+          if (hasFloatAbove.has(up)) continue;
+          const spacer = (n - 2 - up.level) * T;
+          const spotMask = __andMasks(__andMasks(up.mask, flatTop), openN2);
+          const spots = window.shadowboxPinSpots(spotMask, cols, rows, sx, sy, holeR + 1.0, 12);
           if (spots.length) {
             pinList.push({ lower: "back", upper: up, spots });
-            plateParts.push(...pegParts(spots, n - 1, window.hexToRgb(colors[n - 1])));
+            const pegHeight = spacer + pegH;
+            const spacerPegs = spots.map((sp) => {
+              const m = new Uint8Array(cols * rows);
+              window.__sbStampDisk(m, cols, rows, sx, sy, sp.xMm, sp.yMm, pegR, 1);
+              const facets = window.traceMaskToFacets((c, r) => m[r * cols + c] === 1, cols, rows, pitch, pegHeight, T);
+              return { name: "ebene-" + n + "-stift-" + (++pegIdx), color: backColor, facets };
+            }).filter((p) => p.facets.length);
+            plateParts.push(...spacerPegs);
           }
         }
       }

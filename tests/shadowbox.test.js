@@ -649,4 +649,42 @@
     assertEqual(JSON.stringify(window.shadowboxAdaptedOpeningLoops(bare, 2)),
       JSON.stringify(window.shadowboxOpeningLoops(bare, 2)), "no rims -> identical to base loops");
   });
+
+  test("schaukasten-v3: spacer peg anchors a shallow float chain to the back wall", () => {
+    const d = sbDoc(); // 4 layers, T=2, n-2 = 2
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 6; d.shadowbox.insetPerLayerMm = 2;
+    const fl = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 12, hMm: 8, color: "#00AA00" });
+    fl.sbLayer = 1; fl.sbMode = "float"; // one level short of the back wall
+    d.elements.push(fl);
+    const parts = window.buildParts(d);
+    const peg = parts.filter((p) => p.name.indexOf("ebene-4-stift-") === 0);
+    assert(peg.length >= 1, "spacer peg exists");
+    const zp = zbounds(peg.flatMap((p) => p.facets));
+    assertClose(zp[0], 2, 1e-6, "peg base on back plate top");
+    assertClose(zp[1], 2 + 2 + 1.2, 1e-6, "peg spans the missing level plus engagement");
+    // peg xy must lie inside the smallest traversed opening ({d > 10} here)
+    let sx = 0, sy = 0, cnt = 0;
+    for (const p of peg) for (const f2 of p.facets) for (const v of f2) { sx += v[0]; sy += v[1]; cnt++; }
+    const cx = sx / cnt, cyMesh = sy / cnt, cyDoc = 40 - cyMesh; // mesh y-up -> doc y-down
+    const dEdge = Math.min(cx, 60 - cx, Math.min(cyDoc, 40 - cyDoc));
+    assert(dEdge > 10, "peg stays inside the deepest traversed opening");
+    // the piece still gets its underside hole (split slab)
+    assert(parts.some((p) => /ebene-2-schwebeteil-\d+-oben$/.test(p.name)), "hole splits the piece");
+  });
+
+  test("schaukasten-v3: chain middle members get no back anchor", () => {
+    const d = sbDoc();
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 6; d.shadowbox.insetPerLayerMm = 2;
+    const lo = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 16, hMm: 10, color: "#00AA00" });
+    lo.sbLayer = 2; lo.sbMode = "float"; // deepest (n-2): normal anchor
+    const up = window.makeElementV2("shape", { cxMm: 32, cyMm: 20, wMm: 12, hMm: 8, color: "#FF7700" });
+    up.sbLayer = 1; up.sbMode = "float"; // pinned onto lo -> NO own back anchor
+    d.elements.push(lo, up);
+    const parts = window.buildParts(d);
+    const backPegs = parts.filter((p) => p.name.indexOf("ebene-4-stift-") === 0);
+    assert(backPegs.length >= 1, "chain anchored once");
+    const zTops = backPegs.map((p) => zbounds(p.facets)[1]);
+    assert(zTops.every((z) => Math.abs(z - (2 + 1.2)) < 1e-6),
+      "only short pegs (deepest member) — no spacer peg for the pinned upper piece");
+  });
 })();
