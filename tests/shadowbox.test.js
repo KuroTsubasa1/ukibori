@@ -111,6 +111,45 @@
     assertClose(fa(48, 48), fb(48, 48), 1e-9, "same as auto at a probe cell");
   });
 
+  function zbounds(facets) {
+    let lo = Infinity, hi = -Infinity;
+    for (const f of facets) for (const v of f) { lo = Math.min(lo, v[2]); hi = Math.max(hi, v[2]); }
+    return [lo, hi];
+  }
+  function ybounds(facets) {
+    let lo = Infinity, hi = -Infinity;
+    for (const f of facets) for (const v of f) { lo = Math.min(lo, v[1]); hi = Math.max(hi, v[1]); }
+    return [lo, hi];
+  }
+
+  test("schaukasten: stand — three upright parts with exact slot", () => {
+    const sb = window.defaultShadowbox();
+    sb.layers = 4;
+    const parts = window.buildStandParts(sb, 60, 2);
+    assertEqual(parts.length, 3, "sockel + two rails");
+    const names = parts.map((p) => p.name).sort();
+    assertEqual(JSON.stringify(names),
+      JSON.stringify(["staender-sockel", "staender-wand-hinten", "staender-wand-vorne"]), "names");
+    const sockel = parts.find((p) => p.name === "staender-sockel");
+    const vorne = parts.find((p) => p.name === "staender-wand-vorne");
+    const hinten = parts.find((p) => p.name === "staender-wand-hinten");
+    assertClose(zbounds(sockel.facets)[0], 0, 1e-9, "sockel on bed");
+    assertClose(zbounds(sockel.facets)[1], 15 - 8, 1e-9, "sockel top = H - slotDepth");
+    assertClose(zbounds(vorne.facets)[0], 15 - 8, 1e-9, "rail bottom");
+    assertClose(zbounds(vorne.facets)[1], 15, 1e-9, "rail top");
+    // slot: gap between the two rails = layers*T + tol = 4*2 + 0.4
+    const gap = ybounds(hinten.facets)[0] - ybounds(vorne.facets)[1];
+    assertClose(gap, 8.4, 1e-9, "slot width");
+  });
+
+  test("schaukasten: stand returns [] when disabled or degenerate", () => {
+    const sb = window.defaultShadowbox();
+    sb.stand.enabled = false;
+    assertEqual(window.buildStandParts(sb, 60, 2).length, 0, "disabled");
+    sb.stand.enabled = true;
+    assertEqual(window.buildStandParts(sb, 60, 0).length, 0, "no plate thickness");
+  });
+
   test("schaukasten: opening loops are closed and nested", () => {
     const d = sbDoc();
     const l0 = window.shadowboxOpeningLoops(d, 0);

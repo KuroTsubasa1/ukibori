@@ -149,9 +149,34 @@
       .map((lp) => lp.map(([c, r]) => ({ xMm: (c + 0.5) / sx, yMm: (r + 0.5) / sy })));
   }
 
+  // Printed stand: upright as used (slot opens upward -> zero overhangs).
+  // Three separate manifold boxes — same touching-solids pattern as plate+prisms.
+  function buildStandParts(sb, plateWidthMm, thicknessMm) {
+    const st = sb.stand || {};
+    if (!st.enabled || !(thicknessMm > 0) || !(plateWidthMm > 0)) return [];
+    const n = __sbClampLayers(sb.layers);
+    const H = Math.max(6, st.heightMm || 15);
+    const slotDepth = Math.min(H - 2, Math.max(3, st.slotDepthMm || 8));
+    const rail = Math.max(2, st.railMm || 5);
+    const slotW = n * thicknessMm + (st.tolMm != null ? st.tolMm : 0.4);
+    const L = Math.max(20, plateWidthMm * 0.7);
+    const D = 2 * rail + slotW;
+    const color = window.hexToRgb(st.color || "#C8BBAE");
+    const rect = (x0, y0, x1, y1) => [[[x0, y0], [x1, y0], [x1, y1], [x0, y1]]];
+    const mk = (name, loops, th, z0) => ({
+      name, color, facets: window.extrudeLoops(loops, th, z0),
+    });
+    return [
+      mk("staender-sockel", rect(0, 0, L, D), H - slotDepth, 0),
+      mk("staender-wand-vorne", rect(0, 0, L, rail), slotDepth, H - slotDepth),
+      mk("staender-wand-hinten", rect(0, rail + slotW, L, D), slotDepth, H - slotDepth),
+    ];
+  }
+
   window.__sbClampLayers = __sbClampLayers;
   window.shadowboxPlateColors = shadowboxPlateColors;
   window.shadowboxOpeningField = shadowboxOpeningField;
   window.shadowboxOpeningLoops = shadowboxOpeningLoops;
   window.__sbPolygonMask = __sbPolygonMask;
+  window.buildStandParts = buildStandParts;
 })();
