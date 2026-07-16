@@ -114,3 +114,47 @@ In `buildShadowboxParts`:
 Raised/engraved content ON floating pieces (flat slabs only, el.color);
 pin size UI; pins between rim clouds and anything; collision warnings when a
 floating piece outgrows the next opening; per-piece print orientation.
+
+---
+
+## Addendum (2026-07-17): Rand-Stifte, geschlossener Fuß, Explosionsansicht
+
+User requests, added mid-implementation:
+
+### 1. Rim pieces become separate printed parts with pins
+
+The rim cloud's prism is no longer printed fused onto its plate (which would
+force a multi-color plate print). Instead:
+- The plate keeps the footprint extension `[0,T]` (plate color, unchanged) and
+  gains **pegs** on the extension's top face at the chamfer-DT maxima of the
+  prism mask (same `shadowboxPinSpots` mechanism, carrier = the plate, peg
+  color = plate color, names continue the global `ebene-(k+1)-stift-J`
+  numbering).
+- The prism becomes a standalone piece (local slab `[0,T]`, element color,
+  name unchanged `ebene-(k+1)-rand-M`, `-oben` split when holes exist) with
+  **blind holes** on its underside — the float-piece pattern exactly. Stack
+  layout: shown at plate-local `[T,2T]` as before; bed layout: own spot in
+  the pieces row. `pins.enabled === false` keeps the separation but omits
+  pegs/holes.
+
+### 2. Stand: closed slot ends (left/right)
+
+The slot becomes a closed pocket so the stack cannot slide sideways:
+- Pocket length = `plateWidthMm + tolMm`; total stand length
+  `L = pocket + 2*railMm` (the stand is now WIDER than the plates — required
+  for closed ends).
+- Two new parts `staender-wand-links` / `staender-wand-rechts`: end caps
+  spanning the slot strip (`y ∈ [rail, rail+slotW]`, x ∈ `[0, rail]` /
+  `[L-rail, L]`) at rail height `[H-slotDepth, H]`. Front/back rails and
+  sockel unchanged except the new L. Five parts total.
+- The bed-layout stand-width term in build-parts follows the new L (the
+  cross-referenced formula).
+
+### 3. Explosionsansicht (preview-only)
+
+`buildParts(doc, { explodeMm: g })` spreads the stack: every level's z-shift
+becomes `(n-1-k) * (T + g)` (plates, their rand pieces, float pieces, pegs —
+everything rides its carrier). Bed layout and exports ignore it. UI: range
+slider „Explosionsansicht“ (0–20 mm) in the Schaukasten accordion —
+editor-local view state (like zoom): never serialized, no undo entries, only
+`scheduleRebuild3D()`.
