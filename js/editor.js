@@ -1225,6 +1225,18 @@
       ctx.stroke();
       ctx.restore();
     }
+    // Shadowbox opening freehand overlay (closed polygon preview).
+    if (drag && drag.handle === "sbOpening" && drag.ptsPx && drag.ptsPx.length > 1) {
+      ctx.save();
+      ctx.strokeStyle = "#e0245e";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      drag.ptsPx.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
     if (drag && (drag.handle === "marquee" || drag.handle === "scatterRegion") && drag.rectPx) {
       ctx.save();
       ctx.strokeStyle = "#6b4fb0"; ctx.fillStyle = "rgba(107,79,176,0.10)";
@@ -1400,6 +1412,7 @@
   let drag = null;
   var spacePan = false; // Space held → next canvas drag pans the view
   var textPathDraw = null; // text-element id waiting for a Pfadtext drag
+  var sbOpeningDraw = false; // true while waiting for one freehand opening capture
 
   // Mouse wheel zooms the workbench toward the cursor (same convention as the
   // 3D stage); ctrl+wheel is the trackpad pinch (finer deltas, larger factor).
@@ -1442,6 +1455,12 @@
       cv.setPointerCapture(e.pointerId);
       cv.style.cursor = "grabbing";
       e.preventDefault(); // suppress middle-click autoscroll
+      return;
+    }
+    // Schaukasten Öffnung: one freehand capture for the opening shape.
+    if (sbOpeningDraw) {
+      drag = { handle: "sbOpening", px, py, ptsPx: [{ x: px, y: py }] };
+      cv.setPointerCapture(e.pointerId);
       return;
     }
     // Pfadtext: the next canvas drag records the path for the waiting text element.
@@ -1657,6 +1676,15 @@
       }
       return;
     }
+    if (drag.handle === "sbOpening") {
+      // freehand opening shape: sample a point every few pixels
+      const last = drag.ptsPx[drag.ptsPx.length - 1];
+      if (Math.hypot(px - last.x, py - last.y) >= 4) {
+        drag.ptsPx.push({ x: px, y: py });
+        render2D();
+      }
+      return;
+    }
     if (drag.handle === "scatterRegion") {
       const toMm = function (p, v0) { return (p - state.marginPx) / s + v0; };
       scatter.region = {
@@ -1723,6 +1751,30 @@
       drag = null;
       cv.style.cursor = spacePan ? "grab" : "";
       render2D();
+      return;
+    }
+    if (drag.handle === "sbOpening") {
+      // Schaukasten Öffnung: convert px points to doc-mm, smooth, store as closed polygon.
+      var sbPtsPx = drag.ptsPx;
+      drag = null;
+      sbOpeningDraw = false;
+      document.getElementById("sbDrawHint").hidden = true;
+      var s0 = state.scale;
+      var sbMm = sbPtsPx.map(function (p) {
+        return { xMm: (p.x - state.marginPx) / s0 + state.viewX0,
+                 yMm: (p.y - state.marginPx) / s0 + state.viewY0 };
+      });
+      var sbSm = window.smoothPath
+        ? window.smoothPath(sbMm.map(function (p) { return { x: p.xMm, y: p.yMm }; }), 2)
+            .map(function (p) { return { xMm: p.x, yMm: p.y }; })
+        : sbMm;
+      if (sbSm.length >= 3) {
+        sbState().opening.points = sbSm;
+        sbState().opening.source = "drawn";
+      }
+      syncShadowboxControls();
+      render2D();
+      scheduleRebuild3D();
       return;
     }
     if (drag.handle === "textPath") {
@@ -3945,6 +3997,10 @@
     });
     on("sbOpeningAuto", "click", function () { sbState().opening.source = "auto"; sbChanged(); });
     on("sbOpeningDrawn", "click", function () { sbState().opening.source = "drawn"; sbChanged(); });
+    on("sbDrawBtn", "click", function () {
+      sbOpeningDraw = true;
+      document.getElementById("sbDrawHint").hidden = false;
+    });
     on("sbMargin", "change", function () {
       const v = parseFloat(this.value);
       if (!isNaN(v) && v >= 0.5) { sbState().opening.marginMm = v; sbChanged(); }
