@@ -53,7 +53,8 @@
     };
     var rimFp = JSON.stringify((doc.elements || [])
       .filter(function (el) { return modeOf(el) === "rim"; })
-      .map(function (el) { return [el.id, el.cxMm, el.cyMm, el.wMm, el.hMm, el.rotationDeg, el.sbLayer]; }));
+      .map(function (el) { return [el.id, el.cxMm, el.cyMm, el.wMm, el.hMm, el.rotationDeg, el.sbLayer,
+        el.shape || null, el.text || null, el.flipH, el.flipV]; }));
     var key = JSON.stringify([sb.layers, sb.insetPerLayerMm, sb.opening,
       doc.body.shape, doc.body.widthMm, doc.body.heightMm, doc.body.cornerRadiusMm]) + rimFp;
     if (sbLoopsCache.key !== key) {
