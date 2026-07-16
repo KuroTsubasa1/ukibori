@@ -162,3 +162,45 @@ everything rides its carrier). Bed layout and exports ignore it. UI: range
 slider „Explosionsansicht“ (0–20 mm) in the Schaukasten accordion —
 editor-local view state (like zoom): never serialized, no undo entries, only
 `scheduleRebuild3D()`.
+
+---
+
+## Addendum 2 (2026-07-17): „Mit Rand" v3 — die Ebenen wachsen um das Objekt
+
+User feedback: „Ich erwarte, die jetzige Ebene um das Objekt herum wächst, die
+unteren Schichten müssen sich der neuen Form anpassen." — matches the sample
+image, where the stepped tunnel rings wrap around each cloud.
+
+### Semantics
+
+A rim object on plate k locally DEFORMS the opening field for its own plate
+and every deeper plate (j ≥ k):
+
+- Per rim object: silhouette mask on the shared grid → signed distance
+  `dC(x,y)` in mm (positive outside the silhouette, negative inside; two
+  chamfer DTs, the drawn-opening pattern).
+- Border `B = max(2, insetPerLayerMm)` — the plate-material margin around the
+  object on its own plate.
+- Plate j is OPEN at (x,y) iff `f > j·inset` AND for every rim object c with
+  `k_c ≤ j`: `dC_c > B + (j - k_c)·inset`. So plate k grows around the object
+  with margin B („wächst um das Objekt herum"), plate k+1 wraps it one inset
+  step wider, k+2 two steps, … — uniform steps, exactly like the tunnel
+  itself. Plates in FRONT of k (j < k) are unaffected.
+- This REPLACES the silhouette footprint union of V2-8 (the adapted opening
+  subsumes it and adds the border + deeper-plate wrap).
+- Consumers of openings all use the ADAPTED test: plate footprints, float
+  piece clips (+ seam clearance), rand prism clips against plate k-1
+  (+ seam clearance; an object's own term never applies at k-1 since terms
+  require k_c ≤ j). Pegs/holes/piece emission unchanged (flat-top rule from
+  the final-review fix stays).
+- Multiple rim objects compose via the per-object terms (max of cuts).
+- 2D preview: nested contours must show the adapted openings — new
+  `window.shadowboxAdaptedOpeningLoops(doc, k)` in build-parts.js (needs
+  `__renderElementV2` for silhouettes at the coarse display grid); the editor
+  swaps to it and extends the contour cache key with a rim-element
+  fingerprint (id, position, size, rotation, level per rim element).
+
+### Unchanged
+
+The object itself stays a separate printed piece one level forward
+`[T, 2T]` with pegs on the plate extension and blind holes underneath.
