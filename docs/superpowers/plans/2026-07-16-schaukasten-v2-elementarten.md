@@ -597,3 +597,111 @@ Also adapt the EXISTING v1 stand test: its slot-gap (y) assertion is unchanged; 
 ```
 
 - [ ] **Step 2: RED** (fresh port). **Step 3: Implement engine + UI.** **Step 4: GREEN**: expect 343/0; Playwright smoke: move the slider → 3D stack spreads (screenshot `.superpowers/sdd/sb-v2-task-10-screenshot.png`), export still "Fertig." and bed-layout unchanged, slider produces NO undo entries (Ctrl+Z after sliding reverts the last DOC change, not the slider). **Step 5: Commit** — `feat(schaukasten): Explosionsansicht — Regler zieht die Ebenen in der 3D-Vorschau auseinander`
+
+---
+
+## Addendum-2 tasks (Mit-Rand v3, spec Addendum 2): V3-1 engine, V3-2 preview.
+
+### Task V3-1: Engine — adapted opening field (rings wrap rim objects)
+
+**Files:**
+- Modify: `js/build-parts.js` (`buildShadowboxParts`; token → `?v=sb21`), `tests/shadowbox.test.js`
+
+**Interfaces:**
+- Rim records collected BEFORE the plate loop (like floats): `rims = [{el, level, mask, dC}]` where `mask` = `__renderElementV2(el, doc-context, ...).mask` and `dC` = signed mm distance (Float32Array; `mask[i] ? -dIn[i]*pmm : +dOut[i]*pmm` via two `window.__chamferDT` passes, `pmm = (1/sx + 1/sy)/2`). Level via `layerOf`.
+- `B = Math.max(2, inset)`.
+- Adapted-open helper used by ALL opening consumers:
+  `openAt(j, c, r, seam)` := `f(c,r) > j*inset + seam` AND for every rim `rm` with `rm.level <= j`: `rm.dC[i] > B + (j - rm.level)*inset + seam`.
+  - Plate footprints (per plate j): `fp = min(base, cellUnits(max(cutF, max_c cutC)))` — i.e. plate material where NOT openAt(j, ..., 0). Implement as: `fp(c,r) = Math.min(base(c,r), s * Math.max(j*inset - f(c,r), ...perRimTerms (B + Δ*inset - dC)))` — the max over cuts replaces BOTH the old opening cut AND the old rim footprint union (delete the `over` union block; the B-margin growth subsumes it).
+  - Float piece masks: silhouette AND openAt(level, c, r, SEAM_CLEARANCE_MM).
+  - Rand prism clips: prismMask cell kept iff `base > 0` AND (k === 0 || openAt(k-1, c, r, SEAM_CLEARANCE_MM)). (An object's own term never fires at k-1: terms require level ≤ j.)
+- Back plate stays fully solid (no opening cut at n-1 — unchanged; rim terms would only remove material, so the back plate keeps `fp = base` as today: adaptation must NOT cut the back plate).
+- Pegs: rand peg spots stay `prismMask ∧ flatTop`; back anchors and float pins unchanged (piece masks already adapted upstream).
+- Everything else (piece emission, -oben splits, explode, bed row, stand) untouched.
+
+- [ ] **Step 1: Failing tests** (append; deterministic fixtures — waviness 0):
+
+```js
+  function rimAdaptDoc() {
+    const d = sbDoc(); // 60x40, T=2, 4 layers, inset 3
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 8; // openings: j*3+8 from edge
+    const cloud = window.makeElementV2("shape", { cxMm: 30, cyMm: 13, wMm: 10, hMm: 6, color: "#FFFFFF" });
+    cloud.sbLayer = 1; cloud.sbMode = "rim"; // on plate 2 of 4, bulging into the tunnel
+    d.elements.push(cloud);
+    return d;
+  }
+  function grundArea(parts, name) {
+    const p = parts.find((q) => q.name === name);
+    if (!p) return 0;
+    const zTop = zbounds(p.facets)[1];
+    let a = 0;
+    for (const f2 of p.facets) if (f2.every((v) => Math.abs(v[2] - zTop) < 1e-6)) {
+      a += Math.abs((f2[1][0] - f2[0][0]) * (f2[2][1] - f2[0][1])
+                  - (f2[2][0] - f2[0][0]) * (f2[1][1] - f2[0][1])) / 2;
+    }
+    return a;
+  }
+
+  test("schaukasten-v3: deeper plates wrap the rim object; front plates untouched", () => {
+    const withCloud = window.buildParts(rimAdaptDoc());
+    const bare = rimAdaptDoc(); bare.elements = [];
+    const without = window.buildParts(bare);
+    // own plate grows around the object (border B)
+    assert(grundArea(withCloud, "ebene-2-grundplatte") > grundArea(without, "ebene-2-grundplatte") + 10,
+      "own plate grows around the object");
+    // deeper plate wraps it one inset step wider
+    const gain2 = grundArea(withCloud, "ebene-2-grundplatte") - grundArea(without, "ebene-2-grundplatte");
+    const gain3 = grundArea(withCloud, "ebene-3-grundplatte") - grundArea(without, "ebene-3-grundplatte");
+    assert(gain3 > gain2 + 5, "deeper ring wraps wider (one more inset step)");
+    // plates in FRONT are byte-identical
+    const pick = (parts, pre) => JSON.stringify(parts.filter((p) => p.name.indexOf(pre) === 0 && p.name.indexOf("grundplatte") >= 0));
+    assertEqual(pick(withCloud, "ebene-1-"), pick(without, "ebene-1-"), "front plate unaffected");
+  });
+
+  test("schaukasten-v3: floats are clipped by the adapted opening", () => {
+    const d = rimAdaptDoc();
+    const fl = window.makeElementV2("shape", { cxMm: 30, cyMm: 16, wMm: 16, hMm: 8, color: "#00AA00" });
+    fl.sbLayer = 2; fl.sbMode = "float"; // overlaps the cloud's wrap region on level 2
+    d.elements.push(fl);
+    const withCloud = window.buildParts(d);
+    const noCloud = rimAdaptDoc(); noCloud.elements = [JSON.parse(JSON.stringify(fl))];
+    const without = window.buildParts(window.migrateProject(noCloud));
+    const area = (parts) => parts.filter((p) => p.name.indexOf("schwebeteil") >= 0)
+      .reduce((a, p) => a + p.facets.length, 0);
+    assert(area(withCloud) < area(without), "float loses the region claimed by the wrap");
+  });
+```
+
+- [ ] **Step 2: RED** (fresh port 8860). Existing suite interactions to EXPECT and verify:
+  - The v1 "overhang element extends the plate" test (sbMode rim): still passes — growth is now ⊇ old union.
+  - V2-8 rand tests: pegs/holes/names/z unchanged mechanics — should pass. If a peg vanishes because the extension region changed, examine before touching (peg spots = prismMask ∧ flatTop; prismMask unchanged except adapted k-1 clip).
+- [ ] **Step 3: Implement** per Interfaces (delete the `over` union block; single `openAt`-equivalent logic; rims collected pre-loop; back plate exempt from cuts).
+- [ ] **Step 4: GREEN full suite** (fresh port 8859): expect 346/0.
+- [ ] **Step 5: Commit** — `feat(schaukasten): Mit-Rand v3 — Ebenen wachsen um das Objekt, tiefere Ringe folgen der Form mit Versatz-Schritten`
+
+### Task V3-2: 2D contours show adapted openings
+
+**Files:**
+- Modify: `js/build-parts.js` (new export `window.shadowboxAdaptedOpeningLoops(doc, k)`; token → `?v=sb22`), `js/editor.js` (swap + cache key), `tests/shadowbox.test.js`
+
+**Interfaces:**
+- `window.shadowboxAdaptedOpeningLoops(doc, k)` in build-parts.js (IIFE — needs `__renderElementV2`): coarse grid (longest side 160, like `shadowboxOpeningLoops`), composite field `g = min(f - k*inset, min over rims with level<=k of (dC - B - (k-level)*inset))`, loops via `window.marchingSquaresLoops(g, cols, rows)` mapped to `{xMm,yMm}` like the existing loops fn; rims rendered at the coarse grid (pass a grid-shaped doc context to `__renderElementV2` — it takes cols/rows/grid directly). Falls back to the base loops when no rim elements exist (identical output).
+- editor.js `sbContourLoops`: call the adapted fn when present; cache key extended with a rim fingerprint: JSON of rim elements' `[id, cxMm, cyMm, wMm, hMm, rotationDeg, sbLayer]`.
+
+- [ ] **Step 1: Failing test:**
+
+```js
+  test("schaukasten-v3: adapted contour loops wrap the rim object", () => {
+    const d = rimAdaptDoc();
+    const base = window.shadowboxOpeningLoops(d, 2);
+    const adapted = window.shadowboxAdaptedOpeningLoops(d, 2);
+    const len = (loops) => loops.reduce((a, lp) => a + lp.length, 0);
+    assert(len(adapted) > 0, "adapted loops exist");
+    assert(JSON.stringify(adapted) !== JSON.stringify(base), "wrap changes the contour");
+    const bare = rimAdaptDoc(); bare.elements = [];
+    assertEqual(JSON.stringify(window.shadowboxAdaptedOpeningLoops(bare, 2)),
+      JSON.stringify(window.shadowboxOpeningLoops(bare, 2)), "no rims -> identical to base loops");
+  });
+```
+
+- [ ] **Step 2: RED** (fresh port 8858). **Step 3: Implement.** **Step 4: GREEN** (fresh port 8857): expect 347/0; Playwright smoke: enable SB, add a Rechteck „Mit Rand" on Ebene 2 near the rim → 2D contours visibly wrap around it (screenshot `.superpowers/sdd/sb-v3-task-2-screenshot.png`); move/resize the element → contours follow (cache invalidates). **Step 5: Commit** — `feat(schaukasten): 2D-Konturen zeigen die angepassten Öffnungen um Mit-Rand-Objekte`
