@@ -469,3 +469,131 @@ NOTE on bed x: mesh x equals doc x (no flip on x) — `__maskBBoxMm` returns doc
 - [ ] **Step 2:** E2e smoke rebuilding the sample: 6 Ebenen; rim cloud on Ebene 2 near the rim; three floating shapes stacked on levels 4/3/2 with overlaps (wings/body/head stand-ins); verify in 3D (screenshot); export 3MF → "Fertig."; bed layout via evaluate: pieces right of the stand, pegs present, `-oben` sub-slabs exist; engraved text on the back plate still works (Vertieft floor part). No console errors.
 - [ ] **Step 3:** Full suite once more (fresh port): fail 0.
 - [ ] **Step 4:** Commit — `feat(schaukasten): Element-Arten abgeschlossen — Doku und Testzahlen aktualisiert`
+
+---
+
+## Addendum tasks (2026-07-17, spec addendum): V2-8/9/10 run AFTER V2-6; V2-7 (finalize) runs LAST.
+
+### Task V2-8: Rim pieces become separate parts with pins
+
+**Files:**
+- Modify: `js/build-parts.js` (`buildShadowboxParts` rim block + float/pin emission; token → `?v=sb16`), `tests/shadowbox.test.js`
+
+**Interfaces:**
+- Consumes: existing rim collection (`rimMasks` per plate), pin machinery from V2-5 (`pinList`, `pegParts`, `holeR/pegR/pegH/holeDepth`, `__sbStampDisk`, `shadowboxPinSpots`), float emission block (pieceParts pattern, bed cursor).
+- Produces: rim prisms are NO LONGER pushed into `plateParts`. Instead each rim element becomes a standalone piece record `{ el, level: k, mask: prismMask, kind: "rand" }` appended to a shared `pieces` list with the floats (floats get `kind: "float"`). Emission (shared block): rand pieces local slab `[0,T]`, name `ebene-(k+1)-rand-M` (M = 1-based over rand pieces in doc order; unchanged names), `-oben` split on holes; stack shift dz = `(n-1-k)*T + T` (one level forward — net z equals today's `[T,2T]` plate-local); bed: own spot in the same pieces row (cursor shared with floats). Pins: when `pins.enabled`, for each rand piece: spots = `shadowboxPinSpots(prismMask, ..., holeR + 1.0, 12)`; pegs carried by PLATE k (color `colors[k]`, plate-local `[T, T+pegH]`, appended to plateParts after rename, before shift — same pattern as back-plate pegs); holes in the rand piece's underside.
+- The rim FOOTPRINT UNION stays exactly as-is (plate material below the cloud, plate color).
+- `pins.enabled === false`: rand pieces still separate, no pegs/holes.
+
+- [ ] **Step 1: Failing tests** (append inside the IIFE):
+
+```js
+  test("schaukasten-v2: rand piece is separate with plate pegs and underside holes", () => {
+    const d = sbDoc(); // 4 layers, T=2
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 12;
+    const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 12, hMm: 8, color: "#FFFFFF" });
+    el.sbLayer = 1; el.sbMode = "rim";
+    d.elements.push(el);
+    const parts = window.buildParts(d); // plate 2 slab [4,6]; rand piece [6,8]
+    const rand = parts.filter((p) => p.name.indexOf("ebene-2-rand-1") === 0);
+    assert(rand.length >= 1, "rand piece exists");
+    const zb = zbounds(rand.flatMap((p) => p.facets));
+    assertClose(zb[0], 6, 1e-6, "piece sits one level forward");
+    assertClose(zb[1], 8, 1e-6, "piece top");
+    assert(rand.some((p) => /-oben$/.test(p.name)), "hole splits the piece");
+    const peg = parts.filter((p) => p.name.indexOf("ebene-2-stift-") === 0);
+    assert(peg.length >= 1, "peg on the plate's rim extension");
+    const zp = zbounds(peg.flatMap((p) => p.facets));
+    assertClose(zp[0], 6, 1e-6, "peg base on plate top (shifted)");
+    assertClose(zp[1], 6 + 1.2, 1e-6, "peg height");
+    const pegColor = JSON.stringify(peg[0].color);
+    const pieceColor = JSON.stringify(rand[0].color);
+    assert(pegColor !== pieceColor, "peg is plate-colored, piece element-colored");
+  });
+
+  test("schaukasten-v2: rand piece gets its own bed spot; pins off keeps separation", () => {
+    const d = sbDoc();
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 12;
+    const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 12, hMm: 8, color: "#FFFFFF" });
+    el.sbLayer = 1; el.sbMode = "rim";
+    d.elements.push(el);
+    const bed = window.buildParts(d, { layout: "bed" });
+    const rand = bed.filter((p) => p.name.indexOf("-rand-") >= 0);
+    assert(rand.length >= 1, "rand piece on the bed");
+    const zb = zbounds(rand.flatMap((p) => p.facets));
+    assertClose(zb[0], 0, 1e-6, "printed flat");
+    assert(zb[1] <= 2 + 1e-6, "one plate thick");
+    const off = JSON.parse(JSON.stringify(d)); off.shadowbox.pins.enabled = false;
+    const po = window.buildParts(window.migrateProject(off));
+    assert(po.some((p) => p.name.indexOf("-rand-") >= 0), "still separate without pins");
+    assert(!po.some((p) => p.name.indexOf("-stift-") >= 0), "no pegs when disabled");
+    assert(!po.some((p) => /-rand-1-oben$/.test(p.name)), "no hole split when disabled");
+  });
+```
+
+- [ ] **Step 2: RED** (fresh port). Existing V2-3 tests will partially break by design: the rim prism moves out of plateParts — the three V2-3 tests assert `ebene-*-rand-1` NAMES and z-ranges which REMAIN VALID (same names, same stack z). Verify they still pass; if one fails, understand why before touching it (the k=0 unclipped test's top z stays stack-top + T).
+- [ ] **Step 3: Implement** per Interfaces. **Step 4: GREEN** (fresh port): expect 341/0. **Step 5: Commit** — `feat(schaukasten): Rand-Wolken als Einzelteile — Zapfen auf der Randerweiterung, Sackloch in der Wolke`
+
+### Task V2-9: Stand — closed slot ends
+
+**Files:**
+- Modify: `js/shadowbox.js` (`buildStandParts`; token → `?v=sb17`), `js/build-parts.js` (bed cursor stand-width term — the cross-referenced formula; token → `?v=sb18`), `tests/shadowbox.test.js`
+
+**Interfaces:**
+- Produces: `buildStandParts` v2 — `pocketL = plateWidthMm + tolMm`, `L = pocketL + 2*railMm`, D/H/slotDepth/slotW unchanged; parts: sockel `[0,L]×[0,D]` z `[0,H-sd]`; `staender-wand-vorne`/`-hinten` full-L rails as before; NEW `staender-wand-links` (x `[0, rail]`, y `[rail, rail+slotW]`, z `[H-sd, H]`) and `staender-wand-rechts` (x `[L-rail, L]`). Five parts. Bed cursor term in build-parts becomes `(W + tol) + 2*rail` — update BOTH the formula and the cross-reference comment (`tol = sb.stand && sb.stand.tolMm != null ? sb.stand.tolMm : 0.4`, `rail = Math.max(2, (sb.stand && sb.stand.railMm) || 5)` — mirror buildStandParts' clamps exactly).
+
+- [ ] **Step 1: Failing tests** — UPDATE the existing stand test (slot-gap assertion stays; L changes) and add caps:
+
+```js
+  test("schaukasten-v2: stand v2 — closed pocket with end caps", () => {
+    const sb = window.defaultShadowbox();
+    sb.layers = 4;
+    const parts = window.buildStandParts(sb, 60, 2);
+    assertEqual(parts.length, 5, "sockel + four walls");
+    const names = parts.map((p) => p.name).sort();
+    assertEqual(JSON.stringify(names), JSON.stringify([
+      "staender-sockel", "staender-wand-hinten", "staender-wand-links",
+      "staender-wand-rechts", "staender-wand-vorne"]), "names");
+    const xb = (fs) => { let lo = Infinity, hi = -Infinity; for (const f of fs) for (const v of f) { lo = Math.min(lo, v[0]); hi = Math.max(hi, v[0]); } return [lo, hi]; };
+    const links = parts.find((p) => p.name === "staender-wand-links");
+    const rechts = parts.find((p) => p.name === "staender-wand-rechts");
+    // pocket between the caps = plate width + tolerance
+    assertClose(xb(rechts.facets)[0] - xb(links.facets)[1], 60 + 0.4, 1e-9, "pocket length");
+    assertClose(zbounds(links.facets)[0], 15 - 8, 1e-9, "cap at rail height");
+    assertClose(zbounds(links.facets)[1], 15, 1e-9, "cap top");
+    const sockel = parts.find((p) => p.name === "staender-sockel");
+    assertClose(xb(sockel.facets)[1], 60 + 0.4 + 10, 1e-9, "total length = pocket + 2 rails");
+  });
+```
+
+Also adapt the EXISTING v1 stand test: its slot-gap (y) assertion is unchanged; its part-count assertion (3) must become part of the new reality — update count to 5 and keep every other assertion identical.
+- [ ] **Step 2: RED** (fresh port). **Step 3: Implement** (both files, both tokens). **Step 4: GREEN**: expect 342/0 — plus verify the bed-layout float test still passes (cursor moved right; assertions are relative, they must hold). **Step 5: Commit** — `feat(schaukasten): Fuß mit geschlossener Tasche — Endkappen links und rechts, Tasche exakt Plattenbreite plus Toleranz`
+
+### Task V2-10: Explosionsansicht (preview-only)
+
+**Files:**
+- Modify: `js/build-parts.js` (`buildParts` opts + `buildShadowboxParts` signature; token → `?v=sb19`), `js/editor.js` + `index.html` (slider, no tokens), `tests/shadowbox.test.js`
+
+**Interfaces:**
+- Engine: `buildParts(doc, opts)` passes `opts.explodeMm` (number ≥ 0, default 0) → `buildShadowboxParts(doc, layout, explodeMm)`. In STACK layout every level-based z-shift uses `(T + explodeMm)` instead of `T`: plates `(n-1-k)*(T+g)`, float pieces `(n-1-level)*(T+g)`, rand pieces `(n-1-k)*(T+g) + T` (they stay seated on their plate — they are pinned to it). Bed layout ignores explodeMm. `explodeMm` absent/0 → byte-identical to today (parity test).
+- UI: range `#sbExplode` (0–20, step 0.5, value 0, German title „Explosionsansicht — zieht die Ebenen in der 3D-Vorschau auseinander (nur Ansicht, kein Export)") in the Schaukasten accordion after Montagestifte, label „Explosion (mm)". Editor-local `var sbExplodeMm = 0;` (NOT in doc — like zoom: never serialized, no undo). `on("sbExplode", "input", ...)` sets the var + `scheduleRebuild3D()` ONLY. `getPartsFn` (editor.js ~1904) passes `{ explodeMm: sbExplodeMm }` — exports keep `{layout:"bed"}` untouched. Slider reset to 0 on doc replace is NOT required (view state may persist), but sync sets the slider from the var (not the doc).
+
+- [ ] **Step 1: Failing engine tests:**
+
+```js
+  test("schaukasten-v2: explode spreads stack levels; 0 is byte-identical", () => {
+    const d = sbDoc();
+    const a = JSON.stringify(window.buildParts(d));
+    assertEqual(JSON.stringify(window.buildParts(d, { explodeMm: 0 })), a, "explode 0 == default");
+    const ex = window.buildParts(d, { explodeMm: 5 });
+    for (let k = 0; k < 4; k++) {
+      const plate = ex.filter((p) => p.name.indexOf("ebene-" + (k + 1) + "-") === 0);
+      const zb = zbounds(plate.flatMap((p) => p.facets));
+      assertClose(zb[0], (4 - 1 - k) * (2 + 5), 1e-6, "plate " + (k + 1) + " exploded z");
+    }
+    const bedA = JSON.stringify(window.buildParts(d, { layout: "bed" }));
+    assertEqual(JSON.stringify(window.buildParts(d, { layout: "bed", explodeMm: 5 })), bedA, "bed ignores explode");
+  });
+```
+
+- [ ] **Step 2: RED** (fresh port). **Step 3: Implement engine + UI.** **Step 4: GREEN**: expect 343/0; Playwright smoke: move the slider → 3D stack spreads (screenshot `.superpowers/sdd/sb-v2-task-10-screenshot.png`), export still "Fertig." and bed-layout unchanged, slider produces NO undo entries (Ctrl+Z after sliding reverts the last DOC change, not the slider). **Step 5: Commit** — `feat(schaukasten): Explosionsansicht — Regler zieht die Ebenen in der 3D-Vorschau auseinander`
