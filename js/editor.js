@@ -1413,6 +1413,7 @@
   var spacePan = false; // Space held → next canvas drag pans the view
   var textPathDraw = null; // text-element id waiting for a Pfadtext drag
   var sbOpeningDraw = false; // true while waiting for one freehand opening capture
+  var sbExplodeMm = 0; // view-only explode offset in mm — NOT stored in doc, never serialized
 
   // Mouse wheel zooms the workbench toward the cursor (same convention as the
   // 3D stage); ctrl+wheel is the trackpad pinch (finer deltas, larger factor).
@@ -1996,7 +1997,7 @@
 
   // ---- 2D/3D/split preview mode ----
   const PREVIEW_MODE_KEY = "ukibori.previewMode";
-  function getPartsFn() { return { parts: window.buildParts(visibleDoc()) }; }
+  function getPartsFn() { return { parts: window.buildParts(visibleDoc(), { explodeMm: sbExplodeMm }) }; }
 
   // setPreviewMode: unified handler for 2D, 3D, and split modes.
   // Order: set layout class + visibility first so clientWidth is the split half-width
@@ -4007,6 +4008,8 @@
     document.getElementById("sbStandHeight").value = sb.stand.heightMm;
     var sbPinsEl = document.getElementById("sbPins");
     if (sbPinsEl) sbPinsEl.checked = sb.pins ? sb.pins.enabled !== false : true;
+    var sbExplodeEl = document.getElementById("sbExplode");
+    if (sbExplodeEl) sbExplodeEl.value = sbExplodeMm;
   }
 
   function sbChanged() {
@@ -4064,6 +4067,10 @@
       if (sb.pins == null) sb.pins = { enabled: true, diameterMm: 3, clearanceMm: 0.35 };
       sb.pins.enabled = this.checked;
       sbChanged();
+    });
+    on("sbExplode", "input", function () {
+      sbExplodeMm = parseFloat(this.value) || 0;
+      scheduleRebuild3D();
     });
     window.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && sbOpeningDraw) {

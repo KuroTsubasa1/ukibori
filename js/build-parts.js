@@ -735,7 +735,9 @@
     // Disabled or unsupported shapes fall through untouched (parity).
     if (doc.shadowbox && doc.shadowbox.enabled &&
         (doc.body.shape === "rect" || doc.body.shape === "circle")) {
-      return buildShadowboxParts(doc, opts && opts.layout === "bed" ? "bed" : "stack");
+      const sbLayout = opts && opts.layout === "bed" ? "bed" : "stack";
+      const sbExplode = (opts && typeof opts.explodeMm === "number" && opts.explodeMm > 0) ? opts.explodeMm : 0;
+      return buildShadowboxParts(doc, sbLayout, sbExplode);
     }
     // Compute a single shared grid over the expanded domain (expanded only when the
     // Öse washer overhangs the body box; default = body box, byte-identical path).
@@ -892,7 +894,8 @@
   // at k*insetPerLayerMm, content via the standard per-plate pipeline.
   // layout 'stack' = assembled preview (front plate on top); 'bed' = print
   // layout, every plate at z0=0 side-by-side, stand beside the plates.
-  function buildShadowboxParts(doc, layout) {
+  function buildShadowboxParts(doc, layout, explodeMm) {
+    const g = (typeof explodeMm === "number" && explodeMm > 0) ? explodeMm : 0;
     const sb = doc.shadowbox;
     const n = window.__sbClampLayers(sb.layers);
     const T = doc.body.thicknessMm;
@@ -1054,7 +1057,7 @@
           if (pin.lower === "back") plateParts.push(...pegParts(pin.spots, n - 1, window.hexToRgb(colors[n - 1])));
         }
       }
-      if (layout === "stack") __shiftFacets(plateParts, 0, 0, (n - 1 - k) * T);
+      if (layout === "stack") __shiftFacets(plateParts, 0, 0, (n - 1 - k) * (T + g));
       else __shiftFacets(plateParts, k * (W + gapMm), 0, 0);
       out.push(...plateParts);
     }
@@ -1092,7 +1095,7 @@
       const alive = pieceParts.filter((p) => p.facets.length);
       if (!alive.length) continue;
       if (layout === "stack") {
-        __shiftFacets(alive, 0, 0, (n - 1 - fl.level) * T);
+        __shiftFacets(alive, 0, 0, (n - 1 - fl.level) * (T + g));
       } else {
         const bb = __maskBBoxMm(fl.mask, cols, rows, sx, sy);
         __shiftFacets(alive, bedX - bb.x0, 0, 0);
@@ -1122,10 +1125,11 @@
       }
       const alive = pieceParts.filter((p) => p.facets.length);
       if (!alive.length) continue;
-      // Stack shift: one level forward of the plate (dz = (n-1-level)*T + T).
+      // Stack shift: one level forward of the plate (dz = (n-1-level)*(T+g) + T).
+      // The trailing +T is plain T — the rand cloud is pinned to its plate.
       // Bed: flat at z=0, shifted right of all plates+stand+floats.
       if (layout === "stack") {
-        __shiftFacets(alive, 0, 0, (n - 1 - rp.level) * T + T);
+        __shiftFacets(alive, 0, 0, (n - 1 - rp.level) * (T + g) + T);
       } else {
         const bb = __maskBBoxMm(rp.mask, cols, rows, sx, sy);
         __shiftFacets(alive, bedX - bb.x0, 0, 0);

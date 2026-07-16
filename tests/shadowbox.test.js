@@ -543,6 +543,20 @@
     assert(!po.some((p) => /-rand-1-oben$/.test(p.name)), "no hole split when disabled");
   });
 
+  test("schaukasten-v2: explode spreads stack levels; 0 is byte-identical", () => {
+    const d = sbDoc();
+    const a = JSON.stringify(window.buildParts(d));
+    assertEqual(JSON.stringify(window.buildParts(d, { explodeMm: 0 })), a, "explode 0 == default");
+    const ex = window.buildParts(d, { explodeMm: 5 });
+    for (let k = 0; k < 4; k++) {
+      const plate = ex.filter((p) => p.name.indexOf("ebene-" + (k + 1) + "-") === 0);
+      const zb = zbounds(plate.flatMap((p) => p.facets));
+      assertClose(zb[0], (4 - 1 - k) * (2 + 5), 1e-6, "plate " + (k + 1) + " exploded z");
+    }
+    const bedA = JSON.stringify(window.buildParts(d, { layout: "bed" }));
+    assertEqual(JSON.stringify(window.buildParts(d, { layout: "bed", explodeMm: 5 })), bedA, "bed ignores explode");
+  });
+
   test("schaukasten: content-parts refactor keeps a plain doc byte-identical", () => {
     const d = sbDoc();
     d.shadowbox.enabled = false;
