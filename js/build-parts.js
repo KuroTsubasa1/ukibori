@@ -867,6 +867,25 @@
     return parts;
   }
 
+  // mm bounds of set cells in a flat Uint8Array mask (cell-center mapping).
+  // sx = cols/W, sy = rows/H. Returns {x0, x1, y0, y1} in mm; all Infinity
+  // when no cell is set (caller must guard on empty masks before using bbox).
+  function __maskBBoxMm(mask, cols, rows, sx, sy) {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (!mask[r * cols + c]) continue;
+        const xMm = (c + 0.5) / sx;
+        const yMm = (r + 0.5) / sy;
+        if (xMm < x0) x0 = xMm;
+        if (xMm > x1) x1 = xMm;
+        if (yMm < y0) y0 = yMm;
+        if (yMm > y1) y1 = yMm;
+      }
+    }
+    return { x0, x1, y0, y1 };
+  }
+
   const __SB_MOUNT_NONE = Object.freeze({ type: "none", xMm: 0, yMm: 0, diameterMm: 0, ringThicknessMm: 0, ringHeightMm: 0, marginMm: 0 });
 
   // Schaukasten assembly: one plate per layer, shared opening field thresholded
@@ -890,6 +909,32 @@
     const sx = cols / W, sy = rows / H, s = (sx + sy) / 2;
     const gapMm = 5;
     const out = [];
+
+    // Collect float elements once (before the plate loop). Each entry carries
+    // the clipped silhouette mask and the resolved level (clamped to n-2 so
+    // the back plate — which has no opening — is never a float target).
+    const floats = [];
+    if (f) {
+      for (const el of doc.elements) {
+        if (modeOf(el) !== "float") continue;
+        if (el.type === "image" && !el._img) continue; // skip unloaded images
+        const level = Math.max(0, Math.min(n - 2, el.sbLayer == null ? n - 2 : el.sbLayer | 0));
+        const levelInset = level * inset;
+        // Render the element silhouette against a neutral doc (no plate-specific transforms).
+        const dk0 = Object.assign({}, doc, { shadowbox: null });
+        const rendered = __renderElementV2(el, dk0, cols, rows, grid);
+        if (!rendered || !rendered.mask) continue;
+        // Clip silhouette to the opening at this level: {f > level*inset}.
+        const raw = rendered.mask;
+        const mask = new Uint8Array(cols * rows);
+        for (let i = 0; i < mask.length; i++) {
+          if (!raw[i]) continue;
+          const c = i % cols, r = (i / cols) | 0;
+          if (f(c, r) > levelInset) mask[i] = 1;
+        }
+        floats.push({ el, level, mask });
+      }
+    }
 
     for (let k = 0; k < n; k++) {
       const isBack = k === n - 1;
@@ -964,6 +1009,31 @@
       const dx = layout === "stack" ? W + 2 * gapMm : n * (W + gapMm) + gapMm;
       out.push(...__shiftFacets(stand, dx, 0, 0));
     }
+
+    // Emit floating pieces: one slab part per element, ordered by doc.elements
+    // index (M is 1-based over all floats). Pieces are built in doc coords then
+    // shifted as a group — the pins task (V2-5) will add pegs/holes before the
+    // shift, so pieceParts is kept as an array before push.
+    let bedX = n * (W + gapMm) + gapMm + (stand.length ? Math.max(20, W * 0.7) + gapMm : 0);
+    let pieceIdx = 0;
+    for (const fl of floats) {
+      pieceIdx++;
+      const pieceParts = [{
+        name: "ebene-" + (fl.level + 1) + "-schwebeteil-" + pieceIdx,
+        color: window.hexToRgb(fl.el.color || "#000000"),
+        facets: window.traceMaskToFacets((c, r) => fl.mask[r * cols + c] === 1, cols, rows, pitch, T, 0),
+      }].filter((p) => p.facets.length);
+      if (!pieceParts.length) continue;
+      if (layout === "stack") {
+        __shiftFacets(pieceParts, 0, 0, (n - 1 - fl.level) * T);
+      } else {
+        const bb = __maskBBoxMm(fl.mask, cols, rows, sx, sy);
+        __shiftFacets(pieceParts, bedX - bb.x0, 0, 0);
+        bedX += (bb.x1 - bb.x0) + gapMm;
+      }
+      out.push(...pieceParts);
+    }
+
     return out;
   }
 

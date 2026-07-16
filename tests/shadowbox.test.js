@@ -386,6 +386,46 @@
     assertClose(zbounds(prism.facets)[1], 4 * 2 + 2, 1e-6, "pokes above the whole stack");
   });
 
+  test("schaukasten-v2: floating piece — clipped to its opening, own part, right slab", () => {
+    const d = sbDoc(); // 4 layers, T=2, inset 3
+    // deterministic field: no wobble, margin 12 -> opening_2 = {d > 18} (exists at plate center)
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 12;
+    const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 40, hMm: 20, color: "#FF7700" });
+    el.sbLayer = 2; el.sbMode = "float"; // deepest allowed level (n-2)
+    d.elements.push(el);
+    const parts = window.buildParts(d);
+    const piece = parts.filter((p) => p.name.indexOf("ebene-3-schwebeteil-") === 0);
+    assert(piece.length >= 1, "piece exists");
+    const zb = zbounds(piece.flatMap((p) => p.facets));
+    assertClose(zb[0], (4 - 1 - 2) * 2, 1e-6, "piece bottom at its level slab");
+    assertClose(zb[1], (4 - 1 - 2) * 2 + 2, 1e-6, "piece top");
+    // 40x20 element vs opening threshold 6mm: the ring collision is cut off
+    const xb = (fs) => { let lo = Infinity, hi = -Infinity; for (const f2 of fs) for (const v of f2) { lo = Math.min(lo, v[0]); hi = Math.max(hi, v[0]); } return [lo, hi]; };
+    const [x0, x1] = xb(piece.flatMap((p) => p.facets));
+    assert(x1 - x0 < 40 - 1, "wider than the opening -> clipped");
+    assert(!parts.some((p) => /^ebene-3-(farbe|erhaben|farbschicht)/.test(p.name)), "not plate content");
+  });
+
+  test("schaukasten-v2: floating level clamps to n-2 and bed layout gives it its own spot", () => {
+    const d = sbDoc();
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 12; // deterministic field
+    const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 10, hMm: 8, color: "#FF7700" });
+    el.sbLayer = null; el.sbMode = "float"; // null would be back plate -> clamped to n-2
+    d.elements.push(el);
+    const stack = window.buildParts(d);
+    assert(stack.some((p) => p.name.indexOf("ebene-3-schwebeteil-") === 0), "clamped to level n-2");
+    const bed = window.buildParts(d, { layout: "bed" });
+    const piece = bed.filter((p) => p.name.indexOf("schwebeteil") >= 0);
+    const zb = zbounds(piece.flatMap((p) => p.facets));
+    assertClose(zb[0], 0, 1e-6, "on the bed");
+    assertClose(zb[1], 2, 1e-6, "one plate thick");
+    let plateHiX = -Infinity;
+    for (const p of bed) if (p.name.indexOf("schwebeteil") < 0) for (const f2 of p.facets) for (const v of f2) plateHiX = Math.max(plateHiX, v[0]);
+    let pieceLoX = Infinity;
+    for (const p of piece) for (const f2 of p.facets) for (const v of f2) pieceLoX = Math.min(pieceLoX, v[0]);
+    assert(pieceLoX > plateHiX - 1e-6, "piece placed right of plates and stand");
+  });
+
   test("schaukasten: content-parts refactor keeps a plain doc byte-identical", () => {
     const d = sbDoc();
     d.shadowbox.enabled = false;
