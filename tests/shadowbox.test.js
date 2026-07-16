@@ -126,10 +126,11 @@
     const sb = window.defaultShadowbox();
     sb.layers = 4;
     const parts = window.buildStandParts(sb, 60, 2);
-    assertEqual(parts.length, 3, "sockel + two rails");
+    assertEqual(parts.length, 5, "sockel + two rails + two end caps");
     const names = parts.map((p) => p.name).sort();
     assertEqual(JSON.stringify(names),
-      JSON.stringify(["staender-sockel", "staender-wand-hinten", "staender-wand-vorne"]), "names");
+      JSON.stringify(["staender-sockel", "staender-wand-hinten", "staender-wand-links",
+        "staender-wand-rechts", "staender-wand-vorne"]), "names");
     const sockel = parts.find((p) => p.name === "staender-sockel");
     const vorne = parts.find((p) => p.name === "staender-wand-vorne");
     const hinten = parts.find((p) => p.name === "staender-wand-hinten");
@@ -140,6 +141,26 @@
     // slot: gap between the two rails = layers*T + tol = 4*2 + 0.4
     const gap = ybounds(hinten.facets)[0] - ybounds(vorne.facets)[1];
     assertClose(gap, 8.4, 1e-9, "slot width");
+  });
+
+  test("schaukasten-v2: stand v2 — closed pocket with end caps", () => {
+    const sb = window.defaultShadowbox();
+    sb.layers = 4;
+    const parts = window.buildStandParts(sb, 60, 2);
+    assertEqual(parts.length, 5, "sockel + four walls");
+    const names = parts.map((p) => p.name).sort();
+    assertEqual(JSON.stringify(names), JSON.stringify([
+      "staender-sockel", "staender-wand-hinten", "staender-wand-links",
+      "staender-wand-rechts", "staender-wand-vorne"]), "names");
+    const xb = (fs) => { let lo = Infinity, hi = -Infinity; for (const f of fs) for (const v of f) { lo = Math.min(lo, v[0]); hi = Math.max(hi, v[0]); } return [lo, hi]; };
+    const links = parts.find((p) => p.name === "staender-wand-links");
+    const rechts = parts.find((p) => p.name === "staender-wand-rechts");
+    // pocket between the caps = plate width + tolerance
+    assertClose(xb(rechts.facets)[0] - xb(links.facets)[1], 60 + 0.4, 1e-9, "pocket length");
+    assertClose(zbounds(links.facets)[0], 15 - 8, 1e-9, "cap at rail height");
+    assertClose(zbounds(links.facets)[1], 15, 1e-9, "cap top");
+    const sockel = parts.find((p) => p.name === "staender-sockel");
+    assertClose(xb(sockel.facets)[1], 60 + 0.4 + 10, 1e-9, "total length = pocket + 2 rails");
   });
 
   test("schaukasten: stand returns [] when disabled or degenerate", () => {

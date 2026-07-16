@@ -150,7 +150,8 @@
   }
 
   // Printed stand: upright as used (slot opens upward -> zero overhangs).
-  // Three separate manifold boxes — same touching-solids pattern as plate+prisms.
+  // Five separate manifold boxes — sockel, vorne/hinten rails full-length, plus
+  // links/rechts end caps that close the pocket so the plate cannot slide sideways.
   function buildStandParts(sb, plateWidthMm, thicknessMm) {
     const st = sb.stand || {};
     if (!st.enabled || !(thicknessMm > 0) || !(plateWidthMm > 0)) return [];
@@ -158,8 +159,10 @@
     const H = Math.max(6, st.heightMm || 15);
     const slotDepth = Math.min(H - 2, Math.max(3, st.slotDepthMm || 8));
     const rail = Math.max(2, st.railMm || 5);
-    const slotW = n * thicknessMm + (st.tolMm != null ? st.tolMm : 0.4);
-    const L = Math.max(20, plateWidthMm * 0.7);
+    const tol = st.tolMm != null ? st.tolMm : 0.4;
+    const slotW = n * thicknessMm + tol;
+    const pocketL = plateWidthMm + tol;
+    const L = pocketL + 2 * rail;
     const D = 2 * rail + slotW;
     const color = window.hexToRgb(st.color || "#C8BBAE");
     const rect = (x0, y0, x1, y1) => [[[x0, y0], [x1, y0], [x1, y1], [x0, y1]]];
@@ -170,6 +173,8 @@
       mk("staender-sockel", rect(0, 0, L, D), H - slotDepth, 0),
       mk("staender-wand-vorne", rect(0, 0, L, rail), slotDepth, H - slotDepth),
       mk("staender-wand-hinten", rect(0, rail + slotW, L, D), slotDepth, H - slotDepth),
+      mk("staender-wand-links", rect(0, rail, rail, rail + slotW), slotDepth, H - slotDepth),
+      mk("staender-wand-rechts", rect(L - rail, rail, L, rail + slotW), slotDepth, H - slotDepth),
     ];
   }
 

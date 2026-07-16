@@ -1068,9 +1068,11 @@
     // Emit floating pieces: one or two slab parts per element (split when holes
     // are drilled), ordered by doc.elements index (M is 1-based over all floats).
     // Pegs on the piece are appended before the shift so they travel with it.
-    // Stand-width term mirrors buildStandParts' L = max(20, plateWidthMm * 0.7)
+    // Stand-width term mirrors buildStandParts' L = (W + tol) + 2*rail
     // (js/shadowbox.js) — keep the two in sync if the stand length ever changes.
-    let bedX = n * (W + gapMm) + gapMm + (stand.length ? Math.max(20, W * 0.7) + gapMm : 0);
+    const __stTol = sb.stand && sb.stand.tolMm != null ? sb.stand.tolMm : 0.4;
+    const __stRail = Math.max(2, (sb.stand && sb.stand.railMm) || 5);
+    let bedX = n * (W + gapMm) + gapMm + (stand.length ? (W + __stTol) + 2 * __stRail + gapMm : 0);
     let pieceIdx = 0;
     for (const fl of floats) {
       pieceIdx++;
