@@ -353,9 +353,10 @@
     el.sbLayer = 1; el.sbMode = "rim";
     d.elements.push(el);
     const parts = window.buildParts(d); // stack layout; plate 2 slab = [4,6]
-    const prism = parts.find((p) => p.name === "ebene-2-rand-1");
-    assert(!!prism, "prism part exists");
-    const zb = zbounds(prism.facets);
+    // piece may be split into two slabs when pins are on; gather all by prefix
+    const prismParts = parts.filter((p) => p.name.indexOf("ebene-2-rand-1") === 0);
+    assert(prismParts.length >= 1, "prism part exists");
+    const zb = zbounds(prismParts.flatMap((p) => p.facets));
     assertClose(zb[0], 6, 1e-6, "prism starts at plate top");
     assertClose(zb[1], 8, 1e-6, "prism ends one level forward");
     assert(!parts.some((p) => /^ebene-2-(farbe|erhaben|farbschicht)/.test(p.name)),
@@ -380,10 +381,11 @@
     const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 10, hMm: 8, color: "#FFFFFF" });
     el.sbLayer = 0; el.sbMode = "rim";
     d.elements.push(el);
-    const prism = window.buildParts(d).find((p) => p.name === "ebene-1-rand-1");
-    assert(!!prism, "front-plate prism exists");
+    // piece may be split into two slabs when pins are on; gather all by prefix
+    const prismParts = window.buildParts(d).filter((p) => p.name.indexOf("ebene-1-rand-1") === 0);
+    assert(prismParts.length >= 1, "front-plate prism exists");
     // front plate slab [6,8] in a 4x2mm stack; the prism adds one more level
-    assertClose(zbounds(prism.facets)[1], 4 * 2 + 2, 1e-6, "pokes above the whole stack");
+    assertClose(zbounds(prismParts.flatMap((p) => p.facets))[1], 4 * 2 + 2, 1e-6, "pokes above the whole stack");
   });
 
   test("schaukasten-v2: floating piece — clipped to its opening, own part, right slab", () => {
@@ -476,6 +478,48 @@
     d.elements.push(lo, up);
     const parts = window.buildParts(d);
     assert(!parts.some((p) => p.name.indexOf("ebene-4-stift-") === 0), "sliver overlap -> no piece-piece pin");
+  });
+
+  test("schaukasten-v2: rand piece is separate with plate pegs and underside holes", () => {
+    const d = sbDoc(); // 4 layers, T=2
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 12;
+    const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 12, hMm: 8, color: "#FFFFFF" });
+    el.sbLayer = 1; el.sbMode = "rim";
+    d.elements.push(el);
+    const parts = window.buildParts(d); // plate 2 slab [4,6]; rand piece [6,8]
+    const rand = parts.filter((p) => p.name.indexOf("ebene-2-rand-1") === 0);
+    assert(rand.length >= 1, "rand piece exists");
+    const zb = zbounds(rand.flatMap((p) => p.facets));
+    assertClose(zb[0], 6, 1e-6, "piece sits one level forward");
+    assertClose(zb[1], 8, 1e-6, "piece top");
+    assert(rand.some((p) => /-oben$/.test(p.name)), "hole splits the piece");
+    const peg = parts.filter((p) => p.name.indexOf("ebene-2-stift-") === 0);
+    assert(peg.length >= 1, "peg on the plate's rim extension");
+    const zp = zbounds(peg.flatMap((p) => p.facets));
+    assertClose(zp[0], 6, 1e-6, "peg base on plate top (shifted)");
+    assertClose(zp[1], 6 + 1.2, 1e-6, "peg height");
+    const pegColor = JSON.stringify(peg[0].color);
+    const pieceColor = JSON.stringify(rand[0].color);
+    assert(pegColor !== pieceColor, "peg is plate-colored, piece element-colored");
+  });
+
+  test("schaukasten-v2: rand piece gets its own bed spot; pins off keeps separation", () => {
+    const d = sbDoc();
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 12;
+    const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 12, hMm: 8, color: "#FFFFFF" });
+    el.sbLayer = 1; el.sbMode = "rim";
+    d.elements.push(el);
+    const bed = window.buildParts(d, { layout: "bed" });
+    const rand = bed.filter((p) => p.name.indexOf("-rand-") >= 0);
+    assert(rand.length >= 1, "rand piece on the bed");
+    const zb = zbounds(rand.flatMap((p) => p.facets));
+    assertClose(zb[0], 0, 1e-6, "printed flat");
+    assert(zb[1] <= 2 + 1e-6, "one plate thick");
+    const off = JSON.parse(JSON.stringify(d)); off.shadowbox.pins.enabled = false;
+    const po = window.buildParts(window.migrateProject(off));
+    assert(po.some((p) => p.name.indexOf("-rand-") >= 0), "still separate without pins");
+    assert(!po.some((p) => p.name.indexOf("-stift-") >= 0), "no pegs when disabled");
+    assert(!po.some((p) => /-rand-1-oben$/.test(p.name)), "no hole split when disabled");
   });
 
   test("schaukasten: content-parts refactor keeps a plain doc byte-identical", () => {

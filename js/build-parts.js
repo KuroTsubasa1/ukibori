@@ -960,6 +960,9 @@
         if (spots.length) pinList.push({ lower: "back", upper: up, spots });
       }
     }
+    // Rand-Wolken piece records collected during the plate loop (masks exist in-loop).
+    const randPieces = [];
+
     let pegIdx = 0;
     const pegParts = (spots, levelForName, color) => spots.map((sp) => {
       const m = new Uint8Array(cols * rows);
@@ -1013,24 +1016,37 @@
       // fp is the opening-cut footprint for tunnel plates (base for the back plate).
       // __contentParts clips all content — engraved, raised, heightmap — to fp, so
       // nothing is emitted over the hollow ring; rim elements extend the footprint
-      // via the union above and emit prism parts instead of ordinary content.
+      // via the union above and become standalone pieces (not pushed into plateParts).
       const plateParts = __contentParts(dk, comp, grid, fp, null, null);
 
-      // Rand-Wolken: prism one level forward in the element color, clipped to
-      // the front plate's opening so the closed stack never collides.
-      let rimIdx = 0;
+      // Rand-Wolken: compute clipped prism mask per rim element, collect as standalone
+      // piece records. Pegs (when pins on) land on this plate (plateParts, after rename,
+      // before shift); hole spots travel with the piece record for emission later.
+      const insetFront = (k - 1) * inset;
+      const randPegsThisPlate = []; // buffered; appended after rename, before shift
       for (const rm of rimMasks) {
-        rimIdx++;
-        const insetFront = (k - 1) * inset;
-        const clip = (c, r) => {
-          if (!rm.mask[r * cols + c] || base(c, r) <= 0) return false;
-          return k === 0 || !f || f(c, r) > insetFront;
-        };
-        const facets = window.traceMaskToFacets(clip, cols, rows, pitch, T, T);
-        if (facets.length) plateParts.push({ name: "rand-" + rimIdx, color: window.hexToRgb(rm.el.color || "#FFFFFF"), facets });
+        const prismMask = new Uint8Array(cols * rows);
+        for (let i = 0; i < prismMask.length; i++) {
+          const c = i % cols, r = (i / cols) | 0;
+          if (!rm.mask[i] || base(c, r) <= 0) continue;
+          if (k !== 0 && f && f(c, r) <= insetFront) continue;
+          prismMask[i] = 1;
+        }
+        let holeSpots = [];
+        if (pinsOn) {
+          const spots = window.shadowboxPinSpots(prismMask, cols, rows, sx, sy, holeR + 1.0, 12);
+          if (spots.length) {
+            holeSpots = spots;
+            randPegsThisPlate.push(...pegParts(spots, k, window.hexToRgb(colors[k])));
+          }
+        }
+        randPieces.push({ el: rm.el, level: k, mask: prismMask, kind: "rand", holeSpots });
       }
 
       for (const p of plateParts) p.name = "ebene-" + (k + 1) + "-" + p.name;
+      // Rand pegs: already named by pegParts, appended after rename, before shift so
+      // they travel with the plate as one unit (same pattern as back-plate pegs).
+      plateParts.push(...randPegsThisPlate);
       // Back-plate pegs: already named, append after rename, before shift so they
       // travel with the back plate as one unit.
       if (isBack) {
@@ -1077,6 +1093,39 @@
         __shiftFacets(alive, 0, 0, (n - 1 - fl.level) * T);
       } else {
         const bb = __maskBBoxMm(fl.mask, cols, rows, sx, sy);
+        __shiftFacets(alive, bedX - bb.x0, 0, 0);
+        bedX += (bb.x1 - bb.x0) + gapMm;
+      }
+      out.push(...alive);
+    }
+
+    // Emit rand (rim) pieces: standalone slabs in element color, one level forward
+    // of their plate. Holes drilled from underside when pegs were placed in-loop.
+    // M-counter is independent from schwebeteil's pieceIdx.
+    let randIdx = 0;
+    for (const rp of randPieces) {
+      const anySet = rp.mask.some((v) => v);
+      if (!anySet) continue;
+      randIdx++;
+      const baseName = "ebene-" + (rp.level + 1) + "-rand-" + randIdx;
+      const color = window.hexToRgb(rp.el.color || "#FFFFFF");
+      const pieceParts = [];
+      if (rp.holeSpots.length) {
+        const bm = rp.mask.slice();
+        for (const sp of rp.holeSpots) window.__sbStampDisk(bm, cols, rows, sx, sy, sp.xMm, sp.yMm, holeR, 0);
+        pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => bm[r * cols + c] === 1, cols, rows, pitch, holeDepth, 0) });
+        pieceParts.push({ name: baseName + "-oben", color, facets: window.traceMaskToFacets((c, r) => rp.mask[r * cols + c] === 1, cols, rows, pitch, T - holeDepth, holeDepth) });
+      } else {
+        pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => rp.mask[r * cols + c] === 1, cols, rows, pitch, T, 0) });
+      }
+      const alive = pieceParts.filter((p) => p.facets.length);
+      if (!alive.length) continue;
+      // Stack shift: one level forward of the plate (dz = (n-1-level)*T + T).
+      // Bed: flat at z=0, shifted right of all plates+stand+floats.
+      if (layout === "stack") {
+        __shiftFacets(alive, 0, 0, (n - 1 - rp.level) * T + T);
+      } else {
+        const bb = __maskBBoxMm(rp.mask, cols, rows, sx, sy);
         __shiftFacets(alive, bedX - bb.x0, 0, 0);
         bedX += (bb.x1 - bb.x0) + gapMm;
       }
