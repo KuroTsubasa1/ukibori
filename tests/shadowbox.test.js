@@ -637,4 +637,16 @@
       .reduce((a, p) => a + p.facets.length, 0);
     assert(area(withCloud) < area(without), "float loses the region claimed by the wrap");
   });
+
+  test("schaukasten-v3: adapted contour loops wrap the rim object", () => {
+    const d = rimAdaptDoc();
+    const base = window.shadowboxOpeningLoops(d, 2);
+    const adapted = window.shadowboxAdaptedOpeningLoops(d, 2);
+    const len = (loops) => loops.reduce((a, lp) => a + lp.length, 0);
+    assert(len(adapted) > 0, "adapted loops exist");
+    assert(JSON.stringify(adapted) !== JSON.stringify(base), "wrap changes the contour");
+    const bare = rimAdaptDoc(); bare.elements = [];
+    assertEqual(JSON.stringify(window.shadowboxAdaptedOpeningLoops(bare, 2)),
+      JSON.stringify(window.shadowboxOpeningLoops(bare, 2)), "no rims -> identical to base loops");
+  });
 })();

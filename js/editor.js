@@ -47,12 +47,20 @@
   function sbContourLoops() {
     var sb = doc.shadowbox;
     if (!sb || !sb.enabled) return null;
+    var modeOf = function (el) {
+      return el.sbMode === "rim" || el.sbMode === "float" ? el.sbMode
+        : (el.sbMode == null && el.sbOverhang ? "rim" : "plate");
+    };
+    var rimFp = JSON.stringify((doc.elements || [])
+      .filter(function (el) { return modeOf(el) === "rim"; })
+      .map(function (el) { return [el.id, el.cxMm, el.cyMm, el.wMm, el.hMm, el.rotationDeg, el.sbLayer]; }));
     var key = JSON.stringify([sb.layers, sb.insetPerLayerMm, sb.opening,
-      doc.body.shape, doc.body.widthMm, doc.body.heightMm, doc.body.cornerRadiusMm]);
+      doc.body.shape, doc.body.widthMm, doc.body.heightMm, doc.body.cornerRadiusMm]) + rimFp;
     if (sbLoopsCache.key !== key) {
       var n = Math.max(3, Math.min(10, sb.layers));
+      var loopFn = window.shadowboxAdaptedOpeningLoops || window.shadowboxOpeningLoops;
       var all = [];
-      for (var k = 0; k < n - 1; k++) all.push(window.shadowboxOpeningLoops(doc, k));
+      for (var k = 0; k < n - 1; k++) all.push(loopFn(doc, k));
       sbLoopsCache = { key: key, loops: all };
     }
     return sbLoopsCache.loops;

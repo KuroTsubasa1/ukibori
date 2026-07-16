@@ -1851,6 +1851,88 @@
     };
   }
 
+  // 2D workbench opening contours adapted for rim objects.
+  // Mirrors shadowboxOpeningLoops (coarse grid, longest side 160) but composites the
+  // base opening field with rim silhouette distance terms — so each plate's contour
+  // wraps around any rim elements assigned to that plate or shallower layers.
+  // When no rim elements apply, delegates to shadowboxOpeningLoops for byte-identical output.
+  function shadowboxAdaptedOpeningLoops(doc, k) {
+    const body = doc.body;
+    const sb = doc.shadowbox;
+
+    // Coarse grid — mirrors shadowboxOpeningLoops exactly.
+    const RES = 160;
+    const W = body.widthMm, H = body.heightMm;
+    const long = Math.max(W, H);
+    const cols = Math.max(8, Math.round((W / long) * RES));
+    const rows = Math.max(8, Math.round((H / long) * RES));
+    const grid = { cols, rows, pitch: long / RES, x0: 0, y0: 0 };
+
+    // Inset — mirror engine normalization exactly.
+    const inset = Math.max(0.5, sb.insetPerLayerMm || 4);
+    // B — minimum border around a rim object on its own plate (same as engine).
+    const B = Math.max(2, inset);
+
+    const n = window.__sbClampLayers(sb.layers);
+    const layerOf = (el) => el.sbLayer == null ? n - 1 : Math.max(0, Math.min(n - 1, el.sbLayer | 0));
+    const modeOf = (el) => el.sbMode === "rim" || el.sbMode === "float" ? el.sbMode
+      : (el.sbMode == null && el.sbOverhang ? "rim" : "plate");
+
+    // Collect rim elements, skipping unloaded images and empty masks.
+    const rimEls = (doc.elements || []).filter((el) => {
+      if (modeOf(el) !== "rim") return false;
+      if (el.type === "image" && !el._img) return false;
+      return true;
+    });
+
+    // No rims at or above level k → delegate to base fn for byte-identical output.
+    const rimsForK = rimEls.filter((el) => layerOf(el) <= k);
+    if (rimsForK.length === 0) return window.shadowboxOpeningLoops(doc, k);
+
+    const f = window.shadowboxOpeningField(doc, grid);
+    if (!f) return [];
+
+    const sx = cols / W, sy = rows / H;
+    const pmm = (1 / sx + 1 / sy) / 2;
+
+    // Build coarse-grid dC fields for each applicable rim element.
+    // dC[i] = negative inside the silhouette, positive outside (mm from edge).
+    const dk0rim = Object.assign({}, doc, { shadowbox: null });
+    const rimData = [];
+    for (const el of rimsForK) {
+      const level = layerOf(el);
+      const rendered = __renderElementV2(el, dk0rim, cols, rows, grid);
+      if (!rendered || !rendered.mask) continue;
+      const mask = rendered.mask;
+      const inv = new Uint8Array(cols * rows);
+      for (let i = 0; i < inv.length; i++) inv[i] = mask[i] ? 0 : 1;
+      const dIn = window.__chamferDT(inv, cols, rows);   // inward distance
+      const dOut = window.__chamferDT(mask, cols, rows); // outward distance
+      const dC = new Float32Array(cols * rows);
+      for (let i = 0; i < dC.length; i++) {
+        dC[i] = mask[i] ? -dIn[i] * pmm : dOut[i] * pmm;
+      }
+      rimData.push({ level, dC });
+    }
+
+    if (rimData.length === 0) return window.shadowboxOpeningLoops(doc, k);
+
+    // Composite field: g = min(f - k*inset, min over rims of (dC - B - (k-level)*inset)).
+    const g = (c, r) => {
+      let v = f(c, r) - k * inset;
+      const i = r * cols + c;
+      for (const rm of rimData) {
+        const term = rm.dC[i] - B - (k - rm.level) * inset;
+        if (term < v) v = term;
+      }
+      return v;
+    };
+
+    return window.marchingSquaresLoops(g, cols, rows)
+      .filter((lp) => lp.length >= 3)
+      .map((lp) => lp.map(([c, r]) => ({ xMm: (c + 0.5) / sx, yMm: (r + 0.5) / sy })));
+  }
+
   window.freeFootprintField = freeFootprintField;
   window.imageFootprintField = imageFootprintField;
   // Shared with js/shadowbox.js (drawn-opening signed field). Engine-internal.
@@ -1858,4 +1940,5 @@
   // Test-only: expose __renderElementV2 so island-removal.test.js can inspect mask/r/g/b
   // directly without going through full buildParts. Not called by production code.
   window.__renderElementV2ForTest = __renderElementV2;
+  window.shadowboxAdaptedOpeningLoops = shadowboxAdaptedOpeningLoops;
 })();
