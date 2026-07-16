@@ -682,9 +682,9 @@
     d.elements.push(lo, up);
     const parts = window.buildParts(d);
     const backPegs = parts.filter((p) => p.name.indexOf("ebene-4-stift-") === 0);
-    assert(backPegs.length >= 1, "chain anchored once");
+    assertEqual(backPegs.length, 1, "exactly one back peg — the pinned upper piece gets none");
     const zTops = backPegs.map((p) => zbounds(p.facets)[1]);
     assert(zTops.every((z) => Math.abs(z - (2 + 1.2)) < 1e-6),
-      "only short pegs (deepest member) — no spacer peg for the pinned upper piece");
+      "only the short peg of the deepest member — no spacer peg for the pinned upper piece");
   });
 })();
