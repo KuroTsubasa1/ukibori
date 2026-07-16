@@ -898,6 +898,7 @@
           frame: { widthMm: 0, heightMm: 2, color: "#000000" },   // v1: off on all plates
           line: { mode: "none", insetMm: 2.5, widthMm: 0.8, depthMm: 0.6, count: 1, color: "#000000" },
         }),
+        topLayerColor: null,
         // back plate keeps a hanging hole; 'loop' (Öse) is not supported in v1
         mount: (isBack && doc.mount && doc.mount.type === "hole") ? doc.mount : __SB_MOUNT_NONE,
         elements: doc.elements.filter((el) => layerOf(el) === k),
@@ -931,8 +932,7 @@
       const comp = composeDesignV2(dk, cols, rows, grid);
       // fp is the opening-cut footprint for tunnel plates (base for the back plate).
       // __contentParts clips all content — engraved, raised, heightmap — to fp, so
-      // nothing is emitted over the hollow ring. Per-element sbOverhang footprint
-      // union (Task 7) is the sanctioned way to place content over the opening.
+      // nothing is emitted over the hollow ring; the sanctioned way to place content over the opening is the per-element sbOverhang footprint union (see the overhang block above).
       const plateParts = __contentParts(dk, comp, grid, fp, null, null);
       for (const p of plateParts) p.name = "ebene-" + (k + 1) + "-" + p.name;
       if (layout === "stack") __shiftFacets(plateParts, 0, 0, (n - 1 - k) * T);

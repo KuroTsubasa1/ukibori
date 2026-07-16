@@ -3985,6 +3985,7 @@
 
   function sbChanged() {
     syncShadowboxControls();
+    refreshAdvancedForSelection();
     render2D();
     scheduleRebuild3D();
   }
@@ -4030,6 +4031,12 @@
     on("sbStandHeight", "change", function () {
       const v = parseFloat(this.value);
       if (!isNaN(v) && v >= 8) { sbState().stand.heightMm = v; sbChanged(); }
+    });
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && sbOpeningDraw) {
+        sbOpeningDraw = false;
+        document.getElementById("sbDrawHint").hidden = true;
+      }
     });
   }
   initShadowboxControls();

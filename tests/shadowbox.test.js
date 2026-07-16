@@ -179,6 +179,7 @@
 
   test("schaukasten: stack — one plate per layer at its z-slab, front on top", () => {
     const d = sbDoc(); // 4 layers, T=2
+    d.topLayerColor = "#FF00FF";
     const parts = window.buildParts(d);
     for (let k = 0; k < 4; k++) {
       const plate = parts.filter((p) => p.name.indexOf("ebene-" + (k + 1) + "-") === 0);
@@ -187,6 +188,8 @@
       assertClose(zb[0], (4 - 1 - k) * 2, 1e-6, "plate " + (k + 1) + " bottom");
       assertClose(zb[1], (4 - 1 - k) * 2 + 2, 1e-6, "plate " + (k + 1) + " top");
     }
+    const zAll = zbounds(parts.filter(p => p.name.indexOf("ebene-") === 0).flatMap(p => p.facets));
+    assert(zAll[1] <= 4 * 2 + 1e-6, "no deckschicht slab above any plate");
   });
 
   test("schaukasten: openings shrink toward the back; back plate is solid", () => {
