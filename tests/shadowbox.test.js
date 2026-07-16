@@ -300,6 +300,29 @@
     }
   });
 
+  test("schaukasten-v2: sbMode defaults and pins block", () => {
+    const el = window.makeElementV2("shape", {});
+    assertEqual(el.sbMode, "plate", "default mode");
+    const sb = window.defaultShadowbox();
+    assert(sb.pins && sb.pins.enabled === true, "pins on");
+    assertEqual(sb.pins.diameterMm, 3, "peg diameter");
+    assertClose(sb.pins.clearanceMm, 0.35, 1e-9, "hole clearance");
+  });
+
+  test("schaukasten-v2: migration upgrades sbOverhang to rim and backfills pins", () => {
+    const d = window.defaultDoc();
+    delete d.shadowbox.pins;
+    const a = window.makeElementV2("shape", {}); delete a.sbMode; a.sbOverhang = true;
+    const b = window.makeElementV2("shape", {}); delete b.sbMode;
+    d.elements.push(a, b);
+    const m = window.migrateProject(d);
+    assertEqual(m.elements[0].sbMode, "rim", "overhang upgraded");
+    assertEqual(m.elements[1].sbMode, "plate", "plain element");
+    assert(m.shadowbox.pins && m.shadowbox.pins.enabled === true, "pins backfilled");
+    const once = JSON.stringify(m);
+    assertEqual(JSON.stringify(window.migrateProject(m)), once, "idempotent");
+  });
+
   test("schaukasten: content-parts refactor keeps a plain doc byte-identical", () => {
     const d = sbDoc();
     d.shadowbox.enabled = false;

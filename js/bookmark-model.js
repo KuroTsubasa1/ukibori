@@ -119,6 +119,7 @@ function defaultShadowbox() {
     colorFront: "#DDEEFA",
     colorBack: "#1B5E9E",
     stand: { enabled: true, heightMm: 15, slotDepthMm: 8, railMm: 5, tolMm: 0.4, color: "#C8BBAE" },
+    pins: { enabled: true, diameterMm: 3, clearanceMm: 0.35 },
   };
 }
 
@@ -186,7 +187,7 @@ function migrateElement(el, doc, layerHmm) {
     cxMm: el.cxMm, cyMm: el.cyMm, wMm: el.wMm, hMm: el.hMm, rotationDeg: el.rotationDeg || 0,
     flipH: false, flipV: false,
     cutout: !!el.cutout, color: el.color, groupId: el.groupId != null ? el.groupId : null,
-    sbLayer: null, sbOverhang: false, depth,
+    sbLayer: null, sbOverhang: false, sbMode: "plate", depth,
   };
   if (el.type === "image") { out.src = el.src; out._img = null; }
   if (el.type === "text") { out.text = el.text; out.fontFamily = el.fontFamily; out.fontWeight = el.fontWeight; out.arcDeg = el.arcDeg != null ? el.arcDeg : 0; }
@@ -215,6 +216,7 @@ function migrateProject(doc) {
       const sd = defaultShadowbox();
       if (doc.shadowbox.opening == null) doc.shadowbox.opening = sd.opening;
       if (doc.shadowbox.stand == null) doc.shadowbox.stand = sd.stand;
+      if (doc.shadowbox.pins == null) doc.shadowbox.pins = sd.pins;
     }
     if (!Array.isArray(doc.groups)) doc.groups = [];
     for (const el of doc.elements || []) {
@@ -234,6 +236,7 @@ function migrateProject(doc) {
       if (el.groupId === undefined) el.groupId = null;
       if (el.sbLayer === undefined) el.sbLayer = null;
       if (el.sbOverhang == null) el.sbOverhang = false;
+      if (el.sbMode == null) el.sbMode = el.sbOverhang ? "rim" : "plate";
     }
     return doc;
   }
@@ -280,7 +283,7 @@ function makeElementV2(type, props) {
     cxMm: 25, cyMm: 75, wMm: 30, hMm: 30, rotationDeg: 0,
     flipH: false, flipV: false,
     cutout: false, color: "#000000", groupId: null,
-    sbLayer: null, sbOverhang: false,
+    sbLayer: null, sbOverhang: false, sbMode: "plate",
     depth: defaultDepth(type),
   }, props);
   if (type === "image") { if (e.src == null) e.src = ""; e._img = e._img || null; }
