@@ -909,6 +909,25 @@
         const insetK = k * inset;
         fp = (c, r) => Math.min(base(c, r), (insetK - f(c, r)) * s);
       }
+      // Overhang: union flagged elements' silhouettes into the plate so they
+      // jut into the opening (clouds on the rim). Clipped to the plate outline.
+      let over = null;
+      for (const el of dk.elements) {
+        if (!el.sbOverhang || el.cutout) continue;
+        if (el.type === "image" && !el._img) continue;
+        const rendered = __renderElementV2(el, dk, cols, rows, grid);
+        if (!rendered || !rendered.mask) continue;
+        if (!over) over = new Uint8Array(cols * rows);
+        const m = rendered.mask;
+        for (let i = 0; i < m.length; i++) if (m[i]) over[i] = 1;
+      }
+      if (over) {
+        const inner = fp;
+        fp = (c, r) => {
+          if (over[r * cols + c] && base(c, r) > 0) return Math.max(inner(c, r), 0.5);
+          return inner(c, r);
+        };
+      }
       const comp = composeDesignV2(dk, cols, rows, grid);
       // fp is the opening-cut footprint for tunnel plates (base for the back plate).
       // __contentParts clips all content — engraved, raised, heightmap — to fp, so

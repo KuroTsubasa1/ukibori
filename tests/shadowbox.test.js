@@ -257,6 +257,46 @@
       "cutout changes the front plate");
   });
 
+  test("schaukasten: overhang element extends the plate into the opening", () => {
+    const mk = (overhang) => {
+      const d = sbDoc();
+      const el = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 14, hMm: 10, color: "#FFFFFF" });
+      el.sbLayer = 1; el.sbOverhang = overhang;
+      d.elements.push(el);
+      return window.buildParts(d).filter((p) => p.name === "ebene-2-grundplatte")[0];
+    };
+    const zTopArea = (p) => {
+      const zTop = zbounds(p.facets)[1];
+      let a = 0;
+      for (const f of p.facets) if (f.every((v) => Math.abs(v[2] - zTop) < 1e-6)) {
+        a += Math.abs((f[1][0] - f[0][0]) * (f[2][1] - f[0][1])
+                    - (f[2][0] - f[0][0]) * (f[1][1] - f[0][1])) / 2;
+      }
+      return a;
+    };
+    assert(zTopArea(mk(true)) > zTopArea(mk(false)) + 20, "overhang grows the plate face");
+  });
+
+  test("schaukasten: bed layout — all plates on the bed, disjoint in x", () => {
+    const d = sbDoc();
+    const parts = window.buildParts(d, { layout: "bed" });
+    const xbounds = (fs) => {
+      let lo = Infinity, hi = -Infinity;
+      for (const f of fs) for (const v of f) { lo = Math.min(lo, v[0]); hi = Math.max(hi, v[0]); }
+      return [lo, hi];
+    };
+    let prevHi = -Infinity;
+    for (let k = 0; k < 4; k++) {
+      const plate = parts.filter((p) => p.name.indexOf("ebene-" + (k + 1) + "-") === 0);
+      const zb = zbounds(plate.flatMap((p) => p.facets));
+      assertClose(zb[0], 0, 1e-6, "plate " + (k + 1) + " on the bed");
+      assert(zb[1] <= 2 + 1e-6, "plate " + (k + 1) + " content stays within reason for empty plates");
+      const xb = xbounds(plate.flatMap((p) => p.facets));
+      assert(xb[0] > prevHi - 1e-6, "plate " + (k + 1) + " right of plate " + k);
+      prevHi = xb[1];
+    }
+  });
+
   test("schaukasten: content-parts refactor keeps a plain doc byte-identical", () => {
     const d = sbDoc();
     d.shadowbox.enabled = false;
