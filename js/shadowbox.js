@@ -173,10 +173,49 @@
     ];
   }
 
+  // Stamp a filled disk into a raster mask (rectangular cell mapping, in place).
+  function __sbStampDisk(mask, cols, rows, sx, sy, xMm, yMm, rMm, value) {
+    const c0 = Math.max(0, Math.floor((xMm - rMm) * sx)), c1 = Math.min(cols - 1, Math.ceil((xMm + rMm) * sx));
+    const r0 = Math.max(0, Math.floor((yMm - rMm) * sy)), r1 = Math.min(rows - 1, Math.ceil((yMm + rMm) * sy));
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+      const dx = (c + 0.5) / sx - xMm, dy = (r + 0.5) / sy - yMm;
+      if (dx * dx + dy * dy <= rMm * rMm) mask[r * cols + c] = value;
+    }
+  }
+
+  // Deterministic assembly-pin spots: up to two interior chamfer-DT maxima of
+  // an overlap mask. A spot needs >= minMm clearance to the mask boundary;
+  // the second spot must sit >= sepMm from the first (two pins lock rotation).
+  function shadowboxPinSpots(mask, cols, rows, sx, sy, minMm, sepMm) {
+    const n = cols * rows, inv = new Uint8Array(n);
+    let any = false;
+    for (let i = 0; i < n; i++) { inv[i] = mask[i] ? 0 : 1; if (mask[i]) any = true; }
+    if (!any) return [];
+    const dt = window.__chamferDT(inv, cols, rows);
+    const pmm = (1 / sx + 1 / sy) / 2;
+    const mm = (i) => ({ xMm: ((i % cols) + 0.5) / sx, yMm: (Math.floor(i / cols) + 0.5) / sy });
+    let best = -1;
+    for (let i = 0; i < n; i++) if (mask[i] && (best < 0 || dt[i] > dt[best])) best = i;
+    if (best < 0 || dt[best] * pmm < minMm) return [];
+    const p1 = mm(best);
+    let best2 = -1;
+    for (let i = 0; i < n; i++) {
+      if (!mask[i]) continue;
+      const p = mm(i);
+      if (Math.hypot(p.xMm - p1.xMm, p.yMm - p1.yMm) < sepMm) continue;
+      if (best2 < 0 || dt[i] > dt[best2]) best2 = i;
+    }
+    const out = [p1];
+    if (best2 >= 0 && dt[best2] * pmm >= minMm) out.push(mm(best2));
+    return out;
+  }
+
   window.__sbClampLayers = __sbClampLayers;
   window.shadowboxPlateColors = shadowboxPlateColors;
   window.shadowboxOpeningField = shadowboxOpeningField;
   window.shadowboxOpeningLoops = shadowboxOpeningLoops;
   window.__sbPolygonMask = __sbPolygonMask;
   window.buildStandParts = buildStandParts;
+  window.__sbStampDisk = __sbStampDisk;
+  window.shadowboxPinSpots = shadowboxPinSpots;
 })();

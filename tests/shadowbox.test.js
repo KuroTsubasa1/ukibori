@@ -323,6 +323,30 @@
     assertEqual(JSON.stringify(window.migrateProject(m)), once, "idempotent");
   });
 
+  function blobMask(cols, rows, sx, sy, discs) {
+    const m = new Uint8Array(cols * rows);
+    for (const d of discs) window.__sbStampDisk(m, cols, rows, sx, sy, d.x, d.y, d.r, 1);
+    return m;
+  }
+
+  test("schaukasten-v2: pin spots — one centered spot for a single blob", () => {
+    const cols = 96, rows = 64, sx = cols / 60, sy = rows / 40;
+    const m = blobMask(cols, rows, sx, sy, [{ x: 30, y: 20, r: 8 }]);
+    const spots = window.shadowboxPinSpots(m, cols, rows, sx, sy, 2.5, 12);
+    assertEqual(spots.length, 1, "one spot (blob too small for two 12mm apart)");
+    assertClose(spots[0].xMm, 30, 1.5, "centered x");
+    assertClose(spots[0].yMm, 20, 1.5, "centered y");
+  });
+
+  test("schaukasten-v2: pin spots — two spots for two distant blobs, none for slivers", () => {
+    const cols = 96, rows = 64, sx = cols / 60, sy = rows / 40;
+    const two = blobMask(cols, rows, sx, sy, [{ x: 14, y: 20, r: 7 }, { x: 46, y: 20, r: 7 }]);
+    assertEqual(window.shadowboxPinSpots(two, cols, rows, sx, sy, 2.5, 12).length, 2, "two anchors");
+    const sliver = blobMask(cols, rows, sx, sy, [{ x: 30, y: 20, r: 1.2 }]);
+    assertEqual(window.shadowboxPinSpots(sliver, cols, rows, sx, sy, 2.5, 12).length, 0, "sliver skipped");
+    assertEqual(window.shadowboxPinSpots(new Uint8Array(cols * rows), cols, rows, sx, sy, 2.5, 12).length, 0, "empty mask");
+  });
+
   test("schaukasten: content-parts refactor keeps a plain doc byte-identical", () => {
     const d = sbDoc();
     d.shadowbox.enabled = false;
