@@ -936,6 +936,38 @@
       }
     }
 
+    // Montagestifte: peg on the rear part's face, blind hole in the front part.
+    const pinCfg = sb.pins || {};
+    const pinsOn = pinCfg.enabled !== false;
+    const pegR = (pinCfg.diameterMm || 3) / 2;
+    const holeR = ((pinCfg.diameterMm || 3) + (pinCfg.clearanceMm != null ? pinCfg.clearanceMm : 0.35)) / 2;
+    const pegH = Math.min(1.2, 0.6 * T);
+    const holeDepth = Math.min(T - 0.4, pegH + 0.2);
+    const pinList = []; // { lower: float|"back", upper: float, spots }
+    if (pinsOn && floats.length) {
+      for (const lo of floats) for (const up of floats) {
+        if (up.level !== lo.level - 1) continue;
+        const overlap = new Uint8Array(cols * rows);
+        let any = false;
+        for (let i = 0; i < overlap.length; i++) if (lo.mask[i] && up.mask[i]) { overlap[i] = 1; any = true; }
+        if (!any) continue;
+        const spots = window.shadowboxPinSpots(overlap, cols, rows, sx, sy, holeR + 1.0, 12);
+        if (spots.length) pinList.push({ lower: lo, upper: up, spots });
+      }
+      for (const up of floats) {
+        if (up.level !== n - 2) continue;
+        const spots = window.shadowboxPinSpots(up.mask, cols, rows, sx, sy, holeR + 1.0, 12);
+        if (spots.length) pinList.push({ lower: "back", upper: up, spots });
+      }
+    }
+    let pegIdx = 0;
+    const pegParts = (spots, levelForName, color) => spots.map((sp) => {
+      const m = new Uint8Array(cols * rows);
+      window.__sbStampDisk(m, cols, rows, sx, sy, sp.xMm, sp.yMm, pegR, 1);
+      return { name: "ebene-" + (levelForName + 1) + "-stift-" + (++pegIdx),
+               color, facets: window.traceMaskToFacets((c, r) => m[r * cols + c] === 1, cols, rows, pitch, pegH, T) };
+    }).filter((p) => p.facets.length);
+
     for (let k = 0; k < n; k++) {
       const isBack = k === n - 1;
       const dk = Object.assign({}, doc, {
@@ -999,6 +1031,13 @@
       }
 
       for (const p of plateParts) p.name = "ebene-" + (k + 1) + "-" + p.name;
+      // Back-plate pegs: already named, append after rename, before shift so they
+      // travel with the back plate as one unit.
+      if (isBack) {
+        for (const pin of pinList) {
+          if (pin.lower === "back") plateParts.push(...pegParts(pin.spots, n - 1, window.hexToRgb(colors[n - 1])));
+        }
+      }
       if (layout === "stack") __shiftFacets(plateParts, 0, 0, (n - 1 - k) * T);
       else __shiftFacets(plateParts, k * (W + gapMm), 0, 0);
       out.push(...plateParts);
@@ -1010,30 +1049,38 @@
       out.push(...__shiftFacets(stand, dx, 0, 0));
     }
 
-    // Emit floating pieces: one slab part per element, ordered by doc.elements
-    // index (M is 1-based over all floats). Pieces are built in doc coords then
-    // shifted as a group — the pins task (V2-5) will add pegs/holes before the
-    // shift, so pieceParts is kept as an array before push.
+    // Emit floating pieces: one or two slab parts per element (split when holes
+    // are drilled), ordered by doc.elements index (M is 1-based over all floats).
+    // Pegs on the piece are appended before the shift so they travel with it.
     // Stand-width term mirrors buildStandParts' L = max(20, plateWidthMm * 0.7)
     // (js/shadowbox.js) — keep the two in sync if the stand length ever changes.
     let bedX = n * (W + gapMm) + gapMm + (stand.length ? Math.max(20, W * 0.7) + gapMm : 0);
     let pieceIdx = 0;
     for (const fl of floats) {
       pieceIdx++;
-      const pieceParts = [{
-        name: "ebene-" + (fl.level + 1) + "-schwebeteil-" + pieceIdx,
-        color: window.hexToRgb(fl.el.color || "#000000"),
-        facets: window.traceMaskToFacets((c, r) => fl.mask[r * cols + c] === 1, cols, rows, pitch, T, 0),
-      }].filter((p) => p.facets.length);
-      if (!pieceParts.length) continue;
+      const holeSpots = pinList.filter((p) => p.upper === fl).flatMap((p) => p.spots);
+      const baseName = "ebene-" + (fl.level + 1) + "-schwebeteil-" + pieceIdx;
+      const color = window.hexToRgb(fl.el.color || "#000000");
+      const pieceParts = [];
+      if (holeSpots.length) {
+        const bm = fl.mask.slice();
+        for (const sp of holeSpots) window.__sbStampDisk(bm, cols, rows, sx, sy, sp.xMm, sp.yMm, holeR, 0);
+        pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => bm[r * cols + c] === 1, cols, rows, pitch, holeDepth, 0) });
+        pieceParts.push({ name: baseName + "-oben", color, facets: window.traceMaskToFacets((c, r) => fl.mask[r * cols + c] === 1, cols, rows, pitch, T - holeDepth, holeDepth) });
+      } else {
+        pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => fl.mask[r * cols + c] === 1, cols, rows, pitch, T, 0) });
+      }
+      for (const pin of pinList) if (pin.lower === fl) pieceParts.push(...pegParts(pin.spots, fl.level, color));
+      const alive = pieceParts.filter((p) => p.facets.length);
+      if (!alive.length) continue;
       if (layout === "stack") {
-        __shiftFacets(pieceParts, 0, 0, (n - 1 - fl.level) * T);
+        __shiftFacets(alive, 0, 0, (n - 1 - fl.level) * T);
       } else {
         const bb = __maskBBoxMm(fl.mask, cols, rows, sx, sy);
-        __shiftFacets(pieceParts, bedX - bb.x0, 0, 0);
+        __shiftFacets(alive, bedX - bb.x0, 0, 0);
         bedX += (bb.x1 - bb.x0) + gapMm;
       }
-      out.push(...pieceParts);
+      out.push(...alive);
     }
 
     return out;

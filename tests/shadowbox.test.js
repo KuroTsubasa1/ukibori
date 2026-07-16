@@ -426,6 +426,57 @@
     assert(pieceLoX > plateHiX - 1e-6, "piece placed right of plates and stand");
   });
 
+  function sbFloatDoc() { // two stacked floating pieces with a fat overlap
+    const d = sbDoc();
+    d.shadowbox.layers = 5; // levels 0..3 usable for floats (n-2 = 3)
+    // deterministic field with generous deep openings: level3 = {d > 12}, level2 = {d > 10}
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 6; d.shadowbox.insetPerLayerMm = 2;
+    const lo = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 18, hMm: 12, color: "#00AA00" });
+    lo.sbLayer = 3; lo.sbMode = "float";
+    const up = window.makeElementV2("shape", { cxMm: 33, cyMm: 20, wMm: 14, hMm: 10, color: "#FF7700" });
+    up.sbLayer = 2; up.sbMode = "float";
+    d.elements.push(lo, up);
+    return d;
+  }
+
+  test("schaukasten-v2: pins — peg on the lower piece, hole splits the upper piece", () => {
+    const parts = window.buildParts(sbFloatDoc()); // stack: level3 slab [2,4], level2 slab [4,6]
+    const peg = parts.filter((p) => p.name.indexOf("ebene-4-stift-") === 0);
+    assert(peg.length >= 1, "peg exists on the lower piece");
+    const zp = zbounds(peg.flatMap((p) => p.facets));
+    assertClose(zp[0], 4, 1e-6, "peg base on lower piece's face");
+    assertClose(zp[1], 4 + 1.2, 1e-6, "peg height 1.2 (0.6*T)");
+    const upper = parts.filter((p) => p.name.indexOf("ebene-3-schwebeteil-") === 0);
+    assert(upper.some((p) => /-oben$/.test(p.name)), "upper piece split into two slabs");
+    const bottom = upper.find((p) => !/-oben$/.test(p.name));
+    const top = upper.find((p) => /-oben$/.test(p.name));
+    assertClose(zbounds(bottom.facets)[1], 4 + 1.4, 1e-6, "bottom sub-slab up to holeDepth");
+    assertClose(zbounds(top.facets)[0], 4 + 1.4, 1e-6, "top sub-slab from holeDepth");
+  });
+
+  test("schaukasten-v2: pins — back plate anchors the deepest piece; toggle off is clean", () => {
+    const d = sbFloatDoc();
+    const parts = window.buildParts(d);
+    assert(parts.some((p) => p.name.indexOf("ebene-5-stift-") === 0), "back plate peg for level n-2 piece");
+    const off = sbFloatDoc(); off.shadowbox.pins.enabled = false;
+    const po = window.buildParts(off);
+    assert(!po.some((p) => p.name.indexOf("-stift-") >= 0), "no pegs when disabled");
+    assert(!po.some((p) => /-oben$/.test(p.name)), "no split slabs when disabled");
+  });
+
+  test("schaukasten-v2: pins — tiny overlap yields no pin", () => {
+    const d = sbDoc();
+    d.shadowbox.layers = 5;
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 6; d.shadowbox.insetPerLayerMm = 2;
+    const lo = window.makeElementV2("shape", { cxMm: 26, cyMm: 20, wMm: 8, hMm: 8, color: "#00AA00" });
+    lo.sbLayer = 3; lo.sbMode = "float";
+    const up = window.makeElementV2("shape", { cxMm: 34.5, cyMm: 20, wMm: 8, hMm: 8, color: "#FF7700" });
+    up.sbLayer = 2; up.sbMode = "float"; // ~0.5mm sliver overlap with lo
+    d.elements.push(lo, up);
+    const parts = window.buildParts(d);
+    assert(!parts.some((p) => p.name.indexOf("ebene-4-stift-") === 0), "sliver overlap -> no piece-piece pin");
+  });
+
   test("schaukasten: content-parts refactor keeps a plain doc byte-identical", () => {
     const d = sbDoc();
     d.shadowbox.enabled = false;
