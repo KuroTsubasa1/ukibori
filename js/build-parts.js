@@ -1014,6 +1014,8 @@
     // index (M is 1-based over all floats). Pieces are built in doc coords then
     // shifted as a group — the pins task (V2-5) will add pegs/holes before the
     // shift, so pieceParts is kept as an array before push.
+    // Stand-width term mirrors buildStandParts' L = max(20, plateWidthMm * 0.7)
+    // (js/shadowbox.js) — keep the two in sync if the stand length ever changes.
     let bedX = n * (W + gapMm) + gapMm + (stand.length ? Math.max(20, W * 0.7) + gapMm : 0);
     let pieceIdx = 0;
     for (const fl of floats) {
