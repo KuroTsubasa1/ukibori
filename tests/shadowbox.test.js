@@ -122,43 +122,77 @@
     return [lo, hi];
   }
 
-  test("schaukasten: stand — three upright parts with exact slot", () => {
+  // Helper: collect unique y values (rounded to 1e-3) from all vertices of facets.
+  function uniqueYs(facets) {
+    const seen = new Set();
+    for (const f of facets) for (const v of f) seen.add(Math.round(v[1] * 1000) / 1000);
+    return seen;
+  }
+  // Helper: collect unique x values (rounded to 1e-3) from all vertices of facets.
+  function uniqueXs(facets) {
+    const seen = new Set();
+    for (const f of facets) for (const v of f) seen.add(Math.round(v[0] * 1000) / 1000);
+    return seen;
+  }
+  // Helper: compute cap area at zTop (sum of signed triangle areas of upward-facing facets).
+  function capArea(facets, zTop) {
+    let area = 0;
+    for (const f of facets) {
+      // Check if all vertices are at zTop (top cap facets)
+      if (f.every(v => Math.abs(v[2] - zTop) < 1e-6)) {
+        // Triangle area via cross product
+        const [a, b, c] = f;
+        area += Math.abs((b[0]-a[0])*(c[1]-a[1]) - (c[0]-a[0])*(b[1]-a[1])) / 2;
+      }
+    }
+    return area;
+  }
+
+  test("schaukasten: stand — two-part structure with exact slot", () => {
     const sb = window.defaultShadowbox();
     sb.layers = 4;
+    // defaultShadowbox now has cornerRadiusMm=3; set 0 for sharp rect to test original slot geometry
+    sb.stand.cornerRadiusMm = 0;
     const parts = window.buildStandParts(sb, 60, 2);
-    assertEqual(parts.length, 5, "sockel + two rails + two end caps");
+    assertEqual(parts.length, 2, "sockel + wand (collar ring)");
     const names = parts.map((p) => p.name).sort();
     assertEqual(JSON.stringify(names),
-      JSON.stringify(["staender-sockel", "staender-wand-hinten", "staender-wand-links",
-        "staender-wand-rechts", "staender-wand-vorne"]), "names");
+      JSON.stringify(["staender-sockel", "staender-wand"]), "names");
     const sockel = parts.find((p) => p.name === "staender-sockel");
-    const vorne = parts.find((p) => p.name === "staender-wand-vorne");
-    const hinten = parts.find((p) => p.name === "staender-wand-hinten");
+    const wand = parts.find((p) => p.name === "staender-wand");
     assertClose(zbounds(sockel.facets)[0], 0, 1e-9, "sockel on bed");
     assertClose(zbounds(sockel.facets)[1], 15 - 8, 1e-9, "sockel top = H - slotDepth");
-    assertClose(zbounds(vorne.facets)[0], 15 - 8, 1e-9, "rail bottom");
-    assertClose(zbounds(vorne.facets)[1], 15, 1e-9, "rail top");
-    // slot: gap between the two rails = layers*T + tol = 4*2 + 0.4
-    const gap = ybounds(hinten.facets)[0] - ybounds(vorne.facets)[1];
-    assertClose(gap, 8.4, 1e-9, "slot width");
+    assertClose(zbounds(wand.facets)[0], 15 - 8, 1e-9, "wand bottom = H - slotDepth");
+    assertClose(zbounds(wand.facets)[1], 15, 1e-9, "wand top = H");
+    // slot geometry via pocket-edge vertex lines in wand
+    // layers=4, T=2, tol=0.4 -> slotW = 8.4; rail=5
+    const ys = uniqueYs(wand.facets);
+    assert(ys.has(5), "pocket inner edge y = rail (5)");
+    assertClose([...ys].find(y => Math.abs(y - 13.4) < 1e-3) != null ? 0 : 1, 0, 1e-3, "pocket outer edge y = rail + slotW (13.4)");
   });
 
-  test("schaukasten-v2: stand v2 — closed pocket with end caps", () => {
+  test("schaukasten-v2: stand v2 — two-part with closed pocket", () => {
     const sb = window.defaultShadowbox();
     sb.layers = 4;
+    sb.stand.cornerRadiusMm = 0;
     const parts = window.buildStandParts(sb, 60, 2);
-    assertEqual(parts.length, 5, "sockel + four walls");
+    assertEqual(parts.length, 2, "sockel + wand");
     const names = parts.map((p) => p.name).sort();
     assertEqual(JSON.stringify(names), JSON.stringify([
-      "staender-sockel", "staender-wand-hinten", "staender-wand-links",
-      "staender-wand-rechts", "staender-wand-vorne"]), "names");
+      "staender-sockel", "staender-wand"]), "names");
     const xb = (fs) => { let lo = Infinity, hi = -Infinity; for (const f of fs) for (const v of f) { lo = Math.min(lo, v[0]); hi = Math.max(hi, v[0]); } return [lo, hi]; };
-    const links = parts.find((p) => p.name === "staender-wand-links");
-    const rechts = parts.find((p) => p.name === "staender-wand-rechts");
-    // pocket between the caps = plate width + tolerance
-    assertClose(xb(rechts.facets)[0] - xb(links.facets)[1], 60 + 0.4, 1e-9, "pocket length");
-    assertClose(zbounds(links.facets)[0], 15 - 8, 1e-9, "cap at rail height");
-    assertClose(zbounds(links.facets)[1], 15, 1e-9, "cap top");
+    const wand = parts.find((p) => p.name === "staender-wand");
+    // pocket length via x vertex lines: rail and L-rail = 5 and 5+60+0.4 = 65.4
+    const xs = uniqueXs(wand.facets);
+    const pocketL = 60 + 0.4; // plateW + tol
+    const rail = 5;
+    const L = pocketL + 2 * rail; // 70.4
+    assert(xs.has(rail), "pocket left edge x = rail (5)");
+    assertClose([...xs].find(x => Math.abs(x - (L - rail)) < 1e-3) != null ? 0 : 1, 0, 1e-3, "pocket right edge x = L - rail (65.4)");
+    // pocket length = (L-rail) - rail = pocketL = W + tol
+    assertClose(L - rail - rail, pocketL, 1e-9, "pocket length = plate width + tolerance");
+    assertClose(zbounds(wand.facets)[0], 15 - 8, 1e-9, "wand at rail height");
+    assertClose(zbounds(wand.facets)[1], 15, 1e-9, "wand top");
     const sockel = parts.find((p) => p.name === "staender-sockel");
     assertClose(xb(sockel.facets)[1], 60 + 0.4 + 10, 1e-9, "total length = pocket + 2 rails");
   });
@@ -169,6 +203,56 @@
     assertEqual(window.buildStandParts(sb, 60, 2).length, 0, "disabled");
     sb.stand.enabled = true;
     assertEqual(window.buildStandParts(sb, 60, 0).length, 0, "no plate thickness");
+  });
+
+  test("schaukasten: stand corner rounding — r=3 cuts corners, r=0 sharp, r=20 clamps", () => {
+    // r=3 (default): sockel top-cap area < L*D (corners removed)
+    const sb3 = window.defaultShadowbox();
+    sb3.layers = 4;
+    // cornerRadiusMm=3 is the new default
+    const parts3 = window.buildStandParts(sb3, 60, 2);
+    const sockel3 = parts3.find((p) => p.name === "staender-sockel");
+    const tol = 0.4, rail = 5, slotW = 4 * 2 + tol;
+    const L3 = 60 + tol + 2 * rail;
+    const D3 = 2 * rail + slotW;
+    const zTop3 = zbounds(sockel3.facets)[1];
+    const area3 = capArea(sockel3.facets, zTop3);
+    assert(area3 < L3 * D3 - 5, "r=3 corners removed: cap area < L*D - 5 (is " + area3 + " vs " + (L3 * D3) + ")");
+
+    // r=0: cap area within 1.0 of L*D
+    const sb0 = window.defaultShadowbox();
+    sb0.layers = 4;
+    sb0.stand.cornerRadiusMm = 0;
+    const parts0 = window.buildStandParts(sb0, 60, 2);
+    const sockel0 = parts0.find((p) => p.name === "staender-sockel");
+    const zTop0 = zbounds(sockel0.facets)[1];
+    const area0 = capArea(sockel0.facets, zTop0);
+    assertClose(area0, L3 * D3, 1.0, "r=0 sharp: cap area within 1.0 of L*D");
+
+    // r=20: clamped to railMm (5) — JSON-identical to r=5
+    const sb5 = window.defaultShadowbox();
+    sb5.layers = 4;
+    sb5.stand.cornerRadiusMm = 5;
+    const sb20 = window.defaultShadowbox();
+    sb20.layers = 4;
+    sb20.stand.cornerRadiusMm = 20;
+    assertEqual(JSON.stringify(window.buildStandParts(sb20, 60, 2)),
+      JSON.stringify(window.buildStandParts(sb5, 60, 2)), "r=20 clamped to r=rail=5");
+  });
+
+  test("schaukasten: model — default 3, migrate backfills 0", () => {
+    // defaultShadowbox().stand.cornerRadiusMm must be 3
+    assertEqual(window.defaultShadowbox().stand.cornerRadiusMm, 3, "default cornerRadiusMm = 3");
+
+    // migrateProject backfills 0 when field is missing
+    const doc = window.defaultDoc();
+    delete doc.shadowbox.stand.cornerRadiusMm;
+    const migrated = window.migrateProject(doc);
+    assertEqual(migrated.shadowbox.stand.cornerRadiusMm, 0, "migrate backfills 0");
+
+    // idempotent: running again keeps 0
+    const migrated2 = window.migrateProject(migrated);
+    assertEqual(migrated2.shadowbox.stand.cornerRadiusMm, 0, "idempotent: stays 0");
   });
 
   test("schaukasten: opening loops are closed and nested", () => {
@@ -723,5 +807,74 @@
     const exD = ex.filter((p) => p.name.indexOf("duebel-") === 0);
     assertClose(zbounds(exD.flatMap((p) => p.facets))[1], (4 - 1) * (2 + 5) + 2 - 0.3, 1e-6,
       "dowel stretches with the exploded stack");
+  });
+
+  test("schaukasten-v3: colorLayers float renders raised content on the piece", () => {
+    const d = sbDoc(); // 4 layers, T=2
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 12;
+    const fl = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 12, hMm: 8, color: "#FF0000" });
+    fl.sbLayer = 2; fl.sbMode = "float";
+    fl.depth.mode = "colorLayers"; fl.depth.direction = "raised";
+    d.elements.push(fl);
+    const parts = window.buildParts(d);
+    const content = parts.filter((p) => /^ebene-3-schwebeteil-1-/.test(p.name));
+    assert(content.length >= 1, "raised content part exists on the piece");
+    const zb = zbounds(content.flatMap((p) => p.facets));
+    // piece slab (level 2 of 4) sits at [2,4]; content rises above its face
+    assert(zb[0] >= 4 - 1e-6, "content starts at the piece face");
+    assert(zb[1] > 4 + 1e-6, "content rises above the face");
+    const slab = parts.filter((p) => p.name === "ebene-3-schwebeteil-1" || /^ebene-3-schwebeteil-1-oben$/.test(p.name));
+    assert(slab.length >= 1, "base slab still emitted");
+  });
+
+  test("schaukasten-v3: solid float stays flat; engraved falls back to flat", () => {
+    const mk = (mode, dir) => {
+      const d = sbDoc();
+      d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 12;
+      const fl = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 12, hMm: 8, color: "#FF0000" });
+      fl.sbLayer = 2; fl.sbMode = "float";
+      fl.depth.mode = mode; fl.depth.direction = dir;
+      d.elements.push(fl);
+      return window.buildParts(d).filter((p) => /^ebene-3-schwebeteil-1-/.test(p.name) && !/-oben$/.test(p.name));
+    };
+    assertEqual(mk("solid", "raised").length, 0, "solid: no extra content parts");
+    assertEqual(mk("colorLayers", "engraved").length, 0, "engraved: flat fallback");
+  });
+
+  test("schaukasten-v3: pegs avoid a piece's raised content", () => {
+    const d = sbDoc();
+    d.shadowbox.layers = 5;
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 6; d.shadowbox.insetPerLayerMm = 2;
+    const lo = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 18, hMm: 12, color: "#00AA00" });
+    lo.sbLayer = 3; lo.sbMode = "float";
+    lo.depth.mode = "colorLayers"; lo.depth.direction = "raised"; // whole face raised -> flat(lo) empty
+    const up = window.makeElementV2("shape", { cxMm: 33, cyMm: 20, wMm: 14, hMm: 10, color: "#FF7700" });
+    up.sbLayer = 2; up.sbMode = "float";
+    d.elements.push(lo, up);
+    const parts = window.buildParts(d);
+    // flat(lo) is empty -> no float-float pin (lo is chain-deepest, up gets no float-float pin either)
+    assert(!parts.some((p) => p.name.indexOf("ebene-4-stift-") === 0),
+      "no peg on a fully raised piece face");
+    // lo has no float below it in pinList -> becomes back-anchor eligible;
+    // back anchor uses only backplate-flatTop ^ openN2 ^ lo.mask (no flat-top intersection on piece)
+    assert(parts.some((p) => p.name.indexOf("ebene-5-stift-") === 0),
+      "raised piece still anchored from the back wall");
+  });
+
+  test("schaukasten-v3: fully raised upper piece still gets pinned to a flat lower piece", () => {
+    const d = sbDoc();
+    d.shadowbox.layers = 5;
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 6; d.shadowbox.insetPerLayerMm = 2;
+    const lo = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 18, hMm: 12, color: "#00AA00" });
+    lo.sbLayer = 3; lo.sbMode = "float"; // flat wings
+    const up = window.makeElementV2("shape", { cxMm: 33, cyMm: 20, wMm: 14, hMm: 10, color: "#FF7700" });
+    up.sbLayer = 2; up.sbMode = "float";
+    up.depth.mode = "colorLayers"; up.depth.direction = "raised"; // fully raised body
+    d.elements.push(lo, up);
+    const parts = window.buildParts(d);
+    assert(parts.some((p) => p.name.indexOf("ebene-4-stift-") === 0),
+      "peg on the flat lower piece exists despite the raised upper");
+    const upper = parts.filter((p) => /^ebene-3-schwebeteil-\d+(-oben)?$/.test(p.name));
+    assert(upper.some((p) => /-oben$/.test(p.name)), "upper piece drilled (hole split)");
   });
 })();

@@ -233,3 +233,70 @@ rim strip where the stand pocket hides them completely.
   cylinders in the pieces row.
 - **Toggle:** rides `pins.enabled` (Montagestifte) — no new UI.
 - Parity: pins off → no holes, no dowels (differential-tested).
+
+---
+
+## Addendum 4 (2026-07-17): Vollfarbe auf Schwebeteilen
+
+User request: "get the full color mode working with the shadowbox". Plate
+content is already fully multi-color; the gap is the pieces — floats render
+as flat single-color silhouettes regardless of the element's Tiefenmodus.
+
+- **Float pieces become mini-plates**: base slab `[0,T]` in `el.color` with
+  the pin holes exactly as today, PLUS the element's own RAISED content on
+  the piece face when `depth.mode` is `colorLayers` or `heightmap`: derived
+  per-piece doc `dp = {…doc, topLayerColor: null, elements: [el],
+  shadowbox: null}`, `comp_p = composeDesignV2(dp, …)`, content =
+  `buildRaisedParts(dp, fpPiece, comp_p, grid, null)` +
+  `buildHeightmapParts(dp, fpPiece, grid, null)` with `fpPiece` = the
+  piece mask as a cell field. Content parts are prefixed with the piece
+  name (`ebene-(level+1)-schwebeteil-M-<name>`) and ride the piece through
+  the same shift (stack/bed/explode). AMS palette, colorStepLayers and
+  autoLayerHeights inherit from the doc — the Farbebenen look matches
+  plate content.
+- **Solid mode unchanged** (flat slab — running the content pass would
+  double the silhouette as a full-face prism). **Engraved direction on
+  pieces falls back to the flat silhouette** (at typical piece thickness
+  the engrave budget is ~0.4 mm; documented limitation).
+- **Pins**: pegs land only on the LOWER partner's flat cells
+  (`comp_p.owner < 0` on the lower piece); the upper partner's underside is
+  always flat — holes drill into the slab body `[0, holeDepth]`, while raised
+  content sits on the front face (`z ≥ T`) with ≥ 0.4 mm wall between.
+  No upper-side flat restriction applies. Back anchors keep only the back
+  plate's own flat-top rule (`owner < 0` on the back plate cells) plus the
+  open(n-2) tunnel constraint — no piece-side flat intersection.
+  Physical stacking on raised regions remains user-controlled placement
+  (visible in 3D), consistent with the same-slab collision stance.
+- **Rand pieces stay flat** in v1 (the sample's clouds are mono-color; raised
+  content on a rand piece would poke a second level forward and need another
+  clip family). Documented.
+
+---
+
+## Addendum 5 (2026-07-17): Ständer-Kantenrundung
+
+User request: a setting for the stand's corner rounding.
+
+- **Model:** `sb.stand.cornerRadiusMm` — new docs default **3**; migration
+  backfills **0** for existing saves (house pattern: geometry-changing
+  additions arrive OFF for old docs, like autoLayerHeights). Builder clamp:
+  `r = max(0, min(cornerRadiusMm, railMm, D/2 - 0.5))` (radius beyond the
+  rail width would cut into the pocket).
+- **Geometry restructure (required for correct rounding):** the stand
+  becomes TWO parts instead of five —
+  - `staender-sockel`: rounded-rect slab (plan view L×D, radius r),
+    z `[0, H - slotDepth]`;
+  - `staender-wand`: ONE collar ring, z `[H - slotDepth, H]` — outer loop =
+    the same rounded rect (CCW), inner loop = the sharp pocket rect (CW
+    hole; `extrudeLoops` supports holes natively). Four separate wall boxes
+    cannot follow a rounded outline at the seams.
+  `roundedRectLoop(x0,y0,x1,y1,r, 8 segments/corner)` helper in
+  js/shadowbox.js; r = 0 degenerates to the sharp rect (same outline as
+  today, but the part STRUCTURE is now always sockel + wand — the stand
+  tests are updated: slot geometry asserted via the wand's pocket-edge
+  vertex lines y = rail and y = rail + slotW).
+- **UI:** the Ständer row gains a labeled two-column pair „Höhe (mm)" /
+  „Rundung (mm)" (`#sbStandHeight` keeps its id; new `#sbStandRadius`,
+  0–8, step 0.5), synced like the other stand controls.
+- Bed cursor unchanged (L unaffected). Pocket stays sharp (plates have
+  their own corner radius; pocket-corner voids don't affect fit).

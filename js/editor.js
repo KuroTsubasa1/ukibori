@@ -4019,6 +4019,8 @@
     document.getElementById("sbColorBack").value = sb.colorBack;
     document.getElementById("sbStand").checked = !!sb.stand.enabled;
     document.getElementById("sbStandHeight").value = sb.stand.heightMm;
+    var sbStandRadiusEl = document.getElementById("sbStandRadius");
+    if (sbStandRadiusEl) sbStandRadiusEl.value = sb.stand.cornerRadiusMm != null ? sb.stand.cornerRadiusMm : 0;
     var sbPinsEl = document.getElementById("sbPins");
     if (sbPinsEl) sbPinsEl.checked = sb.pins ? sb.pins.enabled !== false : true;
     var sbExplodeEl = document.getElementById("sbExplode");
@@ -4073,6 +4075,10 @@
     on("sbStandHeight", "change", function () {
       const v = parseFloat(this.value);
       if (!isNaN(v) && v >= 8) { sbState().stand.heightMm = v; sbChanged(); }
+    });
+    on("sbStandRadius", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v >= 0) { sbState().stand.cornerRadiusMm = v; sbChanged(); }
     });
     on("sbPins", "change", function () {
       var sb = sbState();

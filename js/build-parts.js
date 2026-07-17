@@ -984,7 +984,19 @@
           }
           if (!blocked) mask[i] = 1;
         }
-        floats.push({ el, level, mask });
+        // Compute per-piece design doc + composition for content pass (colorLayers/heightmap raised).
+        // Cached here so pin-spot flat-mask derivation and emission both reuse the same objects.
+        let compP = null;
+        let dp = null;
+        let flatMask = null; // null = piece is fully flat (no content pass)
+        const d = el.depth;
+        if (d && d.direction !== "engraved" && (d.mode === "colorLayers" || d.mode === "heightmap")) {
+          dp = Object.assign({}, doc, { topLayerColor: null, elements: [el], shadowbox: null });
+          compP = composeDesignV2(dp, cols, rows, grid);
+          flatMask = new Uint8Array(cols * rows);
+          for (let i = 0; i < flatMask.length; i++) flatMask[i] = compP.owner[i] < 0 ? 1 : 0;
+        }
+        floats.push({ el, level, mask, compP, dp, flatMask });
       }
     }
 
@@ -1003,7 +1015,16 @@
         let any = false;
         for (let i = 0; i < overlap.length; i++) if (lo.mask[i] && up.mask[i]) { overlap[i] = 1; any = true; }
         if (!any) continue;
-        const spots = window.shadowboxPinSpots(overlap, cols, rows, sx, sy, holeR + 1.0, 12);
+        // Peg base on the LOWER face must be flat (no raised content underneath the peg foot).
+        // The upper piece's underside is always flat: holes drill into the slab body [0, holeDepth],
+        // while raised content sits on the front face (z ≥ T). No upper-side intersection needed.
+        let spotMask = overlap;
+        if (lo.flatMask) {
+          const m = new Uint8Array(cols * rows);
+          for (let i = 0; i < m.length; i++) m[i] = spotMask[i] & lo.flatMask[i];
+          spotMask = m;
+        }
+        const spots = window.shadowboxPinSpots(spotMask, cols, rows, sx, sy, holeR + 1.0, 12);
         if (spots.length) pinList.push({ lower: lo, upper: up, spots });
       }
       // Back-plate back-anchor spots are deferred into the plate loop (after comp/flatTop)
@@ -1238,6 +1259,9 @@
         for (const up of floats) {
           if (hasFloatAbove.has(up)) continue;
           const spacer = (n - 2 - up.level) * T;
+          // Back anchor: hole drills into the piece's underside slab [0, holeDepth]; raised
+          // content lives on the front face (z ≥ T). The piece underside is always flat —
+          // only the back plate's own flat-top (owner < 0) and open(n-2) constraints apply.
           const spotMask = __andMasks(__andMasks(up.mask, flatTop), openN2);
           const spots = window.shadowboxPinSpots(spotMask, cols, rows, sx, sy, holeR + 1.0, 12);
           if (spots.length) {
@@ -1322,6 +1346,19 @@
         pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => fl.mask[r * cols + c] === 1, cols, rows, pitch, T, 0) });
       }
       for (const pin of pinList) if (pin.lower === fl) pieceParts.push(...pegParts(pin.spots, fl.level, color));
+      // Content pass: raised colorLayers / heightmap on the piece face.
+      // Emits BEFORE the shift so the content rides stack/bed/explode with the piece.
+      if (fl.compP) {
+        const fpPiece = (c, r) => fl.mask[r * cols + c] ? 0.5 : -1;
+        const contentParts = [
+          ...buildRaisedParts(fl.dp, fpPiece, fl.compP, grid, null),
+          ...buildHeightmapParts(fl.dp, fpPiece, grid, null),
+        ];
+        for (const p of contentParts) {
+          p.name = baseName + "-" + p.name;
+          pieceParts.push(p);
+        }
+      }
       const alive = pieceParts.filter((p) => p.facets.length);
       if (!alive.length) continue;
       if (layout === "stack") {
