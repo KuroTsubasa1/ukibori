@@ -985,14 +985,18 @@
           if (!blocked) mask[i] = 1;
         }
         // Compute per-piece design doc + composition for content pass (colorLayers/heightmap raised).
-        // Cached here so pin-spot flat-mask derivation reuses the same compP without re-running.
+        // Cached here so pin-spot flat-mask derivation and emission both reuse the same objects.
         let compP = null;
+        let dp = null;
+        let flatMask = null; // null = piece is fully flat (no content pass)
         const d = el.depth;
         if (d && d.direction !== "engraved" && (d.mode === "colorLayers" || d.mode === "heightmap")) {
-          const dp = Object.assign({}, doc, { topLayerColor: null, elements: [el], shadowbox: null });
+          dp = Object.assign({}, doc, { topLayerColor: null, elements: [el], shadowbox: null });
           compP = composeDesignV2(dp, cols, rows, grid);
+          flatMask = new Uint8Array(cols * rows);
+          for (let i = 0; i < flatMask.length; i++) flatMask[i] = compP.owner[i] < 0 ? 1 : 0;
         }
-        floats.push({ el, level, mask, compP });
+        floats.push({ el, level, mask, compP, dp, flatMask });
       }
     }
 
@@ -1011,21 +1015,13 @@
         let any = false;
         for (let i = 0; i < overlap.length; i++) if (lo.mask[i] && up.mask[i]) { overlap[i] = 1; any = true; }
         if (!any) continue;
-        // Intersect flat-top masks: peg base on lower face must be flat; hole in upper underside
-        // must not pierce raised content. Both constraints intersected for correctness.
+        // Peg base on the LOWER face must be flat (no raised content underneath the peg foot).
+        // The upper piece's underside is always flat: holes drill into the slab body [0, holeDepth],
+        // while raised content sits on the front face (z ≥ T). No upper-side intersection needed.
         let spotMask = overlap;
-        if (lo.compP) {
-          const loFlat = new Uint8Array(cols * rows);
-          for (let i = 0; i < loFlat.length; i++) loFlat[i] = lo.compP.owner[i] < 0 ? 1 : 0;
+        if (lo.flatMask) {
           const m = new Uint8Array(cols * rows);
-          for (let i = 0; i < m.length; i++) m[i] = spotMask[i] & loFlat[i];
-          spotMask = m;
-        }
-        if (up.compP) {
-          const upFlat = new Uint8Array(cols * rows);
-          for (let i = 0; i < upFlat.length; i++) upFlat[i] = up.compP.owner[i] < 0 ? 1 : 0;
-          const m = new Uint8Array(cols * rows);
-          for (let i = 0; i < m.length; i++) m[i] = spotMask[i] & upFlat[i];
+          for (let i = 0; i < m.length; i++) m[i] = spotMask[i] & lo.flatMask[i];
           spotMask = m;
         }
         const spots = window.shadowboxPinSpots(spotMask, cols, rows, sx, sy, holeR + 1.0, 12);
@@ -1263,13 +1259,10 @@
         for (const up of floats) {
           if (hasFloatAbove.has(up)) continue;
           const spacer = (n - 2 - up.level) * T;
-          // Additionally intersect the piece's flat-top mask: hole must not pierce raised content.
-          const upFlatMask = up.compP
-            ? (() => { const m = new Uint8Array(cols * rows); for (let i = 0; i < m.length; i++) m[i] = up.compP.owner[i] < 0 ? 1 : 0; return m; })()
-            : null;
-          const spotMask = upFlatMask
-            ? __andMasks(__andMasks(__andMasks(up.mask, flatTop), openN2), upFlatMask)
-            : __andMasks(__andMasks(up.mask, flatTop), openN2);
+          // Back anchor: hole drills into the piece's underside slab [0, holeDepth]; raised
+          // content lives on the front face (z ≥ T). The piece underside is always flat —
+          // only the back plate's own flat-top (owner < 0) and open(n-2) constraints apply.
+          const spotMask = __andMasks(__andMasks(up.mask, flatTop), openN2);
           const spots = window.shadowboxPinSpots(spotMask, cols, rows, sx, sy, holeR + 1.0, 12);
           if (spots.length) {
             pinList.push({ lower: "back", upper: up, spots });
@@ -1356,11 +1349,10 @@
       // Content pass: raised colorLayers / heightmap on the piece face.
       // Emits BEFORE the shift so the content rides stack/bed/explode with the piece.
       if (fl.compP) {
-        const dp = Object.assign({}, doc, { topLayerColor: null, elements: [fl.el], shadowbox: null });
         const fpPiece = (c, r) => fl.mask[r * cols + c] ? 0.5 : -1;
         const contentParts = [
-          ...buildRaisedParts(dp, fpPiece, fl.compP, grid, null),
-          ...buildHeightmapParts(dp, fpPiece, grid, null),
+          ...buildRaisedParts(fl.dp, fpPiece, fl.compP, grid, null),
+          ...buildHeightmapParts(fl.dp, fpPiece, grid, null),
         ];
         for (const p of contentParts) {
           p.name = baseName + "-" + p.name;

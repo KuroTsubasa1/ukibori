@@ -763,12 +763,34 @@
     d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 6; d.shadowbox.insetPerLayerMm = 2;
     const lo = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 18, hMm: 12, color: "#00AA00" });
     lo.sbLayer = 3; lo.sbMode = "float";
-    lo.depth.mode = "colorLayers"; lo.depth.direction = "raised"; // whole face raised -> no flat cells
+    lo.depth.mode = "colorLayers"; lo.depth.direction = "raised"; // whole face raised -> flat(lo) empty
     const up = window.makeElementV2("shape", { cxMm: 33, cyMm: 20, wMm: 14, hMm: 10, color: "#FF7700" });
     up.sbLayer = 2; up.sbMode = "float";
     d.elements.push(lo, up);
     const parts = window.buildParts(d);
+    // flat(lo) is empty -> no float-float pin (lo is chain-deepest, up gets no float-float pin either)
     assert(!parts.some((p) => p.name.indexOf("ebene-4-stift-") === 0),
       "no peg on a fully raised piece face");
+    // lo has no float below it in pinList -> becomes back-anchor eligible;
+    // back anchor uses only backplate-flatTop ^ openN2 ^ lo.mask (no flat-top intersection on piece)
+    assert(parts.some((p) => p.name.indexOf("ebene-5-stift-") === 0),
+      "raised piece still anchored from the back wall");
+  });
+
+  test("schaukasten-v3: fully raised upper piece still gets pinned to a flat lower piece", () => {
+    const d = sbDoc();
+    d.shadowbox.layers = 5;
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 6; d.shadowbox.insetPerLayerMm = 2;
+    const lo = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 18, hMm: 12, color: "#00AA00" });
+    lo.sbLayer = 3; lo.sbMode = "float"; // flat wings
+    const up = window.makeElementV2("shape", { cxMm: 33, cyMm: 20, wMm: 14, hMm: 10, color: "#FF7700" });
+    up.sbLayer = 2; up.sbMode = "float";
+    up.depth.mode = "colorLayers"; up.depth.direction = "raised"; // fully raised body
+    d.elements.push(lo, up);
+    const parts = window.buildParts(d);
+    assert(parts.some((p) => p.name.indexOf("ebene-4-stift-") === 0),
+      "peg on the flat lower piece exists despite the raised upper");
+    const upper = parts.filter((p) => /^ebene-3-schwebeteil-\d+(-oben)?$/.test(p.name));
+    assert(upper.some((p) => /-oben$/.test(p.name)), "upper piece drilled (hole split)");
   });
 })();

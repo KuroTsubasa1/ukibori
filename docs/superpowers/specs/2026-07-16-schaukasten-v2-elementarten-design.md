@@ -258,9 +258,13 @@ as flat single-color silhouettes regardless of the element's Tiefenmodus.
   double the silhouette as a full-face prism). **Engraved direction on
   pieces falls back to the flat silhouette** (at typical piece thickness
   the engrave budget is ~0.4 mm; documented limitation).
-- **Pins**: a piece with raised content only accepts pegs/holes on its FLAT
-  cells — piece-level flat-top mask (`comp_p.owner < 0`) intersected into
-  the pin spot masks wherever this piece is a pin partner (upper or lower).
+- **Pins**: pegs land only on the LOWER partner's flat cells
+  (`comp_p.owner < 0` on the lower piece); the upper partner's underside is
+  always flat — holes drill into the slab body `[0, holeDepth]`, while raised
+  content sits on the front face (`z ≥ T`) with ≥ 0.4 mm wall between.
+  No upper-side flat restriction applies. Back anchors keep only the back
+  plate's own flat-top rule (`owner < 0` on the back plate cells) plus the
+  open(n-2) tunnel constraint — no piece-side flat intersection.
   Physical stacking on raised regions remains user-controlled placement
   (visible in 3D), consistent with the same-slab collision stance.
 - **Rand pieces stay flat** in v1 (the sample's clouds are mono-color; raised
