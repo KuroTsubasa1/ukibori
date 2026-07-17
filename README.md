@@ -12,7 +12,7 @@ Image · Text · QR · Rectangle & Circle → Relief · Raised & Engraved · AMS
 ![Build](https://img.shields.io/badge/Build-none-16161a)
 ![offline](https://img.shields.io/badge/100%25-offline-2f8f6b)
 ![Vanilla JS](https://img.shields.io/badge/Vanilla-JS-f7df1e?logo=javascript&logoColor=000)
-![Tests](https://img.shields.io/badge/Tests-255%20%E2%9C%93-2f8f6b)
+![Tests](https://img.shields.io/badge/Tests-351%20%E2%9C%93-2f8f6b)
 ![Export](https://img.shields.io/badge/Export-PNG%20·%20.svg%20·%20.3mf%20·%20.stl-6b4fb0)
 
 <img src="assets/hero.png" width="900" alt="The Ukibori workshop: 2D workbench and dark 3D stage side by side, element inspector and layers dock on the right">
@@ -176,6 +176,20 @@ dialog sit in the topbar.
   - Can be turned off with a checkbox; old projects keep their manual heights.
   </details>
 
+### Schaukasten (shadowbox / diorama)
+
+Stacked tunnel plates share a single opening field that widens with depth,
+creating a layered paper-cut diorama. Per-element placement modes: **Auf
+Platte** (content printed onto a plate), **Mit Rand** (element silhouette
+projects as a standalone cloud into the opening and is pegged to its plate),
+and **Schwebend** (a separately printed floating slab suspended between plates
+via assembly pins). Pegs and blind holes are computed automatically; peg spots
+avoid engraved and raised surface features so every pin lands on flat plate
+face. The base includes a closed-pocket press-fit stand and a
+**Bett-Layout** (bed layout) export that places all plates and pieces side by
+side at z = 0 ready to slice. An **Explosionsansicht** (explode) slider
+spreads the stack in the 3D preview.
+
 ### Preview, save & export
 
 - **Live 3D preview** — a rotatable, zoomable, pannable three.js view of the
@@ -316,7 +330,7 @@ print.
 | `js/coachmarks.js` | first-run tour (coach marks) |
 | `vendor/` | bundled locally: three.js, onnxruntime-web (+ WASM) with `u2netp.onnx`, QR encoder |
 | `examples/` | example projects to open — including the coin from the screenshots above |
-| `tests/` | browser test suite — `tests/run.html` runs all `*.test.js` files (255 tests) |
+| `tests/` | browser test suite — `tests/run.html` runs all `*.test.js` files (351 tests) |
 
 Plain HTML/CSS/JavaScript, **no build step and no CDN**. Some features (3D
 preview, AI cutout, QR, SVG tracing) use libraries that are **bundled locally**

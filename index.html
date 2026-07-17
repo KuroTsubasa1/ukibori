@@ -156,6 +156,88 @@
         </div>
       </details>
 
+      <!-- "Schaukasten": layered paper-cut stack (shadowbox mode) -->
+      <details class="acc" id="accShadowbox">
+        <summary>Schaukasten</summary>
+        <div class="acc-body adv-section">
+          <div class="adv-field">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="sbEnabled" title="Schaukasten-Modus: das Werkstück wird ein Stapel einzelner Platten mit organischen, nach hinten kleiner werdenden Öffnungen (Paper-Cut-Effekt). Elemente liegen auf wählbaren Ebenen; die hinterste Platte trägt das Motiv."> Schaukasten-Modus
+            </label>
+            <div id="sbShapeHint" class="hint" hidden>Nur für Rechteck- und Kreis-Platten verfügbar.</div>
+          </div>
+          <div id="sbParams" hidden>
+            <div class="adv-two-col">
+              <div class="adv-field">
+                <label for="sbLayers" class="adv-label">Ebenen</label>
+                <input type="number" id="sbLayers" class="sp-num adv-num-full" min="3" max="10" step="1" value="6" title="Anzahl der Platten inklusive Rückwand">
+              </div>
+              <div class="adv-field">
+                <label for="sbInset" class="adv-label">Versatz (mm)</label>
+                <input type="number" id="sbInset" class="sp-num adv-num-full" min="1" max="20" step="0.5" value="4" title="Wie viel kleiner jede Öffnung je Ebene nach hinten wird">
+              </div>
+            </div>
+            <div class="adv-field">
+              <label class="adv-label">Öffnung</label>
+              <div id="sbOpeningSeg" class="seg-group seg-sm" style="width:100%">
+                <button type="button" id="sbOpeningAuto" class="seg seg-active" style="flex:1" title="Automatisch erzeugte organische Öffnung">Automatisch</button>
+                <button type="button" id="sbOpeningDrawn" class="seg" style="flex:1" title="Öffnung frei auf der Arbeitsfläche zeichnen">Gezeichnet</button>
+              </div>
+            </div>
+            <div id="sbAutoParams">
+              <div class="adv-two-col">
+                <div class="adv-field">
+                  <label for="sbMargin" class="adv-label">Randabstand (mm)</label>
+                  <input type="number" id="sbMargin" class="sp-num adv-num-full" min="4" max="40" step="1" value="12" title="Abstand der vordersten Öffnung vom Plattenrand">
+                </div>
+                <div class="adv-field">
+                  <label for="sbPeriod" class="adv-label">Wellenlänge (mm)</label>
+                  <input type="number" id="sbPeriod" class="sp-num adv-num-full" min="10" max="120" step="5" value="40" title="Länge einer Welle entlang des Randes">
+                </div>
+              </div>
+              <div class="adv-field">
+                <label for="sbWaviness" class="adv-label">Welligkeit</label>
+                <input type="range" id="sbWaviness" min="0" max="1" step="0.05" value="0.5" style="width:100%" title="Wie stark die Öffnung wellt (0 = glatt)">
+              </div>
+              <div class="adv-field">
+                <button type="button" id="sbReroll" class="btn" style="width:100%" title="Neue zufällige Wellenform">Neu würfeln</button>
+              </div>
+            </div>
+            <div id="sbDrawnParams" hidden>
+              <div class="adv-field">
+                <button type="button" id="sbDrawBtn" class="btn" style="width:100%" title="Geschlossene Öffnungsform auf der Arbeitsfläche zeichnen">Öffnung zeichnen</button>
+                <div id="sbDrawHint" class="hint" hidden>Auf der Arbeitsfläche ziehen — Loslassen schließt die Form.</div>
+              </div>
+            </div>
+            <div class="adv-two-col">
+              <div class="adv-field">
+                <label for="sbColorFront" class="adv-label">Farbe vorne</label>
+                <input type="color" id="sbColorFront" value="#DDEEFA" title="Farbe der vordersten Platte">
+              </div>
+              <div class="adv-field">
+                <label for="sbColorBack" class="adv-label">Farbe hinten</label>
+                <input type="color" id="sbColorBack" value="#1B5E9E" title="Farbe der Rückwand">
+              </div>
+            </div>
+            <div class="adv-field adv-field-row">
+              <label class="adv-label toggle" style="flex:1">
+                <input type="checkbox" id="sbStand" checked title="Ständer mit Schlitz für den Plattenstapel mitdrucken"> Ständer
+              </label>
+              <input type="number" id="sbStandHeight" class="sp-num" style="width:64px" min="8" max="40" step="1" value="15" title="Höhe des Ständers in mm">
+            </div>
+            <div class="adv-field">
+              <label class="adv-label toggle">
+                <input type="checkbox" id="sbPins" checked title="Zapfen und Sacklöcher zwischen gestapelten Schwebeteilen (und zur Rückwand) mitdrucken — hilft beim Ausrichten und Verkleben"> Montagestifte
+              </label>
+            </div>
+            <div class="adv-field">
+              <label class="adv-label" for="sbExplode">Explosion (mm)</label>
+              <input type="range" id="sbExplode" min="0" max="20" step="0.5" value="0" style="width:120px" title="Explosionsansicht — zieht die Ebenen in der 3D-Vorschau auseinander (nur Ansicht, kein Export)">
+            </div>
+          </div>
+        </div>
+      </details>
+
       <!-- "Stapelung": doc-wide color/height policy of the layer stack -->
       <details class="acc" id="accStacking" open>
         <summary>Stapelung</summary>
@@ -409,6 +491,17 @@
               <button type="button" id="centerV" class="btn" style="flex:1" title="Element vertikal zentrieren (Mitte der Platte)">↕ Zentrieren</button>
             </div>
           </div>
+          <div class="adv-field" id="sbLayerRow" hidden>
+            <label for="sbLayerSel" class="adv-label">Schaukasten-Ebene</label>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <select id="sbLayerSel" class="text-input" style="width:100%" title="Auf welcher Platte das Element liegt (1 = vorne)"></select>
+              <div id="sbModeSeg" class="seg-group seg-sm" style="width:100%;margin-top:4px">
+                <button type="button" id="sbModePlate" class="seg seg-active" style="flex:1" title="Inhalt liegt auf der Platte und wird am Öffnungsrand beschnitten">Auf Platte</button>
+                <button type="button" id="sbModeRim" class="seg" style="flex:1" title="Mit dem Rand verbunden und ragt eine Ebene nach vorn (wie die Wolken im Beispiel)">Mit Rand</button>
+                <button type="button" id="sbModeFloat" class="seg" style="flex:1" title="Schwebt als eigenes Teil in der Öffnung — Kollision mit dem Rand wird abgeschnitten; Montagestifte verbinden gestapelte Teile">Schwebend</button>
+              </div>
+            </div>
+          </div>
           </div>
         </div>
       </div>
@@ -480,6 +573,7 @@
 <script src="js/scatter.js"></script>
 <script src="js/pause-sheet.js"></script>
 <script src="js/bookmark-export.js"></script>
+<script src="js/shadowbox.js"></script>
 <script src="js/build-parts.js"></script>
 <script src="js/preview3d.js"></script>
 <script src="js/editor.js"></script>

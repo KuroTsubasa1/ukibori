@@ -42,6 +42,31 @@
   // Streuen (scatter) sub-mode state: null unless the panel is open.
   var scatter = null; // { sourceId, region:{x0,y0,x1,y1}|null, seed, previewIds:[] }
 
+  // Schaukasten: cache for nested opening contour loops (invalidated by param key).
+  var sbLoopsCache = { key: "", loops: null };
+  function sbContourLoops() {
+    var sb = doc.shadowbox;
+    if (!sb || !sb.enabled) return null;
+    var modeOf = function (el) {
+      return el.sbMode === "rim" || el.sbMode === "float" ? el.sbMode
+        : (el.sbMode == null && el.sbOverhang ? "rim" : "plate");
+    };
+    var rimFp = JSON.stringify((doc.elements || [])
+      .filter(function (el) { return modeOf(el) === "rim"; })
+      .map(function (el) { return [el.id, el.cxMm, el.cyMm, el.wMm, el.hMm, el.rotationDeg, el.sbLayer,
+        el.shape || null, el.text || null, el.flipH, el.flipV]; }));
+    var key = JSON.stringify([sb.layers, sb.insetPerLayerMm, sb.opening,
+      doc.body.shape, doc.body.widthMm, doc.body.heightMm, doc.body.cornerRadiusMm]) + rimFp;
+    if (sbLoopsCache.key !== key) {
+      var n = Math.max(3, Math.min(10, sb.layers));
+      var loopFn = window.shadowboxAdaptedOpeningLoops || window.shadowboxOpeningLoops;
+      var all = [];
+      for (var k = 0; k < n - 1; k++) all.push(loopFn(doc, k));
+      sbLoopsCache = { key: key, loops: all };
+    }
+    return sbLoopsCache.loops;
+  }
+
   var MARGIN_PX = 48;
 
   // ---- mm↔px helpers — all drawing/hit-test coordinates go through these ----
@@ -1119,6 +1144,28 @@
       strokeZierlinie(ctx, s);
     }
 
+    // Schaukasten: ghosted nested opening contours (front = strongest).
+    var sbLoops = sbContourLoops();
+    if (sbLoops) {
+      ctx.save();
+      ctx.setLineDash([]);
+      for (var sbk = 0; sbk < sbLoops.length; sbk++) {
+        ctx.strokeStyle = "rgba(30,90,158," + (0.55 - (0.4 * sbk) / Math.max(1, sbLoops.length - 1)) + ")";
+        ctx.lineWidth = sbk === 0 ? 1.5 : 1;
+        for (var sbi = 0; sbi < sbLoops[sbk].length; sbi++) {
+          var lp = sbLoops[sbk][sbi];
+          ctx.beginPath();
+          lp.forEach(function (p, i) {
+            var px = mmX(p.xMm), py = mmY(p.yMm);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          });
+          ctx.closePath();
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+
     // Mount marker: visible draggable circle + crosshair.
     const mount = doc.mount;
     if (mount && mount.type !== "none") {
@@ -1184,6 +1231,18 @@
       ctx.setLineDash([4, 3]);
       ctx.beginPath();
       scPathPts.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+      ctx.stroke();
+      ctx.restore();
+    }
+    // Shadowbox opening freehand overlay (closed polygon preview).
+    if (drag && drag.handle === "sbOpening" && drag.ptsPx && drag.ptsPx.length > 1) {
+      ctx.save();
+      ctx.strokeStyle = "#e0245e";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      drag.ptsPx.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+      ctx.closePath();
       ctx.stroke();
       ctx.restore();
     }
@@ -1362,6 +1421,8 @@
   let drag = null;
   var spacePan = false; // Space held → next canvas drag pans the view
   var textPathDraw = null; // text-element id waiting for a Pfadtext drag
+  var sbOpeningDraw = false; // true while waiting for one freehand opening capture
+  var sbExplodeMm = 0; // view-only explode offset in mm — NOT stored in doc, never serialized
 
   // Mouse wheel zooms the workbench toward the cursor (same convention as the
   // 3D stage); ctrl+wheel is the trackpad pinch (finer deltas, larger factor).
@@ -1404,6 +1465,12 @@
       cv.setPointerCapture(e.pointerId);
       cv.style.cursor = "grabbing";
       e.preventDefault(); // suppress middle-click autoscroll
+      return;
+    }
+    // Schaukasten Öffnung: one freehand capture for the opening shape.
+    if (sbOpeningDraw) {
+      drag = { handle: "sbOpening", px, py, ptsPx: [{ x: px, y: py }] };
+      cv.setPointerCapture(e.pointerId);
       return;
     }
     // Pfadtext: the next canvas drag records the path for the waiting text element.
@@ -1619,6 +1686,15 @@
       }
       return;
     }
+    if (drag.handle === "sbOpening") {
+      // freehand opening shape: sample a point every few pixels
+      const last = drag.ptsPx[drag.ptsPx.length - 1];
+      if (Math.hypot(px - last.x, py - last.y) >= 4) {
+        drag.ptsPx.push({ x: px, y: py });
+        render2D();
+      }
+      return;
+    }
     if (drag.handle === "scatterRegion") {
       const toMm = function (p, v0) { return (p - state.marginPx) / s + v0; };
       scatter.region = {
@@ -1685,6 +1761,30 @@
       drag = null;
       cv.style.cursor = spacePan ? "grab" : "";
       render2D();
+      return;
+    }
+    if (drag.handle === "sbOpening") {
+      // Schaukasten Öffnung: convert px points to doc-mm, smooth, store as closed polygon.
+      var sbPtsPx = drag.ptsPx;
+      drag = null;
+      sbOpeningDraw = false;
+      document.getElementById("sbDrawHint").hidden = true;
+      var s0 = state.scale;
+      var sbMm = sbPtsPx.map(function (p) {
+        return { xMm: (p.x - state.marginPx) / s0 + state.viewX0,
+                 yMm: (p.y - state.marginPx) / s0 + state.viewY0 };
+      });
+      var sbSm = window.smoothPath
+        ? window.smoothPath(sbMm.map(function (p) { return { x: p.xMm, y: p.yMm }; }), 2)
+            .map(function (p) { return { xMm: p.x, yMm: p.y }; })
+        : sbMm;
+      if (sbSm.length >= 3) {
+        sbState().opening.points = sbSm;
+        sbState().opening.source = "drawn";
+      }
+      syncShadowboxControls();
+      render2D();
+      scheduleRebuild3D();
       return;
     }
     if (drag.handle === "textPath") {
@@ -1832,6 +1932,11 @@
     }
 
     if (e.key === "Escape") {                         // deselect + release focus
+      if (sbOpeningDraw) {                            // cancel an armed opening draw
+        sbOpeningDraw = false;
+        var sbHint = document.getElementById("sbDrawHint");
+        if (sbHint) sbHint.hidden = true;
+      }
       if (state.selectedId != null) {
         clearSelection(); refreshAdvancedForSelection(); renderLayers(); render2D();
       }
@@ -1901,7 +2006,7 @@
 
   // ---- 2D/3D/split preview mode ----
   const PREVIEW_MODE_KEY = "ukibori.previewMode";
-  function getPartsFn() { return { parts: window.buildParts(visibleDoc()) }; }
+  function getPartsFn() { return { parts: window.buildParts(visibleDoc(), { explodeMm: sbExplodeMm }) }; }
 
   // setPreviewMode: unified handler for 2D, 3D, and split modes.
   // Order: set layout class + visibility first so clientWidth is the split half-width
@@ -1990,7 +2095,7 @@
   document.getElementById("exportMf").addEventListener("click", function () {
     try {
       setExportStatus("Exportiere …");
-      const parts = window.buildParts(visibleDoc());
+      const parts = window.buildParts(visibleDoc(), { layout: "bed" });
       const blob = window.build3MF(parts);
       downloadBlob(blob, exportFileName() + ".3mf");
       setExportStatus("Fertig.");
@@ -2002,7 +2107,7 @@
   document.getElementById("exportStl").addEventListener("click", function () {
     try {
       setExportStatus("Exportiere …");
-      const parts = window.buildParts(visibleDoc());
+      const parts = window.buildParts(visibleDoc(), { layout: "bed" });
       const facets = parts.flatMap(function (p) { return p.facets; });
       const u8 = window.facetsToBinarySTL(facets);
       const blob = new Blob([u8], { type: "application/octet-stream" });
@@ -2016,8 +2121,13 @@
   // Pausen-Spickzettel: exact pause layers for manual color swaps (no AMS).
   document.getElementById("exportPause").addEventListener("click", function () {
     try {
+      const doc = visibleDoc();
+      if (doc.shadowbox && doc.shadowbox.enabled) {
+        setExportStatus("Im Schaukasten-Modus nicht verfügbar — jede Platte wird einzeln und einfarbig gedruckt.");
+        return;
+      }
       setExportStatus("Berechne …");
-      const parts = window.buildParts(visibleDoc());
+      const parts = window.buildParts(doc);
       const sheet = window.buildPauseSheet(parts, doc.body.layerHeightMm);
       if (sheet.swaps.length <= 1 && !sheet.mixed.length) {
         setExportStatus("Nur eine Farbe — keine Pausen nötig.");
@@ -2241,6 +2351,7 @@
     }
     setHidden("simpleMountSection", isImage);
     setHidden("simpleCenterSection", isImage);
+    syncShadowboxControls();
     render2D();
     scheduleRebuild3D();
   }
@@ -3101,6 +3212,28 @@
     renderPaletteSwatches(el);
     // Doc-level AMS filament palette (Ebenen group).
     renderAmsPaletteField();
+
+    // Schaukasten: plate assignment row — only when shadowbox is enabled and an element is selected.
+    var sbRow = document.getElementById("sbLayerRow");
+    var sbOn = doc.shadowbox && doc.shadowbox.enabled;
+    if (sbRow) {
+      sbRow.hidden = !(sbOn && el);
+      if (sbOn && el) {
+        var effectiveMode = el.sbMode || (el.sbOverhang ? "rim" : "plate");
+        var isFloat = effectiveMode === "float";
+        sbPopulateLayerSelect(isFloat);
+        var sbN = Math.max(3, Math.min(10, doc.shadowbox.layers));
+        // For float mode, clamp to n-2 (last valid non-hinten index).
+        var sbMaxK = isFloat ? sbN - 2 : sbN - 1;
+        var sbK = el.sbLayer == null ? sbN - 1 : Math.max(0, Math.min(sbN - 1, el.sbLayer));
+        if (sbK > sbMaxK) sbK = sbMaxK;
+        document.getElementById("sbLayerSel").value = String(sbK);
+        // Sync seg buttons.
+        document.getElementById("sbModePlate").classList.toggle("seg-active", effectiveMode === "plate");
+        document.getElementById("sbModeRim").classList.toggle("seg-active", effectiveMode === "rim");
+        document.getElementById("sbModeFloat").classList.toggle("seg-active", effectiveMode === "float");
+      }
+    }
   }
 
   // AMS-Filament-Palette (Ebenen group, doc scope): visible whenever the shared
@@ -3278,6 +3411,51 @@
     var v = parseFloat(node.value);
     if (isNaN(v) || v <= 0) return false;
     el.edge.periodMm = v;
+  });
+
+  // -- Schaukasten: plate assignment (Ebene) + mode seg --
+  // excludeBack: when true, omit the last (hinten) option (float mode).
+  // Rebuilds whenever the option count OR excludeBack shape changes.
+  function sbPopulateLayerSelect(excludeBack) {
+    var sel = document.getElementById("sbLayerSel");
+    if (!sel) return;
+    var sb = doc.shadowbox;
+    var n = sb ? Math.max(3, Math.min(10, sb.layers)) : 6;
+    var shown = excludeBack ? n - 1 : n;
+    // Detect shape via a data attribute so we rebuild when excludeBack flips.
+    var prevShape = sel.getAttribute("data-excl") || "0";
+    var curShape = excludeBack ? "1" : "0";
+    if (sel.options.length !== shown || prevShape !== curShape) {
+      sel.innerHTML = "";
+      sel.setAttribute("data-excl", curShape);
+      for (var k = 0; k < shown; k++) {
+        var opt = document.createElement("option");
+        opt.value = String(k);
+        opt.textContent = (k + 1) + (k === 0 ? " (vorne)" : k === n - 1 ? " (hinten)" : "");
+        sel.appendChild(opt);
+      }
+    }
+  }
+  bindElementField("sbLayerSel", "change", function (el) {
+    var sb = doc.shadowbox, n = sb ? Math.max(3, Math.min(10, sb.layers)) : 6;
+    var v = parseInt(document.getElementById("sbLayerSel").value, 10);
+    el.sbLayer = (isNaN(v) || v >= n - 1) ? null : v; // back plate stored as null
+  });
+  bindElementField("sbModePlate", "click", function (el) {
+    el.sbMode = "plate"; el.sbOverhang = false;
+    refreshAdvancedForSelection();
+  });
+  bindElementField("sbModeRim", "click", function (el) {
+    el.sbMode = "rim"; el.sbOverhang = false;
+    refreshAdvancedForSelection();
+  });
+  bindElementField("sbModeFloat", "click", function (el) {
+    el.sbMode = "float"; el.sbOverhang = false;
+    if (el.sbLayer == null) {
+      var sb = doc.shadowbox, n = sb ? Math.max(3, Math.min(10, sb.layers)) : 6;
+      el.sbLayer = n - 2;
+    }
+    refreshAdvancedForSelection();
   });
 
   // -- Shape kind (Rechteck / Kreis, shape elements) --
@@ -3816,6 +3994,106 @@
     var cv2 = document.getElementById("centerV"); if (cv2) cv2.addEventListener("click", centerV);
   }());
 
+  // ---- Schaukasten (shadowbox) doc controls ----
+  function sbState() { return doc.shadowbox; }
+
+  function syncShadowboxControls() {
+    const sb = sbState();
+    if (!sb) return;
+    const supported = doc.body.shape === "rect" || doc.body.shape === "circle";
+    document.getElementById("sbEnabled").checked = !!sb.enabled;
+    document.getElementById("sbEnabled").disabled = !supported;
+    document.getElementById("sbShapeHint").hidden = supported;
+    document.getElementById("sbParams").hidden = !sb.enabled || !supported;
+    document.getElementById("sbLayers").value = sb.layers;
+    document.getElementById("sbInset").value = sb.insetPerLayerMm;
+    const auto = sb.opening.source !== "drawn";
+    document.getElementById("sbOpeningAuto").classList.toggle("seg-active", auto);
+    document.getElementById("sbOpeningDrawn").classList.toggle("seg-active", !auto);
+    document.getElementById("sbAutoParams").hidden = !auto;
+    document.getElementById("sbDrawnParams").hidden = auto;
+    document.getElementById("sbMargin").value = sb.opening.marginMm;
+    document.getElementById("sbPeriod").value = sb.opening.periodMm;
+    document.getElementById("sbWaviness").value = sb.opening.waviness;
+    document.getElementById("sbColorFront").value = sb.colorFront;
+    document.getElementById("sbColorBack").value = sb.colorBack;
+    document.getElementById("sbStand").checked = !!sb.stand.enabled;
+    document.getElementById("sbStandHeight").value = sb.stand.heightMm;
+    var sbPinsEl = document.getElementById("sbPins");
+    if (sbPinsEl) sbPinsEl.checked = sb.pins ? sb.pins.enabled !== false : true;
+    var sbExplodeEl = document.getElementById("sbExplode");
+    if (sbExplodeEl) sbExplodeEl.value = sbExplodeMm;
+  }
+
+  function sbChanged() {
+    syncShadowboxControls();
+    refreshAdvancedForSelection();
+    render2D();
+    scheduleRebuild3D();
+  }
+
+  function initShadowboxControls() {
+    const on = (id, evt, fn) => document.getElementById(id).addEventListener(evt, fn);
+    on("sbEnabled", "change", function () { sbState().enabled = this.checked; sbChanged(); });
+    on("sbLayers", "change", function () {
+      const v = parseInt(this.value, 10);
+      if (!isNaN(v)) { sbState().layers = Math.max(3, Math.min(10, v)); sbChanged(); }
+    });
+    on("sbInset", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v > 0) { sbState().insetPerLayerMm = v; sbChanged(); }
+    });
+    on("sbOpeningAuto", "click", function () {
+      sbState().opening.source = "auto";
+      sbOpeningDraw = false;                          // switching to Auto cancels an armed draw
+      document.getElementById("sbDrawHint").hidden = true;
+      sbChanged();
+    });
+    on("sbOpeningDrawn", "click", function () { sbState().opening.source = "drawn"; sbChanged(); });
+    on("sbDrawBtn", "click", function () {
+      sbOpeningDraw = true;
+      document.getElementById("sbDrawHint").hidden = false;
+    });
+    on("sbMargin", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v >= 0.5) { sbState().opening.marginMm = v; sbChanged(); }
+    });
+    on("sbPeriod", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v >= 4) { sbState().opening.periodMm = v; sbChanged(); }
+    });
+    on("sbWaviness", "input", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v)) { sbState().opening.waviness = v; sbChanged(); }
+    });
+    on("sbReroll", "click", function () { sbState().opening.seed = (sbState().opening.seed | 0) + 1; sbChanged(); });
+    on("sbColorFront", "input", function () { sbState().colorFront = this.value.toUpperCase(); sbChanged(); });
+    on("sbColorBack", "input", function () { sbState().colorBack = this.value.toUpperCase(); sbChanged(); });
+    on("sbStand", "change", function () { sbState().stand.enabled = this.checked; sbChanged(); });
+    on("sbStandHeight", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v >= 8) { sbState().stand.heightMm = v; sbChanged(); }
+    });
+    on("sbPins", "change", function () {
+      var sb = sbState();
+      if (!sb) return;
+      if (sb.pins == null) sb.pins = { enabled: true, diameterMm: 3, clearanceMm: 0.35 };
+      sb.pins.enabled = this.checked;
+      sbChanged();
+    });
+    on("sbExplode", "input", function () {
+      sbExplodeMm = parseFloat(this.value) || 0;
+      scheduleRebuild3D();
+    });
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && sbOpeningDraw) {
+        sbOpeningDraw = false;
+        document.getElementById("sbDrawHint").hidden = true;
+      }
+    });
+  }
+  initShadowboxControls();
+
   // -- Init Advanced panel doc-level values (also called by resetDocTo) --
   function initAdvancedUI() {
     var t = document.getElementById("advThickness");
@@ -3834,6 +4112,7 @@
     // applyShape/applyMount, called from initSimpleUI).
     refreshAdvancedForSelection();
     renderAdvancedLayers();
+    syncShadowboxControls();
   }
   initAdvancedUI();
 

@@ -729,7 +729,16 @@
   // engraved colored floors + raised prisms + heightmap slabs. Mount ring no longer
   // emitted (Öse is now a flat tab via footprint union on the expanded domain).
   // Handles rect/circle/free bodies.
-  function buildParts(doc) {
+  function buildParts(doc, opts) {
+    // Schaukasten: stacked paper-cut plates — separate assembly path. Only
+    // rect/circle bodies (the opening field needs the analytic perimeter).
+    // Disabled or unsupported shapes fall through untouched (parity).
+    if (doc.shadowbox && doc.shadowbox.enabled &&
+        (doc.body.shape === "rect" || doc.body.shape === "circle")) {
+      const sbLayout = opts && opts.layout === "bed" ? "bed" : "stack";
+      const sbExplode = (opts && typeof opts.explodeMm === "number" && opts.explodeMm > 0) ? opts.explodeMm : 0;
+      return buildShadowboxParts(doc, sbLayout, sbExplode);
+    }
     // Compute a single shared grid over the expanded domain (expanded only when the
     // Öse washer overhangs the body box; default = body box, byte-identical path).
     const domain = docDomain(doc);
@@ -812,12 +821,26 @@
     const lineBand = __zierlinieBand(doc, grid, footprint, comp, band, domainExpanded);
     const lineMode = lineBand ? doc.body.line.mode : "none";
 
+    return [
+      ...__contentParts(doc, comp, grid, footprint, band,
+        lineMode === "engraved" ? lineBand : null),
+      ...buildFrameParts(doc, band, cols, rows, pitch),
+      ...buildZierlinieParts(doc, lineMode === "raised" ? lineBand : null, cols, rows, pitch),
+      ...buildMountRingParts(doc),
+    ];
+  }
+
+  // Content assembly shared by buildParts and buildShadowboxParts: reclassifies
+  // non-engraved pixels as base for the engraved pass, then concatenates the
+  // three content builders. Extracted verbatim — order and output byte-identical.
+  function __contentParts(doc, comp, grid, footprint, band, grooveBand) {
+    const { cols, rows, pitch } = grid;
     const isEngravedEi = (ei) => {
       const d = doc.elements[ei] && doc.elements[ei].depth;
       return !!(d && d.direction === "engraved" && d.mode !== "heightmap");
     };
     const base = window.hexToRgb(doc.body.baseColor);
-    // depthMm and cutout are shared read-only (alias intentional; only r/g/b/isBase/owner are sliced because only they are rewritten).
+    // depthMm and cutout are shared read-only (alias intentional; only r/g/b/isBase/owner are rewritten).
     const engComp = {
       r: comp.r.slice(), g: comp.g.slice(), b: comp.b.slice(),
       depthMm: comp.depthMm, cutout: comp.cutout,
@@ -831,14 +854,521 @@
       }
     }
     return [
-      ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint, band,
-        lineMode === "engraved" ? lineBand : null),
+      ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint, band, grooveBand),
       ...buildRaisedParts(doc, footprint, comp, grid, band),
       ...buildHeightmapParts(doc, footprint, grid, band),
-      ...buildFrameParts(doc, band, cols, rows, pitch),
-      ...buildZierlinieParts(doc, lineMode === "raised" ? lineBand : null, cols, rows, pitch),
-      ...buildMountRingParts(doc),
     ];
+  }
+
+  // Facet translation — creates new vertex arrays to avoid double-shifting
+  // shared vertices (extrudeLoops reuses corner arrays across wall quads).
+  function __shiftFacets(parts, dx, dy, dz) {
+    for (const p of parts) {
+      p.facets = p.facets.map(f => f.map(v => [v[0] + dx, v[1] + dy, v[2] + dz]));
+    }
+    return parts;
+  }
+
+  // mm bounds of set cells in a flat Uint8Array mask (cell-center mapping).
+  // sx = cols/W, sy = rows/H. Returns {x0, x1, y0, y1} in mm; all Infinity
+  // when no cell is set (caller must guard on empty masks before using bbox).
+  function __maskBBoxMm(mask, cols, rows, sx, sy) {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (!mask[r * cols + c]) continue;
+        const xMm = (c + 0.5) / sx;
+        const yMm = (r + 0.5) / sy;
+        if (xMm < x0) x0 = xMm;
+        if (xMm > x1) x1 = xMm;
+        if (yMm < y0) y0 = yMm;
+        if (yMm > y1) y1 = yMm;
+      }
+    }
+    return { x0, x1, y0, y1 };
+  }
+
+  const __SB_MOUNT_NONE = Object.freeze({ type: "none", xMm: 0, yMm: 0, diameterMm: 0, ringThicknessMm: 0, ringHeightMm: 0, marginMm: 0 });
+
+  // Schaukasten assembly: one plate per layer, shared opening field thresholded
+  // at k*insetPerLayerMm, content via the standard per-plate pipeline.
+  // layout 'stack' = assembled preview (front plate on top); 'bed' = print
+  // layout, every plate at z0=0 side-by-side, stand beside the plates.
+  function buildShadowboxParts(doc, layout, explodeMm) {
+    const g = (typeof explodeMm === "number" && explodeMm > 0) ? explodeMm : 0;
+    const sb = doc.shadowbox;
+    const n = window.__sbClampLayers(sb.layers);
+    const T = doc.body.thicknessMm;
+    const W = doc.body.widthMm, H = doc.body.heightMm;
+    const colors = window.shadowboxPlateColors(Object.assign({}, sb, { layers: n }));
+    const inset = Math.max(0.5, sb.insetPerLayerMm || 4);
+    // Domain never expands: mount is 'hole' at most (loop stripped below).
+    const domain = docDomain(Object.assign({}, doc, { mount: __SB_MOUNT_NONE }));
+    const grid = gridForDomain(domain, doc.resolution);
+    const { cols, rows, pitch } = grid;
+    const f = window.shadowboxOpeningField(doc, grid);
+    const layerOf = (el) => el.sbLayer == null ? n - 1 : Math.max(0, Math.min(n - 1, el.sbLayer | 0));
+    const modeOf = (el) => el.sbMode === "rim" || el.sbMode === "float" ? el.sbMode : (el.sbMode == null && el.sbOverhang ? "rim" : "plate");
+    const sx = cols / W, sy = rows / H, s = (sx + sy) / 2;
+    const gapMm = 5;
+    // Separately printed pieces need lateral air against the plate rings.
+    const SEAM_CLEARANCE_MM = 0.2;
+    const out = [];
+
+    // B: minimum border around a rim object on its own plate.
+    const B = Math.max(2, inset);
+    // pmm: pixel size in mm (average of x and y pitch).
+    const pmm = (1 / sx + 1 / sy) / 2;
+
+    // Collect rim elements once (before the plate loop). Each entry carries
+    // the raw silhouette mask, the resolved level, and a signed-mm distance
+    // field dC (NEGATIVE inside the rim object, POSITIVE outside — mm from
+    // the silhouette edge): dC[i] = mask[i] ? -dIn[i]*pmm : +dOut[i]*pmm.
+    // Two chamfer DT passes (same cost class as the drawn opening field).
+    const rims = [];
+    if (f) {
+      const dk0rim = Object.assign({}, doc, { shadowbox: null });
+      for (const el of doc.elements) {
+        if (modeOf(el) !== "rim") continue;
+        if (el.type === "image" && !el._img) continue;
+        const level = layerOf(el);
+        const rendered = __renderElementV2(el, dk0rim, cols, rows, grid);
+        if (!rendered || !rendered.mask) continue;
+        const mask = rendered.mask;
+        // Build inside/outside masks for two DT passes.
+        const inv = new Uint8Array(cols * rows);
+        for (let i = 0; i < inv.length; i++) inv[i] = mask[i] ? 0 : 1;
+        const dIn = window.__chamferDT(inv, cols, rows);   // distance inward (from outside edge)
+        const dOut = window.__chamferDT(mask, cols, rows); // distance outward (from inside edge)
+        const dC = new Float32Array(cols * rows);
+        for (let i = 0; i < dC.length; i++) {
+          dC[i] = mask[i] ? -dIn[i] * pmm : dOut[i] * pmm;
+        }
+        // Sign: inside rim dC < 0, outside dC > 0 (mm from rim edge).
+        // openAt requires dC > B+delta+seam → only holds far outside the rim.
+        // Cut term: B+delta-dC > 0 when cell is inside or within B+delta of rim
+        // → max() makes it plate material (protected ring around the object).
+        rims.push({ el, level, mask, dC });
+      }
+    }
+
+    // Collect float elements once (before the plate loop). Each entry carries
+    // the clipped silhouette mask and the resolved level (clamped to n-2 so
+    // the back plate — which has no opening — is never a float target).
+    // Floats are collected AFTER rims so their masks can use rim dC fields.
+    const floats = [];
+    if (f) {
+      for (const el of doc.elements) {
+        if (modeOf(el) !== "float") continue;
+        if (el.type === "image" && !el._img) continue; // skip unloaded images
+        const level = Math.max(0, Math.min(n - 2, el.sbLayer == null ? n - 2 : el.sbLayer | 0));
+        const levelInset = level * inset;
+        // Render the element silhouette against a neutral doc (no plate-specific transforms).
+        const dk0 = Object.assign({}, doc, { shadowbox: null });
+        const rendered = __renderElementV2(el, dk0, cols, rows, grid);
+        if (!rendered || !rendered.mask) continue;
+        // Clip silhouette to the adapted opening at this level (includes rim terms).
+        // openAt(level, c, r, SEAM_CLEARANCE_MM): f > level*inset+seam AND all rims with
+        // level<=level have dC > B + (level-rm.level)*inset + seam.
+        const raw = rendered.mask;
+        const mask = new Uint8Array(cols * rows);
+        for (let i = 0; i < mask.length; i++) {
+          if (!raw[i]) continue;
+          const c = i % cols, r2 = (i / cols) | 0;
+          if (f(c, r2) <= levelInset + SEAM_CLEARANCE_MM) continue;
+          // Check all rim terms at this level.
+          let blocked = false;
+          for (const rm of rims) {
+            if (rm.level > level) continue;
+            if (rm.dC[i] <= B + (level - rm.level) * inset + SEAM_CLEARANCE_MM) { blocked = true; break; }
+          }
+          if (!blocked) mask[i] = 1;
+        }
+        floats.push({ el, level, mask });
+      }
+    }
+
+    // Montagestifte: peg on the rear part's face, blind hole in the front part.
+    const pinCfg = sb.pins || {};
+    const pinsOn = pinCfg.enabled !== false;
+    const pegR = (pinCfg.diameterMm || 3) / 2;
+    const holeR = ((pinCfg.diameterMm || 3) + (pinCfg.clearanceMm != null ? pinCfg.clearanceMm : 0.35)) / 2;
+    const pegH = Math.min(1.2, 0.6 * T);
+    const holeDepth = Math.min(T - 0.4, pegH + 0.2);
+    const pinList = []; // { lower: float|"back", upper: float, spots }
+    if (pinsOn && floats.length) {
+      for (const lo of floats) for (const up of floats) {
+        if (up.level !== lo.level - 1) continue;
+        const overlap = new Uint8Array(cols * rows);
+        let any = false;
+        for (let i = 0; i < overlap.length; i++) if (lo.mask[i] && up.mask[i]) { overlap[i] = 1; any = true; }
+        if (!any) continue;
+        const spots = window.shadowboxPinSpots(overlap, cols, rows, sx, sy, holeR + 1.0, 12);
+        if (spots.length) pinList.push({ lower: lo, upper: up, spots });
+      }
+      // Back-plate back-anchor spots are deferred into the plate loop (after comp/flatTop)
+      // so pegs only land on flat plate face (owner < 0 ⇒ no element → top at T).
+    }
+    // Platten-Ausrichtungs-Dübel: two through-holes in the bottom strip (y = H-4)
+    // punched into EVERY plate, plus printed dowel parts spanning the full stack.
+    // Gated on pinsOn. Spots computed once (pure, deterministic) before the plate loop.
+    // holeR reused from above: (diameterMm + clearanceMm) / 2.
+    const dowelR = (pinCfg.diameterMm || 3) / 2; // printed dowel radius (no clearance)
+    const dowelSpots = [];
+    if (pinsOn) {
+      const plateSdf = window.bodySdfMm(doc.body); // decorated SDF (includes Zierkante)
+      // Elements from ALL plates whose mode is plate or rim (not float) — for AABB check.
+      const aabbs = doc.elements.filter((el) => modeOf(el) !== "float").map((el) => window.elementAABB(el));
+      const edgeClear = holeR + 1.2;
+      const fieldClear = holeR + 0.8;
+      // AABB inflation: 1mm clearance measured from the printed dowel cylinder edge.
+      // Center must be at least (1 + dowelR) from any AABB face.
+      const aabbInflate = 1 + dowelR;
+      // Mount-hole clearance (only relevant when the back plate has a hanging hole).
+      const mountHole = (doc.mount && doc.mount.type === "hole") ? doc.mount : null;
+      const mountClear = mountHole ? holeR + mountHole.diameterMm / 2 + 1 : 0;
+      // Scan one row at yMm; return { yMm, xs: [...valid x values] } or null if none.
+      const scanRow = (yMm) => {
+        const rr = Math.round(yMm * sy - 0.5);
+        const xs = [];
+        for (let xMm = 6; xMm <= W - 6; xMm++) {
+          if (plateSdf(xMm, yMm) < edgeClear) continue;
+          const cc = Math.round(xMm * sx - 0.5);
+          if (f && f(cc, rr) > -fieldClear) continue;
+          let blocked = false;
+          for (const aabb of aabbs) {
+            if (xMm > aabb.x0 - aabbInflate && xMm < aabb.x1 + aabbInflate &&
+                yMm > aabb.y0 - aabbInflate && yMm < aabb.y1 + aabbInflate) {
+              blocked = true; break;
+            }
+          }
+          if (blocked) continue;
+          if (mountHole && Math.hypot(xMm - mountHole.xMm, yMm - mountHole.yMm) < mountClear) continue;
+          xs.push(xMm);
+        }
+        return xs.length ? { yMm, xs } : null;
+      };
+      // Try bottom strip first (hidden by stand pocket), fall back to top strip.
+      const row = scanRow(H - 4) || scanRow(4);
+      if (row) {
+        const { yMm: yUsed, xs } = row;
+        if (xs.length >= 2) {
+          // Pick the pair maximizing separation with min 20 mm apart.
+          let bestX1 = -1, bestX2 = -1, bestSep = -1;
+          for (let i = 0; i < xs.length; i++) {
+            for (let j = i + 1; j < xs.length; j++) {
+              const sep = xs[j] - xs[i];
+              if (sep >= 20 && sep > bestSep) { bestSep = sep; bestX1 = xs[i]; bestX2 = xs[j]; }
+            }
+          }
+          if (bestX1 >= 0) {
+            dowelSpots.push({ xMm: bestX1, yMm: yUsed });
+            dowelSpots.push({ xMm: bestX2, yMm: yUsed });
+          } else {
+            // No valid pair ≥ 20 mm apart → single dowel at the first valid x.
+            dowelSpots.push({ xMm: xs[0], yMm: yUsed });
+          }
+        } else {
+          dowelSpots.push({ xMm: xs[0], yMm: yUsed });
+        }
+      }
+      // If no valid x on either row: skip silently (dowelSpots stays empty).
+    }
+
+    // Rand-Wolken piece records collected during the plate loop (masks exist in-loop).
+    const randPieces = [];
+
+    let pegIdx = 0;
+    const pegParts = (spots, levelForName, color) => spots.map((sp) => {
+      const m = new Uint8Array(cols * rows);
+      window.__sbStampDisk(m, cols, rows, sx, sy, sp.xMm, sp.yMm, pegR, 1);
+      return { name: "ebene-" + (levelForName + 1) + "-stift-" + (++pegIdx),
+               color, facets: window.traceMaskToFacets((c, r) => m[r * cols + c] === 1, cols, rows, pitch, pegH, T) };
+    }).filter((p) => p.facets.length);
+
+    for (let k = 0; k < n; k++) {
+      const isBack = k === n - 1;
+      const dk = Object.assign({}, doc, {
+        body: Object.assign({}, doc.body, {
+          baseColor: colors[k],
+          frame: { widthMm: 0, heightMm: 2, color: "#000000" },   // v1: off on all plates
+          line: { mode: "none", insetMm: 2.5, widthMm: 0.8, depthMm: 0.6, count: 1, color: "#000000" },
+        }),
+        topLayerColor: null,
+        // back plate keeps a hanging hole; 'loop' (Öse) is not supported in v1
+        mount: (isBack && doc.mount && doc.mount.type === "hole") ? doc.mount : __SB_MOUNT_NONE,
+        elements: doc.elements.filter((el) => layerOf(el) === k && modeOf(el) === "plate"),
+        shadowbox: null,
+      });
+      const base = window.shapeFootprintField(cols, rows, dk.body, dk.mount);
+      let fp = base;
+      if (!isBack && f) {
+        // Adapted opening footprint: plate material where NOT openAt(k, c, r, 0).
+        // openAt(j, c, r, seam) := f > j*inset+seam AND all rims with level<=j have
+        // dC > B + (j-level)*inset + seam.
+        // Implemented as: fp = min(base, s * max(cutF, max_rims cutC))
+        //   cutF = k*inset - f(c,r)  (POSITIVE → outside the opening → plate MATERIAL)
+        //   cutC_rm = B + (k-rm.level)*inset - rm.dC[i]  (POSITIVE → inside the rim
+        //   protection zone → plate MATERIAL)
+        // A cell is hollow (open) only when ALL terms are <= 0; any positive
+        // term keeps it plate material — that is how a rim object grows its
+        // own plate and makes deeper rings wrap around it.
+        // Back plate: skip (isBack guard above keeps fp = base).
+        const insetK = k * inset;
+        const rimsAtOrBelow = rims.filter((rm) => rm.level <= k);
+        if (rimsAtOrBelow.length === 0) {
+          // No rim terms: same as old opening cut.
+          fp = (c, r) => Math.min(base(c, r), (insetK - f(c, r)) * s);
+        } else {
+          fp = (c, r) => {
+            const bv = base(c, r);
+            if (bv <= 0) return bv;
+            const i = r * cols + c;
+            let cut = insetK - f(c, r); // f-term (positive → plate material)
+            for (const rm of rimsAtOrBelow) {
+              const rimCut = B + (k - rm.level) * inset - rm.dC[i];
+              if (rimCut > cut) cut = rimCut;
+            }
+            return Math.min(bv, cut * s);
+          };
+        }
+      }
+      // Dowel through-holes: punch every plate's footprint at the two alignment spots.
+      // Uses the mount-hole min pattern: fp'' = min(fp', (hypot(x-hx, y-hy) - holeR) * s).
+      if (dowelSpots.length) {
+        const fpPrev = fp;
+        fp = (c, r) => {
+          let v = fpPrev(c, r);
+          if (v <= 0) return v;
+          const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
+          for (const ds of dowelSpots) v = Math.min(v, (Math.hypot(x - ds.xMm, y - ds.yMm) - holeR) * s);
+          return v;
+        };
+      }
+      // Collect rim masks for this plate (for rand prism pieces).
+      // The old 'over' union block is removed — the adapted fp above subsumes it.
+      const rimMasks = rims
+        .filter((rm) => rm.level === k)
+        .map((rm) => ({ el: rm.el, mask: rm.mask }));
+      const comp = composeDesignV2(dk, cols, rows, grid);
+      // fp is the adapted opening footprint for tunnel plates (base for the back plate).
+      // __contentParts clips all content to fp; rim objects extend plate material via
+      // the B-border cut term (no separate union needed).
+      const plateParts = __contentParts(dk, comp, grid, fp, null, null);
+
+      // flatTop: cells no element owns → plain plate face at exactly T. Used to
+      // restrict peg spots to flat surface (owner < 0 ⇒ no raised/engraved content).
+      const flatTop = new Uint8Array(cols * rows);
+      if (pinsOn) {
+        for (let i = 0; i < flatTop.length; i++) flatTop[i] = comp.owner[i] < 0 ? 1 : 0;
+      }
+      // Local helper: bitwise AND of two same-length Uint8Arrays.
+      const __andMasks = (a, b) => { const r = new Uint8Array(a.length); for (let i = 0; i < r.length; i++) r[i] = a[i] & b[i]; return r; };
+
+      // Rand-Wolken: compute clipped prism mask per rim element, collect as standalone
+      // piece records. Pegs (when pins on) land on flat cells of this plate
+      // (plateParts, after rename, before shift); hole spots travel with the piece
+      // record for emission later.
+      // Adapted prism clip: keep cell iff base > 0 AND (k===0 OR openAt(k-1, c, r, SEAM)).
+      // openAt(k-1,...): f > (k-1)*inset+seam AND all rims with level<=k-1 have
+      // dC > B + (k-1-rm.level)*inset + seam. A rim at level k never fires at k-1
+      // (level > k-1), so the object's own term never clips it here (correct).
+      const insetFront = (k - 1) * inset;
+      const rimsFront = f ? rims.filter((rm) => rm.level <= k - 1) : [];
+      const randPegsThisPlate = []; // buffered; appended after rename, before shift
+      for (const rm of rimMasks) {
+        const prismMask = new Uint8Array(cols * rows);
+        for (let i = 0; i < prismMask.length; i++) {
+          const c = i % cols, r = (i / cols) | 0;
+          if (!rm.mask[i] || base(c, r) <= 0) continue;
+          if (k !== 0 && f) {
+            // Must satisfy openAt(k-1): f term
+            if (f(c, r) <= insetFront + SEAM_CLEARANCE_MM) continue;
+            // Rim terms at levels <= k-1
+            let blocked = false;
+            for (const rr of rimsFront) {
+              if (rr.dC[i] <= B + (k - 1 - rr.level) * inset + SEAM_CLEARANCE_MM) { blocked = true; break; }
+            }
+            if (blocked) continue;
+          }
+          prismMask[i] = 1;
+        }
+        let holeSpots = [];
+        if (pinsOn) {
+          const spots = window.shadowboxPinSpots(__andMasks(prismMask, flatTop), cols, rows, sx, sy, holeR + 1.0, 12);
+          if (spots.length) {
+            holeSpots = spots;
+            randPegsThisPlate.push(...pegParts(spots, k, window.hexToRgb(colors[k])));
+          }
+        }
+        randPieces.push({ el: rm.el, level: k, mask: prismMask, kind: "rand", holeSpots });
+      }
+
+      for (const p of plateParts) p.name = "ebene-" + (k + 1) + "-" + p.name;
+      // Rand pegs: already named by pegParts, appended after rename, before shift so
+      // they travel with the plate as one unit (same pattern as back-plate pegs).
+      plateParts.push(...randPegsThisPlate);
+      // Back-plate pegs (Abstands-Zapfen): computed here (after comp/flatTop) so spots
+      // only land on flat plate top (owner < 0). Append after rename, before shift.
+      // Eligible: every float that is NOT the upper member of any float-float pin
+      // (i.e., the chain's deepest member). spacer = (n-2-level)*T extends the peg
+      // through intermediate slabs. Spots are constrained to the adapted open(n-2)
+      // region so the spacer shaft clears all traversed rings.
+      if (isBack && pinsOn) {
+        const hasFloatAbove = new Set(pinList.filter((p) => p.lower !== "back").map((p) => p.upper));
+        // openAt(n-2, SEAM) mask: cells where the opening is clear at the deepest tunnel level.
+        // Nested openings guarantee this is the tightest constraint for all traversed plates.
+        const insetBack = (n - 2) * inset;
+        const rimsForBack = f ? rims.filter((rm) => rm.level <= n - 2) : [];
+        const openN2 = new Uint8Array(cols * rows);
+        if (f) {
+          for (let i = 0; i < openN2.length; i++) {
+            const c = i % cols, r = (i / cols) | 0;
+            if (f(c, r) <= insetBack + SEAM_CLEARANCE_MM) continue;
+            let blocked = false;
+            for (const rm of rimsForBack) {
+              if (rm.dC[i] <= B + (n - 2 - rm.level) * inset + SEAM_CLEARANCE_MM) { blocked = true; break; }
+            }
+            if (!blocked) openN2[i] = 1;
+          }
+        } else {
+          openN2.fill(1);
+        }
+        const backColor = window.hexToRgb(colors[n - 1]);
+        for (const up of floats) {
+          if (hasFloatAbove.has(up)) continue;
+          const spacer = (n - 2 - up.level) * T;
+          const spotMask = __andMasks(__andMasks(up.mask, flatTop), openN2);
+          const spots = window.shadowboxPinSpots(spotMask, cols, rows, sx, sy, holeR + 1.0, 12);
+          if (spots.length) {
+            pinList.push({ lower: "back", upper: up, spots });
+            const pegHeight = spacer + pegH;
+            const spacerPegs = spots.map((sp) => {
+              const m = new Uint8Array(cols * rows);
+              window.__sbStampDisk(m, cols, rows, sx, sy, sp.xMm, sp.yMm, pegR, 1);
+              const facets = window.traceMaskToFacets((c, r) => m[r * cols + c] === 1, cols, rows, pitch, pegHeight, T);
+              return { name: "ebene-" + n + "-stift-" + (++pegIdx), color: backColor, facets };
+            }).filter((p) => p.facets.length);
+            plateParts.push(...spacerPegs);
+          }
+        }
+      }
+      if (layout === "stack") __shiftFacets(plateParts, 0, 0, (n - 1 - k) * (T + g));
+      else __shiftFacets(plateParts, k * (W + gapMm), 0, 0);
+      out.push(...plateParts);
+    }
+
+    const stand = window.buildStandParts(Object.assign({}, sb, { layers: n }), W, T);
+    if (stand.length) {
+      const dx = layout === "stack" ? W + 2 * gapMm : n * (W + gapMm) + gapMm;
+      out.push(...__shiftFacets(stand, dx, 0, 0));
+    }
+
+    // Emit dowel parts: printed alignment cylinders spanning the full stack.
+    // Stack: z = [0.3, stackH - 0.3] (0.3 mm recess per side; stretches with explode).
+    // stackH with explode = (n-1)*(T+g) + T (top of the front plate).
+    // Bed: standing cylinders placed in the pieces row via the bedX cursor.
+    // Stand-width term mirrors buildStandParts' L = (W + tol) + 2*rail
+    // (js/shadowbox.js) — keep the two in sync if the stand length ever changes.
+    const __stTol = sb.stand && sb.stand.tolMm != null ? sb.stand.tolMm : 0.4;
+    const __stRail = Math.max(2, (sb.stand && sb.stand.railMm) || 5);
+    let bedX = n * (W + gapMm) + gapMm + (stand.length ? (W + __stTol) + 2 * __stRail + gapMm : 0);
+    if (dowelSpots.length && layout !== "bed") {
+      const stackH = (n - 1) * (T + g) + T;
+      const dowelLen = stackH - 0.6; // 0.3 mm recess per side
+      const dowelColor = window.hexToRgb(sb.colorBack || "#1B5E9E");
+      for (let di = 0; di < dowelSpots.length; di++) {
+        const ds = dowelSpots[di];
+        const dm = new Uint8Array(cols * rows);
+        window.__sbStampDisk(dm, cols, rows, sx, sy, ds.xMm, ds.yMm, dowelR, 1);
+        const facets = window.traceMaskToFacets((c, r) => dm[r * cols + c] === 1, cols, rows, pitch, dowelLen, 0.3);
+        if (facets.length) out.push({ name: "duebel-" + (di + 1), color: dowelColor, facets });
+      }
+    }
+    if (dowelSpots.length && layout === "bed") {
+      const dowelLen = n * T - 0.6; // bed: total stack height without explode
+      const dowelColor = window.hexToRgb(sb.colorBack || "#1B5E9E");
+      for (let di = 0; di < dowelSpots.length; di++) {
+        const ds = dowelSpots[di];
+        const dm = new Uint8Array(cols * rows);
+        window.__sbStampDisk(dm, cols, rows, sx, sy, ds.xMm, ds.yMm, dowelR, 1);
+        const facets = window.traceMaskToFacets((c, r) => dm[r * cols + c] === 1, cols, rows, pitch, dowelLen, 0);
+        if (facets.length) {
+          const part = { name: "duebel-" + (di + 1), color: dowelColor, facets };
+          const bb = __maskBBoxMm(dm, cols, rows, sx, sy);
+          __shiftFacets([part], bedX - bb.x0, 0, 0);
+          out.push(part);
+          bedX += (bb.x1 - bb.x0) + gapMm;
+        }
+      }
+    }
+
+    // Emit floating pieces: one or two slab parts per element (split when holes
+    // are drilled), ordered by doc.elements index (M is 1-based over all floats).
+    // Pegs on the piece are appended before the shift so they travel with it.
+    let pieceIdx = 0;
+    for (const fl of floats) {
+      pieceIdx++;
+      const holeSpots = pinList.filter((p) => p.upper === fl).flatMap((p) => p.spots);
+      const baseName = "ebene-" + (fl.level + 1) + "-schwebeteil-" + pieceIdx;
+      const color = window.hexToRgb(fl.el.color || "#000000");
+      const pieceParts = [];
+      if (holeSpots.length) {
+        const bm = fl.mask.slice();
+        for (const sp of holeSpots) window.__sbStampDisk(bm, cols, rows, sx, sy, sp.xMm, sp.yMm, holeR, 0);
+        pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => bm[r * cols + c] === 1, cols, rows, pitch, holeDepth, 0) });
+        pieceParts.push({ name: baseName + "-oben", color, facets: window.traceMaskToFacets((c, r) => fl.mask[r * cols + c] === 1, cols, rows, pitch, T - holeDepth, holeDepth) });
+      } else {
+        pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => fl.mask[r * cols + c] === 1, cols, rows, pitch, T, 0) });
+      }
+      for (const pin of pinList) if (pin.lower === fl) pieceParts.push(...pegParts(pin.spots, fl.level, color));
+      const alive = pieceParts.filter((p) => p.facets.length);
+      if (!alive.length) continue;
+      if (layout === "stack") {
+        __shiftFacets(alive, 0, 0, (n - 1 - fl.level) * (T + g));
+      } else {
+        const bb = __maskBBoxMm(fl.mask, cols, rows, sx, sy);
+        __shiftFacets(alive, bedX - bb.x0, 0, 0);
+        bedX += (bb.x1 - bb.x0) + gapMm;
+      }
+      out.push(...alive);
+    }
+
+    // Emit rand (rim) pieces: standalone slabs in element color, one level forward
+    // of their plate. Holes drilled from underside when pegs were placed in-loop.
+    // M-counter is independent from schwebeteil's pieceIdx.
+    let randIdx = 0;
+    for (const rp of randPieces) {
+      const anySet = rp.mask.some((v) => v);
+      if (!anySet) continue;
+      randIdx++;
+      const baseName = "ebene-" + (rp.level + 1) + "-rand-" + randIdx;
+      const color = window.hexToRgb(rp.el.color || "#FFFFFF");
+      const pieceParts = [];
+      if (rp.holeSpots.length) {
+        const bm = rp.mask.slice();
+        for (const sp of rp.holeSpots) window.__sbStampDisk(bm, cols, rows, sx, sy, sp.xMm, sp.yMm, holeR, 0);
+        pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => bm[r * cols + c] === 1, cols, rows, pitch, holeDepth, 0) });
+        pieceParts.push({ name: baseName + "-oben", color, facets: window.traceMaskToFacets((c, r) => rp.mask[r * cols + c] === 1, cols, rows, pitch, T - holeDepth, holeDepth) });
+      } else {
+        pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => rp.mask[r * cols + c] === 1, cols, rows, pitch, T, 0) });
+      }
+      const alive = pieceParts.filter((p) => p.facets.length);
+      if (!alive.length) continue;
+      // Stack shift: one level forward of the plate (dz = (n-1-level)*(T+g) + T).
+      // The trailing +T is plain T — the rand cloud is pinned to its plate.
+      // Bed: flat at z=0, shifted right of all plates+stand+floats.
+      if (layout === "stack") {
+        __shiftFacets(alive, 0, 0, (n - 1 - rp.level) * (T + g) + T);
+      } else {
+        const bb = __maskBBoxMm(rp.mask, cols, rows, sx, sy);
+        __shiftFacets(alive, bedX - bb.x0, 0, 0);
+        bedX += (bb.x1 - bb.x0) + gapMm;
+      }
+      out.push(...alive);
+    }
+
+    return out;
   }
 
   // Zierlinie band mask (Uint8Array, 1 = line cell), or null when off. Cells
@@ -1466,9 +1996,94 @@
     };
   }
 
+  // 2D workbench opening contours adapted for rim objects.
+  // Mirrors shadowboxOpeningLoops (coarse grid, longest side 160) but composites the
+  // base opening field with rim silhouette distance terms — so each plate's contour
+  // wraps around any rim elements assigned to that plate or shallower layers.
+  // When no rim elements apply, delegates to shadowboxOpeningLoops for byte-identical output.
+  function shadowboxAdaptedOpeningLoops(doc, k) {
+    const body = doc.body;
+    const sb = doc.shadowbox;
+
+    // Coarse grid — mirrors shadowboxOpeningLoops exactly.
+    const RES = 160;
+    const W = body.widthMm, H = body.heightMm;
+    const long = Math.max(W, H);
+    const cols = Math.max(8, Math.round((W / long) * RES));
+    const rows = Math.max(8, Math.round((H / long) * RES));
+    const grid = { cols, rows, pitch: long / RES, x0: 0, y0: 0 };
+
+    // Inset — mirror engine normalization exactly.
+    const inset = Math.max(0.5, sb.insetPerLayerMm || 4);
+    // B — minimum border around a rim object on its own plate (same as engine).
+    const B = Math.max(2, inset);
+
+    const n = window.__sbClampLayers(sb.layers);
+    const layerOf = (el) => el.sbLayer == null ? n - 1 : Math.max(0, Math.min(n - 1, el.sbLayer | 0));
+    const modeOf = (el) => el.sbMode === "rim" || el.sbMode === "float" ? el.sbMode
+      : (el.sbMode == null && el.sbOverhang ? "rim" : "plate");
+
+    // Collect rim elements, skipping unloaded images and empty masks.
+    const rimEls = (doc.elements || []).filter((el) => {
+      if (modeOf(el) !== "rim") return false;
+      if (el.type === "image" && !el._img) return false;
+      return true;
+    });
+
+    // No rims at or above level k → delegate to base fn for byte-identical output.
+    const rimsForK = rimEls.filter((el) => layerOf(el) <= k);
+    if (rimsForK.length === 0) return window.shadowboxOpeningLoops(doc, k);
+
+    const f = window.shadowboxOpeningField(doc, grid);
+    if (!f) return [];
+
+    const sx = cols / W, sy = rows / H;
+    const pmm = (1 / sx + 1 / sy) / 2;
+
+    // Build coarse-grid dC fields for each applicable rim element.
+    // dC[i] = negative inside the silhouette, positive outside (mm from edge).
+    const dk0rim = Object.assign({}, doc, { shadowbox: null });
+    const rimData = [];
+    for (const el of rimsForK) {
+      const level = layerOf(el);
+      const rendered = __renderElementV2(el, dk0rim, cols, rows, grid);
+      if (!rendered || !rendered.mask) continue;
+      const mask = rendered.mask;
+      const inv = new Uint8Array(cols * rows);
+      for (let i = 0; i < inv.length; i++) inv[i] = mask[i] ? 0 : 1;
+      const dIn = window.__chamferDT(inv, cols, rows);   // inward distance
+      const dOut = window.__chamferDT(mask, cols, rows); // outward distance
+      const dC = new Float32Array(cols * rows);
+      for (let i = 0; i < dC.length; i++) {
+        dC[i] = mask[i] ? -dIn[i] * pmm : dOut[i] * pmm;
+      }
+      rimData.push({ level, dC });
+    }
+
+    if (rimData.length === 0) return window.shadowboxOpeningLoops(doc, k);
+
+    // Composite field: g = min(f - k*inset, min over rims of (dC - B - (k-level)*inset)).
+    const g = (c, r) => {
+      let v = f(c, r) - k * inset;
+      const i = r * cols + c;
+      for (const rm of rimData) {
+        const term = rm.dC[i] - B - (k - rm.level) * inset;
+        if (term < v) v = term;
+      }
+      return v;
+    };
+
+    return window.marchingSquaresLoops(g, cols, rows)
+      .filter((lp) => lp.length >= 3)
+      .map((lp) => lp.map(([c, r]) => ({ xMm: (c + 0.5) / sx, yMm: (r + 0.5) / sy })));
+  }
+
   window.freeFootprintField = freeFootprintField;
   window.imageFootprintField = imageFootprintField;
+  // Shared with js/shadowbox.js (drawn-opening signed field). Engine-internal.
+  window.__chamferDT = __chamferDT;
   // Test-only: expose __renderElementV2 so island-removal.test.js can inspect mask/r/g/b
   // directly without going through full buildParts. Not called by production code.
   window.__renderElementV2ForTest = __renderElementV2;
+  window.shadowboxAdaptedOpeningLoops = shadowboxAdaptedOpeningLoops;
 })();
