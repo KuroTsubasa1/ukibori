@@ -223,7 +223,7 @@ rim strip where the stand pocket hides them completely.
   `x ∈ [6, W-6]`): decorated plate SDF ≥ holeR + 1.2 (edge/Zierkante
   clearance); base opening field `f ≤ -(holeR + 0.8)` (inside every ring —
   adapted openings only shrink, so the base field suffices); clear of every
-  plate/rim element's rotated AABB (+1 mm) on any plate; clear of the back
+  plate/rim element's rotated AABB (1 mm gap from the dowel SURFACE, i.e. center clearance 1 + dowelR) on any plate; clear of the back
   plate's mount hole. Pick the two valid x maximizing separation (min
   20 mm); one valid x → single dowel; none → skip silently (documented).
 - **Dowels:** parts `duebel-1`/`duebel-2` (d = `pins.diameterMm`, color =
