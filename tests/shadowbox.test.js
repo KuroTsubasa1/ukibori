@@ -687,4 +687,41 @@
     assert(zTops.every((z) => Math.abs(z - (2 + 1.2)) < 1e-6),
       "only the short peg of the deepest member — no spacer peg for the pinned upper piece");
   });
+
+  test("schaukasten-v3: alignment dowels — holes in every plate, dowels span the stack", () => {
+    const d = sbDoc(); // 4 layers, T=2, margin 14, W=60 H=40
+    const withD = window.buildParts(d);
+    const dowels = withD.filter((p) => p.name.indexOf("duebel-") === 0);
+    assertEqual(dowels.length, 2, "two dowels");
+    const zb = zbounds(dowels.flatMap((p) => p.facets));
+    assertClose(zb[0], 0.3, 1e-6, "recessed at the back");
+    assertClose(zb[1], 4 * 2 - 0.3, 1e-6, "recessed at the front");
+    const off = JSON.parse(JSON.stringify(d)); off.shadowbox.pins.enabled = false;
+    const po = window.buildParts(window.migrateProject(off));
+    assert(!po.some((p) => p.name.indexOf("duebel-") === 0), "no dowels when pins off");
+    assert(JSON.stringify(po.filter((p) => /grundplatte/.test(p.name)))
+      !== JSON.stringify(withD.filter((p) => /grundplatte/.test(p.name))),
+      "holes really punched (plates differ vs pins off)");
+    // dowel centers sit in the bottom strip, hidden by the stand pocket
+    let sy = 0, cnt = 0;
+    for (const p of dowels) for (const f2 of p.facets) for (const v of f2) { sy += v[1]; cnt++; }
+    const yDoc = 40 - sy / cnt; // mesh y-up -> doc y-down
+    assertClose(yDoc, 40 - 4, 1.0, "bottom strip (y = H - 4)");
+  });
+
+  test("schaukasten-v3: dowel spots dodge elements; explode stretches the dowel", () => {
+    const d = sbDoc();
+    const blocker = window.makeElementV2("shape", { cxMm: 15, cyMm: 36, wMm: 22, hMm: 7, color: "#333333" });
+    d.elements.push(blocker); // sits on the back plate over the bottom-left strip
+    const parts = window.buildParts(d);
+    const dowels = parts.filter((p) => p.name.indexOf("duebel-") === 0);
+    assert(dowels.length >= 1, "dowels still placed");
+    let minX = Infinity;
+    for (const p of dowels) for (const f2 of p.facets) for (const v of f2) minX = Math.min(minX, v[0]);
+    assert(minX > 15 + 11 + 1 - 1e-6, "spots cleared the blocker's inflated AABB");
+    const ex = window.buildParts(sbDoc(), { explodeMm: 5 });
+    const exD = ex.filter((p) => p.name.indexOf("duebel-") === 0);
+    assertClose(zbounds(exD.flatMap((p) => p.facets))[1], (4 - 1) * (2 + 5) + 2 - 0.3, 1e-6,
+      "dowel stretches with the exploded stack");
+  });
 })();

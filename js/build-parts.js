@@ -1009,6 +1009,72 @@
       // Back-plate back-anchor spots are deferred into the plate loop (after comp/flatTop)
       // so pegs only land on flat plate face (owner < 0 ⇒ no element → top at T).
     }
+    // Platten-Ausrichtungs-Dübel: two through-holes in the bottom strip (y = H-4)
+    // punched into EVERY plate, plus printed dowel parts spanning the full stack.
+    // Gated on pinsOn. Spots computed once (pure, deterministic) before the plate loop.
+    // holeR reused from above: (diameterMm + clearanceMm) / 2.
+    const dowelR = (pinCfg.diameterMm || 3) / 2; // printed dowel radius (no clearance)
+    const dowelSpots = [];
+    if (pinsOn) {
+      const plateSdf = window.bodySdfMm(doc.body); // decorated SDF (includes Zierkante)
+      // Elements from ALL plates whose mode is plate or rim (not float) — for AABB check.
+      const aabbs = doc.elements.filter((el) => modeOf(el) !== "float").map((el) => window.elementAABB(el));
+      const edgeClear = holeR + 1.2;
+      const fieldClear = holeR + 0.8;
+      // AABB inflation: 1mm clearance measured from the printed dowel cylinder edge.
+      // Center must be at least (1 + dowelR) from any AABB face.
+      const aabbInflate = 1 + dowelR;
+      // Mount-hole clearance (only relevant when the back plate has a hanging hole).
+      const mountHole = (doc.mount && doc.mount.type === "hole") ? doc.mount : null;
+      const mountClear = mountHole ? holeR + mountHole.diameterMm / 2 + 1 : 0;
+      // Scan one row at yMm; return { yMm, xs: [...valid x values] } or null if none.
+      const scanRow = (yMm) => {
+        const rr = Math.round(yMm * sy - 0.5);
+        const xs = [];
+        for (let xMm = 6; xMm <= W - 6; xMm++) {
+          if (plateSdf(xMm, yMm) < edgeClear) continue;
+          const cc = Math.round(xMm * sx - 0.5);
+          if (f && f(cc, rr) > -fieldClear) continue;
+          let blocked = false;
+          for (const aabb of aabbs) {
+            if (xMm > aabb.x0 - aabbInflate && xMm < aabb.x1 + aabbInflate &&
+                yMm > aabb.y0 - aabbInflate && yMm < aabb.y1 + aabbInflate) {
+              blocked = true; break;
+            }
+          }
+          if (blocked) continue;
+          if (mountHole && Math.hypot(xMm - mountHole.xMm, yMm - mountHole.yMm) < mountClear) continue;
+          xs.push(xMm);
+        }
+        return xs.length ? { yMm, xs } : null;
+      };
+      // Try bottom strip first (hidden by stand pocket), fall back to top strip.
+      const row = scanRow(H - 4) || scanRow(4);
+      if (row) {
+        const { yMm: yUsed, xs } = row;
+        if (xs.length >= 2) {
+          // Pick the pair maximizing separation with min 20 mm apart.
+          let bestX1 = -1, bestX2 = -1, bestSep = -1;
+          for (let i = 0; i < xs.length; i++) {
+            for (let j = i + 1; j < xs.length; j++) {
+              const sep = xs[j] - xs[i];
+              if (sep >= 20 && sep > bestSep) { bestSep = sep; bestX1 = xs[i]; bestX2 = xs[j]; }
+            }
+          }
+          if (bestX1 >= 0) {
+            dowelSpots.push({ xMm: bestX1, yMm: yUsed });
+            dowelSpots.push({ xMm: bestX2, yMm: yUsed });
+          } else {
+            // No valid pair ≥ 20 mm apart → single dowel at the first valid x.
+            dowelSpots.push({ xMm: xs[0], yMm: yUsed });
+          }
+        } else {
+          dowelSpots.push({ xMm: xs[0], yMm: yUsed });
+        }
+      }
+      // If no valid x on either row: skip silently (dowelSpots stays empty).
+    }
+
     // Rand-Wolken piece records collected during the plate loop (masks exist in-loop).
     const randPieces = [];
 
@@ -1066,6 +1132,18 @@
             return Math.min(bv, cut * s);
           };
         }
+      }
+      // Dowel through-holes: punch every plate's footprint at the two alignment spots.
+      // Uses the mount-hole min pattern: fp'' = min(fp', (hypot(x-hx, y-hy) - holeR) * s).
+      if (dowelSpots.length) {
+        const fpPrev = fp;
+        fp = (c, r) => {
+          let v = fpPrev(c, r);
+          if (v <= 0) return v;
+          const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
+          for (const ds of dowelSpots) v = Math.min(v, (Math.hypot(x - ds.xMm, y - ds.yMm) - holeR) * s);
+          return v;
+        };
       }
       // Collect rim masks for this plate (for rand prism pieces).
       // The old 'over' union block is removed — the adapted fp above subsumes it.
@@ -1186,14 +1264,48 @@
       out.push(...__shiftFacets(stand, dx, 0, 0));
     }
 
-    // Emit floating pieces: one or two slab parts per element (split when holes
-    // are drilled), ordered by doc.elements index (M is 1-based over all floats).
-    // Pegs on the piece are appended before the shift so they travel with it.
+    // Emit dowel parts: printed alignment cylinders spanning the full stack.
+    // Stack: z = [0.3, stackH - 0.3] (0.3 mm recess per side; stretches with explode).
+    // stackH with explode = (n-1)*(T+g) + T (top of the front plate).
+    // Bed: standing cylinders placed in the pieces row via the bedX cursor.
     // Stand-width term mirrors buildStandParts' L = (W + tol) + 2*rail
     // (js/shadowbox.js) — keep the two in sync if the stand length ever changes.
     const __stTol = sb.stand && sb.stand.tolMm != null ? sb.stand.tolMm : 0.4;
     const __stRail = Math.max(2, (sb.stand && sb.stand.railMm) || 5);
     let bedX = n * (W + gapMm) + gapMm + (stand.length ? (W + __stTol) + 2 * __stRail + gapMm : 0);
+    if (dowelSpots.length && layout !== "bed") {
+      const stackH = (n - 1) * (T + g) + T;
+      const dowelLen = stackH - 0.6; // 0.3 mm recess per side
+      const dowelColor = window.hexToRgb(sb.colorBack || "#1B5E9E");
+      for (let di = 0; di < dowelSpots.length; di++) {
+        const ds = dowelSpots[di];
+        const dm = new Uint8Array(cols * rows);
+        window.__sbStampDisk(dm, cols, rows, sx, sy, ds.xMm, ds.yMm, dowelR, 1);
+        const facets = window.traceMaskToFacets((c, r) => dm[r * cols + c] === 1, cols, rows, pitch, dowelLen, 0.3);
+        if (facets.length) out.push({ name: "duebel-" + (di + 1), color: dowelColor, facets });
+      }
+    }
+    if (dowelSpots.length && layout === "bed") {
+      const dowelLen = n * T - 0.6; // bed: total stack height without explode
+      const dowelColor = window.hexToRgb(sb.colorBack || "#1B5E9E");
+      for (let di = 0; di < dowelSpots.length; di++) {
+        const ds = dowelSpots[di];
+        const dm = new Uint8Array(cols * rows);
+        window.__sbStampDisk(dm, cols, rows, sx, sy, ds.xMm, ds.yMm, dowelR, 1);
+        const facets = window.traceMaskToFacets((c, r) => dm[r * cols + c] === 1, cols, rows, pitch, dowelLen, 0);
+        if (facets.length) {
+          const part = { name: "duebel-" + (di + 1), color: dowelColor, facets };
+          const bb = __maskBBoxMm(dm, cols, rows, sx, sy);
+          __shiftFacets([part], bedX - bb.x0, 0, 0);
+          out.push(part);
+          bedX += (bb.x1 - bb.x0) + gapMm;
+        }
+      }
+    }
+
+    // Emit floating pieces: one or two slab parts per element (split when holes
+    // are drilled), ordered by doc.elements index (M is 1-based over all floats).
+    // Pegs on the piece are appended before the shift so they travel with it.
     let pieceIdx = 0;
     for (const fl of floats) {
       pieceIdx++;
