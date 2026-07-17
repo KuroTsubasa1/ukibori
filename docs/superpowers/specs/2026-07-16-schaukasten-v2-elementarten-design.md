@@ -233,3 +233,36 @@ rim strip where the stand pocket hides them completely.
   cylinders in the pieces row.
 - **Toggle:** rides `pins.enabled` (Montagestifte) — no new UI.
 - Parity: pins off → no holes, no dowels (differential-tested).
+
+---
+
+## Addendum 4 (2026-07-17): Vollfarbe auf Schwebeteilen
+
+User request: "get the full color mode working with the shadowbox". Plate
+content is already fully multi-color; the gap is the pieces — floats render
+as flat single-color silhouettes regardless of the element's Tiefenmodus.
+
+- **Float pieces become mini-plates**: base slab `[0,T]` in `el.color` with
+  the pin holes exactly as today, PLUS the element's own RAISED content on
+  the piece face when `depth.mode` is `colorLayers` or `heightmap`: derived
+  per-piece doc `dp = {…doc, topLayerColor: null, elements: [el],
+  shadowbox: null}`, `comp_p = composeDesignV2(dp, …)`, content =
+  `buildRaisedParts(dp, fpPiece, comp_p, grid, null)` +
+  `buildHeightmapParts(dp, fpPiece, grid, null)` with `fpPiece` = the
+  piece mask as a cell field. Content parts are prefixed with the piece
+  name (`ebene-(level+1)-schwebeteil-M-<name>`) and ride the piece through
+  the same shift (stack/bed/explode). AMS palette, colorStepLayers and
+  autoLayerHeights inherit from the doc — the Farbebenen look matches
+  plate content.
+- **Solid mode unchanged** (flat slab — running the content pass would
+  double the silhouette as a full-face prism). **Engraved direction on
+  pieces falls back to the flat silhouette** (at typical piece thickness
+  the engrave budget is ~0.4 mm; documented limitation).
+- **Pins**: a piece with raised content only accepts pegs/holes on its FLAT
+  cells — piece-level flat-top mask (`comp_p.owner < 0`) intersected into
+  the pin spot masks wherever this piece is a pin partner (upper or lower).
+  Physical stacking on raised regions remains user-controlled placement
+  (visible in 3D), consistent with the same-slab collision stance.
+- **Rand pieces stay flat** in v1 (the sample's clouds are mono-color; raised
+  content on a rand piece would poke a second level forward and need another
+  clip family). Documented.
