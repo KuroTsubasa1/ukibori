@@ -118,7 +118,7 @@ function defaultShadowbox() {
     opening: { source: "auto", marginMm: 12, waviness: 0.5, periodMm: 40, seed: 1, points: null },
     colorFront: "#DDEEFA",
     colorBack: "#1B5E9E",
-    stand: { enabled: true, heightMm: 15, slotDepthMm: 8, railMm: 5, tolMm: 0.4, color: "#C8BBAE" },
+    stand: { enabled: true, heightMm: 15, slotDepthMm: 8, railMm: 5, tolMm: 0.4, color: "#C8BBAE", cornerRadiusMm: 3 },
     pins: { enabled: true, diameterMm: 3, clearanceMm: 0.35 },
   };
 }
@@ -217,6 +217,7 @@ function migrateProject(doc) {
       if (doc.shadowbox.opening == null) doc.shadowbox.opening = sd.opening;
       if (doc.shadowbox.stand == null) doc.shadowbox.stand = sd.stand;
       if (doc.shadowbox.pins == null) doc.shadowbox.pins = sd.pins;
+      if (doc.shadowbox.stand.cornerRadiusMm == null) doc.shadowbox.stand.cornerRadiusMm = 0;
     }
     if (!Array.isArray(doc.groups)) doc.groups = [];
     for (const el of doc.elements || []) {

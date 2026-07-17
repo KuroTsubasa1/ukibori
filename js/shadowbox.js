@@ -149,9 +149,32 @@
       .map((lp) => lp.map(([c, r]) => ({ xMm: (c + 0.5) / sx, yMm: (r + 0.5) / sy })));
   }
 
+  // Rounded-rectangle loop CCW in y-up mesh space. r=0 degenerates to a plain
+  // 4-point rect. segs = number of arc segments per corner.
+  function roundedRectLoop(x0, y0, x1, y1, r, segs) {
+    if (segs == null) segs = 8;
+    r = r > 0 ? r : 0;
+    if (r <= 0) return [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+    const pts = [];
+    // CCW: bottom-left -> bottom-right -> top-right -> top-left
+    const corners = [
+      { cx: x0 + r, cy: y0 + r, a0: Math.PI,       a1: Math.PI * 1.5 }, // bottom-left
+      { cx: x1 - r, cy: y0 + r, a0: Math.PI * 1.5, a1: Math.PI * 2   }, // bottom-right
+      { cx: x1 - r, cy: y1 - r, a0: 0,              a1: Math.PI * 0.5 }, // top-right
+      { cx: x0 + r, cy: y1 - r, a0: Math.PI * 0.5, a1: Math.PI       }, // top-left
+    ];
+    for (const { cx, cy, a0, a1 } of corners) {
+      for (let i = 0; i <= segs; i++) {
+        const a = a0 + (a1 - a0) * i / segs;
+        pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+      }
+    }
+    return pts;
+  }
+
   // Printed stand: upright as used (slot opens upward -> zero overhangs).
-  // Five separate manifold boxes — sockel, vorne/hinten rails full-length, plus
-  // links/rechts end caps that close the pocket so the plate cannot slide sideways.
+  // Two manifold parts — sockel (rounded-rect slab) and wand (collar ring with
+  // sharp pocket hole), replacing the old five-wall construction.
   function buildStandParts(sb, plateWidthMm, thicknessMm) {
     const st = sb.stand || {};
     if (!st.enabled || !(thicknessMm > 0) || !(plateWidthMm > 0)) return [];
@@ -165,16 +188,19 @@
     const L = pocketL + 2 * rail;
     const D = 2 * rail + slotW;
     const color = window.hexToRgb(st.color || "#C8BBAE");
-    const rect = (x0, y0, x1, y1) => [[[x0, y0], [x1, y0], [x1, y1], [x0, y1]]];
+    // Clamp corner radius: must not exceed rail width or half-depth minus clearance.
+    const r = Math.max(0, Math.min(st.cornerRadiusMm != null ? st.cornerRadiusMm : 0, rail, D / 2 - 0.5));
+    // Outer CCW loop (rounded or plain rect)
+    const outerLoop = roundedRectLoop(0, 0, L, D, r);
+    // Pocket rect wound CW (negative area = hole for extrudeLoops)
+    // CW = reverse of CCW: go x0->x0->x1->x1 in reverse y order
+    const pocketRectCW = [[rail, rail + slotW], [L - rail, rail + slotW], [L - rail, rail], [rail, rail]];
     const mk = (name, loops, th, z0) => ({
       name, color, facets: window.extrudeLoops(loops, th, z0),
     });
     return [
-      mk("staender-sockel", rect(0, 0, L, D), H - slotDepth, 0),
-      mk("staender-wand-vorne", rect(0, 0, L, rail), slotDepth, H - slotDepth),
-      mk("staender-wand-hinten", rect(0, rail + slotW, L, D), slotDepth, H - slotDepth),
-      mk("staender-wand-links", rect(0, rail, rail, rail + slotW), slotDepth, H - slotDepth),
-      mk("staender-wand-rechts", rect(L - rail, rail, L, rail + slotW), slotDepth, H - slotDepth),
+      mk("staender-sockel", [outerLoop], H - slotDepth, 0),
+      mk("staender-wand", [outerLoop, pocketRectCW], slotDepth, H - slotDepth),
     ];
   }
 
