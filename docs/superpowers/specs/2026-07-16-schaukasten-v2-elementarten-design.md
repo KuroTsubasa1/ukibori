@@ -270,3 +270,33 @@ as flat single-color silhouettes regardless of the element's Tiefenmodus.
 - **Rand pieces stay flat** in v1 (the sample's clouds are mono-color; raised
   content on a rand piece would poke a second level forward and need another
   clip family). Documented.
+
+---
+
+## Addendum 5 (2026-07-17): Ständer-Kantenrundung
+
+User request: a setting for the stand's corner rounding.
+
+- **Model:** `sb.stand.cornerRadiusMm` — new docs default **3**; migration
+  backfills **0** for existing saves (house pattern: geometry-changing
+  additions arrive OFF for old docs, like autoLayerHeights). Builder clamp:
+  `r = max(0, min(cornerRadiusMm, railMm, D/2 - 0.5))` (radius beyond the
+  rail width would cut into the pocket).
+- **Geometry restructure (required for correct rounding):** the stand
+  becomes TWO parts instead of five —
+  - `staender-sockel`: rounded-rect slab (plan view L×D, radius r),
+    z `[0, H - slotDepth]`;
+  - `staender-wand`: ONE collar ring, z `[H - slotDepth, H]` — outer loop =
+    the same rounded rect (CCW), inner loop = the sharp pocket rect (CW
+    hole; `extrudeLoops` supports holes natively). Four separate wall boxes
+    cannot follow a rounded outline at the seams.
+  `roundedRectLoop(x0,y0,x1,y1,r, 8 segments/corner)` helper in
+  js/shadowbox.js; r = 0 degenerates to the sharp rect (same outline as
+  today, but the part STRUCTURE is now always sockel + wand — the stand
+  tests are updated: slot geometry asserted via the wand's pocket-edge
+  vertex lines y = rail and y = rail + slotW).
+- **UI:** the Ständer row gains a labeled two-column pair „Höhe (mm)" /
+  „Rundung (mm)" (`#sbStandHeight` keeps its id; new `#sbStandRadius`,
+  0–8, step 0.5), synced like the other stand controls.
+- Bed cursor unchanged (L unaffected). Pocket stays sharp (plates have
+  their own corner radius; pocket-corner voids don't affect fit).
