@@ -984,7 +984,15 @@
           }
           if (!blocked) mask[i] = 1;
         }
-        floats.push({ el, level, mask });
+        // Compute per-piece design doc + composition for content pass (colorLayers/heightmap raised).
+        // Cached here so pin-spot flat-mask derivation reuses the same compP without re-running.
+        let compP = null;
+        const d = el.depth;
+        if (d && d.direction !== "engraved" && (d.mode === "colorLayers" || d.mode === "heightmap")) {
+          const dp = Object.assign({}, doc, { topLayerColor: null, elements: [el], shadowbox: null });
+          compP = composeDesignV2(dp, cols, rows, grid);
+        }
+        floats.push({ el, level, mask, compP });
       }
     }
 
@@ -1003,7 +1011,24 @@
         let any = false;
         for (let i = 0; i < overlap.length; i++) if (lo.mask[i] && up.mask[i]) { overlap[i] = 1; any = true; }
         if (!any) continue;
-        const spots = window.shadowboxPinSpots(overlap, cols, rows, sx, sy, holeR + 1.0, 12);
+        // Intersect flat-top masks: peg base on lower face must be flat; hole in upper underside
+        // must not pierce raised content. Both constraints intersected for correctness.
+        let spotMask = overlap;
+        if (lo.compP) {
+          const loFlat = new Uint8Array(cols * rows);
+          for (let i = 0; i < loFlat.length; i++) loFlat[i] = lo.compP.owner[i] < 0 ? 1 : 0;
+          const m = new Uint8Array(cols * rows);
+          for (let i = 0; i < m.length; i++) m[i] = spotMask[i] & loFlat[i];
+          spotMask = m;
+        }
+        if (up.compP) {
+          const upFlat = new Uint8Array(cols * rows);
+          for (let i = 0; i < upFlat.length; i++) upFlat[i] = up.compP.owner[i] < 0 ? 1 : 0;
+          const m = new Uint8Array(cols * rows);
+          for (let i = 0; i < m.length; i++) m[i] = spotMask[i] & upFlat[i];
+          spotMask = m;
+        }
+        const spots = window.shadowboxPinSpots(spotMask, cols, rows, sx, sy, holeR + 1.0, 12);
         if (spots.length) pinList.push({ lower: lo, upper: up, spots });
       }
       // Back-plate back-anchor spots are deferred into the plate loop (after comp/flatTop)
@@ -1238,7 +1263,13 @@
         for (const up of floats) {
           if (hasFloatAbove.has(up)) continue;
           const spacer = (n - 2 - up.level) * T;
-          const spotMask = __andMasks(__andMasks(up.mask, flatTop), openN2);
+          // Additionally intersect the piece's flat-top mask: hole must not pierce raised content.
+          const upFlatMask = up.compP
+            ? (() => { const m = new Uint8Array(cols * rows); for (let i = 0; i < m.length; i++) m[i] = up.compP.owner[i] < 0 ? 1 : 0; return m; })()
+            : null;
+          const spotMask = upFlatMask
+            ? __andMasks(__andMasks(__andMasks(up.mask, flatTop), openN2), upFlatMask)
+            : __andMasks(__andMasks(up.mask, flatTop), openN2);
           const spots = window.shadowboxPinSpots(spotMask, cols, rows, sx, sy, holeR + 1.0, 12);
           if (spots.length) {
             pinList.push({ lower: "back", upper: up, spots });
@@ -1322,6 +1353,20 @@
         pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => fl.mask[r * cols + c] === 1, cols, rows, pitch, T, 0) });
       }
       for (const pin of pinList) if (pin.lower === fl) pieceParts.push(...pegParts(pin.spots, fl.level, color));
+      // Content pass: raised colorLayers / heightmap on the piece face.
+      // Emits BEFORE the shift so the content rides stack/bed/explode with the piece.
+      if (fl.compP) {
+        const dp = Object.assign({}, doc, { topLayerColor: null, elements: [fl.el], shadowbox: null });
+        const fpPiece = (c, r) => fl.mask[r * cols + c] ? 0.5 : -1;
+        const contentParts = [
+          ...buildRaisedParts(dp, fpPiece, fl.compP, grid, null),
+          ...buildHeightmapParts(dp, fpPiece, grid, null),
+        ];
+        for (const p of contentParts) {
+          p.name = baseName + "-" + p.name;
+          pieceParts.push(p);
+        }
+      }
       const alive = pieceParts.filter((p) => p.facets.length);
       if (!alive.length) continue;
       if (layout === "stack") {

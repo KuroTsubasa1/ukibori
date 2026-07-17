@@ -724,4 +724,51 @@
     assertClose(zbounds(exD.flatMap((p) => p.facets))[1], (4 - 1) * (2 + 5) + 2 - 0.3, 1e-6,
       "dowel stretches with the exploded stack");
   });
+
+  test("schaukasten-v3: colorLayers float renders raised content on the piece", () => {
+    const d = sbDoc(); // 4 layers, T=2
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 12;
+    const fl = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 12, hMm: 8, color: "#FF0000" });
+    fl.sbLayer = 2; fl.sbMode = "float";
+    fl.depth.mode = "colorLayers"; fl.depth.direction = "raised";
+    d.elements.push(fl);
+    const parts = window.buildParts(d);
+    const content = parts.filter((p) => /^ebene-3-schwebeteil-1-/.test(p.name));
+    assert(content.length >= 1, "raised content part exists on the piece");
+    const zb = zbounds(content.flatMap((p) => p.facets));
+    // piece slab (level 2 of 4) sits at [2,4]; content rises above its face
+    assert(zb[0] >= 4 - 1e-6, "content starts at the piece face");
+    assert(zb[1] > 4 + 1e-6, "content rises above the face");
+    const slab = parts.filter((p) => p.name === "ebene-3-schwebeteil-1" || /^ebene-3-schwebeteil-1-oben$/.test(p.name));
+    assert(slab.length >= 1, "base slab still emitted");
+  });
+
+  test("schaukasten-v3: solid float stays flat; engraved falls back to flat", () => {
+    const mk = (mode, dir) => {
+      const d = sbDoc();
+      d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 12;
+      const fl = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 12, hMm: 8, color: "#FF0000" });
+      fl.sbLayer = 2; fl.sbMode = "float";
+      fl.depth.mode = mode; fl.depth.direction = dir;
+      d.elements.push(fl);
+      return window.buildParts(d).filter((p) => /^ebene-3-schwebeteil-1-/.test(p.name) && !/-oben$/.test(p.name));
+    };
+    assertEqual(mk("solid", "raised").length, 0, "solid: no extra content parts");
+    assertEqual(mk("colorLayers", "engraved").length, 0, "engraved: flat fallback");
+  });
+
+  test("schaukasten-v3: pegs avoid a piece's raised content", () => {
+    const d = sbDoc();
+    d.shadowbox.layers = 5;
+    d.shadowbox.opening.waviness = 0; d.shadowbox.opening.marginMm = 6; d.shadowbox.insetPerLayerMm = 2;
+    const lo = window.makeElementV2("shape", { cxMm: 30, cyMm: 20, wMm: 18, hMm: 12, color: "#00AA00" });
+    lo.sbLayer = 3; lo.sbMode = "float";
+    lo.depth.mode = "colorLayers"; lo.depth.direction = "raised"; // whole face raised -> no flat cells
+    const up = window.makeElementV2("shape", { cxMm: 33, cyMm: 20, wMm: 14, hMm: 10, color: "#FF7700" });
+    up.sbLayer = 2; up.sbMode = "float";
+    d.elements.push(lo, up);
+    const parts = window.buildParts(d);
+    assert(!parts.some((p) => p.name.indexOf("ebene-4-stift-") === 0),
+      "no peg on a fully raised piece face");
+  });
 })();
