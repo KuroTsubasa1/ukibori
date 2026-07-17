@@ -204,3 +204,32 @@ and every deeper plate (j ≥ k):
 
 The object itself stays a separate printed piece one level forward
 `[T, 2T]` with pegs on the plate extension and blind holes underneath.
+
+---
+
+## Addendum 3 (2026-07-17): Platten-Ausrichtung — Dübel durch den Stapel
+
+User request: alignment pins/holes for the LAYERS themselves.
+
+Design: two printed dowels through the whole stack instead of per-joint
+peg/hole pairs — registers ALL plates simultaneously, avoids slicing the
+parity-locked plate solids for blind holes, and the holes sit in the bottom
+rim strip where the stand pocket hides them completely.
+
+- **Holes:** two through-holes (d = `pins.diameterMm + clearanceMm`) punched
+  into EVERY plate via the footprint (the mount-hole pattern), at
+  `y = H - 4 mm` (bottom strip; fallback `y = 4 mm` top strip when the bottom
+  yields no valid spots). Valid x positions (deterministic 1 mm scan,
+  `x ∈ [6, W-6]`): decorated plate SDF ≥ holeR + 1.2 (edge/Zierkante
+  clearance); base opening field `f ≤ -(holeR + 0.8)` (inside every ring —
+  adapted openings only shrink, so the base field suffices); clear of every
+  plate/rim element's rotated AABB (+1 mm) on any plate; clear of the back
+  plate's mount hole. Pick the two valid x maximizing separation (min
+  20 mm); one valid x → single dowel; none → skip silently (documented).
+- **Dowels:** parts `duebel-1`/`duebel-2` (d = `pins.diameterMm`, color =
+  colorBack). Length `stackH - 0.6` (0.3 mm recessed per side; stack layout:
+  z `[0.3, stackH-0.3]` at the hole xy; with Explosion the length stretches
+  to the exploded stack — reads as the alignment axis). Bed layout: standing
+  cylinders in the pieces row.
+- **Toggle:** rides `pins.enabled` (Montagestifte) — no new UI.
+- Parity: pins off → no holes, no dowels (differential-tested).
