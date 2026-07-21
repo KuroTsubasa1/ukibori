@@ -168,4 +168,46 @@
     assertEqual(partsJson(buildParts(mk())), partsJson(buildParts(mk())),
       "non-AMS engraved build is deterministic / unchanged");
   });
+
+  test("hidden bands element does NOT suppress plate banding (pre-scan counts only present pixels)", async () => {
+    // The bands pre-scan counts only bands-style elements with >=1 PRESENT pixel, so a
+    // hidden (or empty / fully-overlapped) bands element no longer inflates bandsElemCount to
+    // force the ambiguous multi-element fallback. With NO amsPalette, ONE effective bands
+    // element (bandsElemCount === 1) → the plate IS banded to that element's own palette and
+    // its motif floors align to the plan (floor top == plate band top for each color).
+    // The hidden element is ALSO fully overlapped by the visible one (rendered later, so it
+    // wins), so it contributes no present pixels regardless of how a raw doc treats _hidden.
+    const cv = document.createElement("canvas"); cv.width = 24; cv.height = 24;
+    const c2 = cv.getContext("2d");
+    c2.fillStyle = "#111111"; c2.fillRect(0, 0, 12, 24);   // darker → plan index 0 (band 1, top at T)
+    c2.fillStyle = "#CC3333"; c2.fillRect(12, 0, 12, 24);  // lighter → plan index 1 (band 2)
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = cv.toDataURL("image/png"); });
+    const bandsEl = (wMm) => {
+      const el = makeElementV2("image", { src: "a", cxMm: 20, cyMm: 20, wMm, hMm: wMm });
+      el.depth.direction = "engraved"; el.depth.mode = "colorLayers"; el.depth.colorLayerStyle = "bands";
+      el.depth.reduce = { method: "palette", numColors: 8, levels: 4, remap: {}, order: [] };
+      el._img = img;
+      return el;
+    };
+    const d = reproDoc();
+    d.autoLayerHeights = false; d.amsPalette = [];          // no shared palette → single-element plan
+    const hidden = bandsEl(12); hidden._hidden = true;      // hidden AND fully covered by `visible`
+    const visible = bandsEl(16);
+    d.elements = [hidden, visible];                          // `visible` renders last → wins the overlap
+    const parts = buildParts(d);
+
+    // The plate is STILL banded — the hidden/overlapped element didn't force the fallback.
+    const plateBands = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0);
+    assert(plateBands.length >= 2, "plate is banded despite the hidden bands element (" + plateBands.length + " bands)");
+
+    // The visible element's motif floors are plan-aligned: floor top == plate band top per color.
+    for (const hex of ["#111111", "#CC3333"]) {
+      const floor = parts.filter(p => p.name.indexOf("farbe-") === 0 && colorIs(p, hex));
+      const band = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0 && colorIs(p, hex));
+      assert(floor.length >= 1 && band.length >= 1, "floor + band present for " + hex);
+      assertClose(Math.max(...floor.map(zTop)), Math.max(...band.map(zTop)), 1e-6,
+        "motif floor top == plate band top for " + hex);
+    }
+  });
 })();

@@ -402,8 +402,9 @@
   // Engraved carve budget: color-floor slab thickness, solid base under the deepest
   // recess (user body.baseThicknessMm override, clamped to leave room for a color
   // floor, else auto-derived from the overall thickness), and the recess depth left
-  // for color floors. Shared by __engravedBaseAndFloors and the auto-layer-height
-  // preview (window.autoSolidHeightMm) so both see the same numbers.
+  // for color floors. Feeds both __amsEngravedPlan (the shared layer plan, via minBase)
+  // and the classic per-element compression fallback (via maxRecess), used by the build
+  // and by the auto-layer-height preview (window.autoSolidHeightMm) alike.
   function __engravedBudget(body) {
     const T = body.thicknessMm, layerH = body.layerHeightMm;
     const floor = Math.min(2 * layerH, T);
@@ -508,6 +509,79 @@
     return out;
   }
 
+  // --- Shared engraved layer plan (AMS layer alignment, 2026-07-22) ------------
+  // The single ordered color→z-band plan that the plate/Öse bands AND the engraved
+  // motif floors both carve to (spec docs/…/2026-07-22-ams-layer-alignment-design.md).
+  // This is the ONE source of truth for `bandHexes`, the grid-snapped `bandThick`, and
+  // `recessOf(hex)` (= planIndex*bandThick, null when the color is not in the plan).
+  // Both __engravedBaseAndFloors (the build) and window.autoSolidHeightMm (the editor
+  // "Höhe je Farbe" badge) call it, so the previewed depth matches the carved depth.
+  //
+  // `preScan` = { bandHexSet, bandsElemCount } comes from the build's pixel-level scan of
+  // the special `bands` elements (which colors are actually present). The badge has no
+  // composed pixels, so it passes null → treated as "no bands element" (bandsElemCount 0),
+  // which selects the auto-heights branch of the plan. That is exact for the reported
+  // scenario (solid engraved + Höhe je Farbe, no bands element) and any bands-free doc;
+  // a doc mixing a bands image with auto-height solids is an unchanged badge approximation.
+  function __amsEngravedPlan(doc, preScan) {
+    const body = doc.body;
+    const T = body.thicknessMm, layerH = body.layerHeightMm;
+    const baseHex = String(body.baseColor || "").toUpperCase();
+    const { minBase } = __engravedBudget(body);
+    const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
+    const lumHex = (hex) => { const c = window.hexToRgb(hex); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
+    // AMS shared palette: a color's layer index (and thus depth) is its position in the
+    // global palette, so the same color lands at the same depth across every element.
+    const ams = (Array.isArray(doc.amsPalette) && doc.amsPalette.length) ? doc.amsPalette : null;
+    // Deckschicht on the shared palette: the deck color becomes the topmost plate band
+    // and every palette layer carves ONE STEP DEEPER (through the deck). Motif pixels
+    // never quantize to the deck color — it is the workpiece's face, not a palette slot.
+    const deckHexE = doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null;
+    const deckShiftE = (deckHexE && deckHexE !== baseHex && ams) ? 1 : 0;
+    const bandHexSet = (preScan && preScan.bandHexSet) || new Set();
+    const bandsElemCount = (preScan && preScan.bandsElemCount) || 0;
+    // bandHexes: the ordered color plan for the plate bands. amsSolidBase / no bands
+    // element → none; shared palette → full palette (multi-element safe); else a single
+    // bands element's own palette (by luminance).
+    let bandHexes = (doc.amsSolidBase || bandsElemCount === 0)
+      ? []
+      : (ams ? (deckShiftE ? [deckHexE].concat(ams) : ams.slice())
+             : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []));
+    // Auto layer heights (Höhe je Farbe): engraved Einfarbig elements split the plate the
+    // same way. The FACE stays the base color (band 1); a valid Deckschicht replaces the
+    // face and leads the order.
+    if (!bandHexes.length && doc.autoLayerHeights && !doc.amsSolidBase && bandsElemCount === 0) {
+      const order = __autoSolidOrder(doc, "engraved");
+      const deckValidE = !!(deckHexE && deckHexE !== baseHex);
+      const hasParticipant = order.length && doc.elements.some((e) => {
+        if (!e || !e.depth || e.depth.mode !== "solid" || e._hidden || e.cutout) return false;
+        if (e.type === "image" && !e._img) return false;
+        if ((e.depth.direction || "raised") !== "engraved") return false;
+        if (e.depth.heightOverrideMm != null) return false;
+        const h = String(e.color || "").toUpperCase();
+        return order.indexOf(h) !== -1 || (deckValidE && h === baseHex);
+      });
+      if (hasParticipant) bandHexes = deckValidE ? [order[0], baseHex].concat(order.slice(1)) : [baseHex].concat(order);
+    }
+    // Grid-snapped band thickness (spec §1): with avail = T - minBase, N = bandHexes.length,
+    // bandThick = layerH * max(1, floor(min(step, avail/N)/layerH)). Degenerate fallback
+    // (plate too thin to fit N whole layers, avail < N*layerH): unsnapped min(step, avail/N)
+    // so colors stay distinct. bandThick === 0 when there is no plan.
+    const availPlan = Math.max(0, T - minBase);
+    const N_plan = bandHexes.length;
+    const bandThick = N_plan > 0
+      ? (availPlan < N_plan * layerH
+          ? Math.min(step, availPlan / N_plan)
+          : layerH * Math.max(1, Math.floor(Math.min(step, availPlan / N_plan) / layerH)))
+      : 0;
+    // recessOf(hex): a plan-aligned motif floor recess = index*bandThick (index into
+    // bandHexes), so the floor's visible top T-index*bandThick equals band-hex's top.
+    // Returns null when the color is not in the plan (fall back to compression).
+    const planIndex = new Map(); bandHexes.forEach((h, i) => { if (!planIndex.has(h)) planIndex.set(h, i); });
+    const recessOf = (hex) => planIndex.has(hex) ? planIndex.get(hex) * bandThick : null;
+    return { bandHexes, bandThick, recessOf };
+  }
+
   // Engraved base slab + risers + per-color recess floors, from a pre-composed grid.
   // (Body extracted verbatim from buildEngravedParts so a pure-engraved comp is
   // unchanged — parity preserved. buildParts feeds it a comp where non-engraved
@@ -552,11 +626,12 @@
     // --- Shared layer plan (AMS layer alignment, 2026-07-22) --------------------
     // The plate/Öse color bands and the engraved motif floors share ONE ordered
     // color→z-band plan snapped to the print-layer grid, so a given AMS color prints
-    // at the SAME height everywhere and every boundary lands on a whole layer. The
-    // plan (bandHexes + snapped bandThick) is computed HERE, before any motif floor is
-    // emitted, so both the special `bands` pass and the auto-height solid floors carve
-    // to it. Colors not in the plan (or when there is no plan) fall back to the classic
-    // per-element compression below — no alignment target exists for them.
+    // at the SAME height everywhere and every boundary lands on a whole layer. The plan
+    // is computed HERE (by __amsEngravedPlan, below), before any motif floor is emitted,
+    // so both the special `bands` pass and the auto-height solid floors carve to it.
+    // Colors not in the plan (or when there is no plan) fall back to the classic
+    // per-element compression below — no alignment target exists for them. ams/deckShiftE/
+    // lumHex are also read by the fallback compression (amsRank/amsStep) in the bands pass.
     const lumHex = (hex) => { const c = window.hexToRgb(hex); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
     // AMS shared palette: a color's layer index (and thus depth) is its position in the
     // global palette, so the same color lands at the same depth across every element.
@@ -580,50 +655,18 @@
         if (comp.owner[i] !== ei || comp.isBase[i] || comp.cutout[i] || inBand(i)) continue;
         present.add(__hex(comp.r[i], comp.g[i], comp.b[i]));
       }
+      // Hidden / empty / fully-overlapped bands elements contribute no present pixels
+      // here, so they add nothing to any/bandsElemCount and DON'T suppress plate banding
+      // — an invisible element must not force the ambiguous multi-element fallback.
       let any = false;
       for (const h of elemHexes) if (present.has(h)) { bandHexSet.add(h); any = true; }
       for (const h of present) if (elemHexes.indexOf(h) === -1) { bandHexSet.add(h); any = true; }
       if (any) bandsElemCount++;
     }
-    // bandHexes: the ordered color plan for the plate bands (see the plate-band emitter
-    // below). Same rules as before: amsSolidBase / no bands element → none; shared palette
-    // → full palette (multi-element safe); else a single bands element's own palette.
-    let bandHexes = (doc.amsSolidBase || bandsElemCount === 0)
-      ? []
-      : (ams ? (deckShiftE ? [deckHexE].concat(ams) : ams.slice())
-             : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []));
-    // Auto layer heights (Höhe je Farbe): engraved Einfarbig elements split the plate the
-    // same way. The FACE stays the base color (band 1); a valid Deckschicht replaces the
-    // face and leads the order. See the plate-band emitter for the full rationale.
-    if (!bandHexes.length && doc.autoLayerHeights && !doc.amsSolidBase && bandsElemCount === 0) {
-      const order = __autoSolidOrder(doc, "engraved");
-      const deckValidE = !!(deckHexE && deckHexE !== baseHex);
-      const hasParticipant = order.length && doc.elements.some((e) => {
-        if (!e || !e.depth || e.depth.mode !== "solid" || e._hidden || e.cutout) return false;
-        if (e.type === "image" && !e._img) return false;
-        if ((e.depth.direction || "raised") !== "engraved") return false;
-        if (e.depth.heightOverrideMm != null) return false;
-        const h = String(e.color || "").toUpperCase();
-        return order.indexOf(h) !== -1 || (deckValidE && h === baseHex);
-      });
-      if (hasParticipant) bandHexes = deckValidE ? [order[0], baseHex].concat(order.slice(1)) : [baseHex].concat(order);
-    }
-    // Grid-snapped band thickness (spec §1): with avail = T - minBase, N = bandHexes.length,
-    // bandThick = layerH * max(1, floor(min(step, avail/N)/layerH)). Degenerate fallback
-    // (plate too thin to fit N whole layers, avail < N*layerH): unsnapped min(step, avail/N)
-    // so colors stay distinct. bandThick === 0 when there is no plan.
-    const availPlan = Math.max(0, T - minBase);
-    const N_plan = bandHexes.length;
-    const bandThick = N_plan > 0
-      ? (availPlan < N_plan * layerH
-          ? Math.min(step, availPlan / N_plan)
-          : layerH * Math.max(1, Math.floor(Math.min(step, availPlan / N_plan) / layerH)))
-      : 0;
-    // planRecess(hex): a plan-aligned motif floor recess = index*bandThick (index into
-    // bandHexes), so the floor's visible top T-index*bandThick equals band-hex's top.
-    // Returns null when the color is not in the plan (fall back to compression).
-    const planIndex = new Map(); bandHexes.forEach((h, i) => { if (!planIndex.has(h)) planIndex.set(h, i); });
-    const planRecess = (hex) => planIndex.has(hex) ? planIndex.get(hex) * bandThick : null;
+    // The shared layer plan (bandHexes + grid-snapped bandThick + planRecess) is built by
+    // the ONE source of truth __amsEngravedPlan, from the pre-scan above; the "Höhe je Farbe"
+    // badge (window.autoSolidHeightMm) calls the same helper so preview == carve.
+    const { bandHexes, bandThick, recessOf: planRecess } = __amsEngravedPlan(doc, { bandHexSet, bandsElemCount });
 
     // Per-element recess depth: solid/text recess by the element's relief height (depth.heightMm);
     // stepped colorLayers split that height evenly across their colors (topmost color = full
@@ -704,9 +747,13 @@
     }
 
     // --- flush / bands color floors (per-element). ---
-    // effDepth[i] = the DEEPEST floor base-under height at pixel i (used for base-fill-behind).
-    // For special pixels it is set here; for stepped pixels it is derived below.
-    const effDepth = new Float32Array(cols * rows);
+    // effH: ei -> the DEEPEST floor base-under HEIGHT for that special element (all of a
+    // special element's pixels carve to the same deepest floor, so one value per element is
+    // enough). Kept as a double (not a per-pixel Float32Array) so the base-fill-behind slab
+    // top is byte-identical to the pre-plan build for the non-plan flush/bands-fallback path
+    // (the old code stored the recess in a Float32Array, so its baseUnder rounded the recess
+    // first — replicated here via Math.fround on the recess — but did NOT re-round the height).
+    const effH = new Map();
     // amsRank/amsStep: the CLASSIC compressed depth used only when a color is NOT in the
     // shared plan (fallback). The plan itself (bandHexes/bandThick/planRecess) is computed
     // above and takes precedence via depthOfPos below. ams/deckHexE/deckShiftE/lumHex/
@@ -736,9 +783,13 @@
           const set = presentSets.get(hex);
           addFloor((c, r) => set[idx(c, r)] === 1, hex, step);
         }
-        // Flush colors are never in the shared plan → classic base-under height at recess step.
-        const fh = baseUnder(step);
-        for (let i = 0; i < cols * rows; i++) if (comp.owner[i] === ei && !comp.isBase[i] && !comp.cutout[i] && !inBand(i)) effDepth[i] = fh;
+        // Flush floors carve to ONE recess (step) and take the classic base-under height.
+        // A flush color is NOT treated as a plan slot even if an AMS-quantized color happens
+        // to coincide with a plan color — the inlay still carves to `step` and the geometry
+        // stays correct. Compute the height the OLD way (baseUnder of the float32-rounded
+        // recess) so a non-plan flush doc stays byte-identical (the old code stored `step` in
+        // a Float32Array, so its baseUnder saw the float32-rounded recess).
+        effH.set(ei, baseUnder(Math.fround(step)));
       } else {
         // bands (AMS), engraved = downward mirror of raised bands. Sort colors by
         // luminance ASCENDING (rank 1 = darkest). region(rank k) = union of ranks <= k.
@@ -774,13 +825,14 @@
         }
         // Base beneath a pixel reaches the deepest floor covering it = the deepest present
         // color. Store the floor's base-under HEIGHT (plan-aware) so the behind-fill below
-        // meets the floor exactly whether it is plan-aligned or on the fallback path.
+        // meets the floor exactly. PLAN path: floorZ0 pins the top to the band grid — keep
+        // the plan build byte-identical (it stored fround(deepestZ0) via a Float32Array).
+        // FALLBACK path (color not in the plan): round the recess to float32 first, matching
+        // the pre-plan `baseUnder(fround(deepest))` byte-for-byte.
         const deepestHex = sorted[N - 1], deepestRecess = depthOfPos(N - 1);
-        const deepestZ0 = floorZ0(deepestHex, deepestRecess);
-        for (let i = 0; i < cols * rows; i++) {
-          if (comp.owner[i] !== ei || comp.isBase[i] || comp.cutout[i] || inBand(i)) continue;
-          effDepth[i] = deepestZ0;
-        }
+        effH.set(ei, planRecess(deepestHex) != null
+          ? Math.fround(floorZ0(deepestHex, deepestRecess))
+          : baseUnder(Math.fround(deepestRecess)));
       }
     }
 
@@ -842,13 +894,13 @@
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const i = idx(c, r);
       if (comp.cutout[i] || comp.isBase[i] || inBand(i)) continue;
-      // Fill the base beneath the DEEPEST floor at this pixel down to minBase. effDepth[i]
-      // (flush/bands) already holds the floor's base-under HEIGHT; for stepped/solid/text
-      // derive it plan-aware from the per-element recess (floorZ0 pins plan-aligned floors
-      // to the band grid, else the classic budget-clamped baseUnder).
+      // Fill the base beneath the DEEPEST floor at this pixel down to minBase. effH
+      // (flush/bands) already holds the special element's base-under HEIGHT; for
+      // stepped/solid/text derive it plan-aware from the per-element recess (floorZ0 pins
+      // plan-aligned floors to the band grid, else the classic budget-clamped baseUnder).
       let h;
       if (isSpecial(i)) {
-        h = effDepth[i];
+        h = effH.get(comp.owner[i]);
       } else {
         const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
         h = floorZ0(hex, depthForOwnerHex(comp.owner[i], hex));
@@ -2158,12 +2210,26 @@
   window.thinFeatureMask = thinFeatureMask;
 
   // Editor UI: preview the AUTO height (Höhe je Farbe) an Einfarbig element falls
-  // back to — ignores a set override (the input shows that itself) and applies the
-  // engraved carve-budget compression so the shown value matches the build.
-  window.autoSolidHeightMm = (doc, el) => __autoSolidHeight(
-    doc, el,
-    (el && el.depth && el.depth.direction) === "engraved" ? __engravedBudget(doc.body).maxRecess : null,
-    true);
+  // back to — ignores a set override (the input shows that itself). Engraved elements
+  // return a per-color RECESS depth (mm): the plate/motif carve depth. To keep preview ==
+  // carve, an engraved color that participates in the shared layer plan returns its
+  // plan-aligned recess (index*bandThick — the same __amsEngravedPlan the build uses),
+  // NOT the old maxRecess-compressed height. The badge has no composed pixels, so the plan
+  // is built without a bands pre-scan (auto-heights branch) — exact for the reported
+  // "Höhe je Farbe, no bands element" scenario and any bands-free doc. Only when the color
+  // is not in the plan / there is no plan (raised elements, all-overridden, no palette)
+  // does it fall back to the classic carve-budget-compressed height — the SAME fallback
+  // rule as the build. Raised elements always take the classic (grid-aligned) path.
+  window.autoSolidHeightMm = (doc, el) => {
+    const isEngraved = !!(el && el.depth && el.depth.direction === "engraved");
+    if (isEngraved && doc.autoLayerHeights && el.depth.mode === "solid") {
+      const hex = String(el.color || "").toUpperCase();
+      const pr = __amsEngravedPlan(doc, null).recessOf(hex);
+      if (pr != null) return pr; // in the shared plan → preview matches the carved floor
+    }
+    // Fallback: classic per-element compression (engraved) or raised stack (raised).
+    return __autoSolidHeight(doc, el, isEngraved ? __engravedBudget(doc.body).maxRecess : null, true);
+  };
   // Footprint = the defining image element's rotated rectangle (plate-free "Bild" object).
   // >0 inside the rectangle, in cell units. borderMm is ignored (the image IS the object).
   function imageFootprintField(doc, cols, rows, pitch, grid) {
