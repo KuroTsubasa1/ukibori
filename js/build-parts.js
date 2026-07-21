@@ -1863,6 +1863,7 @@
       return (c, r) => {
         const x = x0 + (c + 0.5) * pitch, yy = y0 + (r + 0.5) * pitch;
         let v = borderCells - dt[idx(c, r)];            // >0 within borderCells of silhouette
+        if (dt[idx(c, r)] === 0) v = Math.max(v, 0.5);  // the silhouette itself is always plate (fixes borderMm 0 → vanish)
         if (hasWasher) {
           const washerSdf = (outerR - Math.hypot(x - cx, yy - cy)) * s; // >0 inside washer disk
           v = Math.max(v, washerSdf);                   // union: inside plate OR inside washer
@@ -1881,6 +1882,7 @@
       // outerR already computed above (hasWasher controls whether to apply it).
       return (c, r) => {
         let v = borderCells - dt[idx(c, r)];            // >0 within borderCells of silhouette
+        if (dt[idx(c, r)] === 0) v = Math.max(v, 0.5);  // the silhouette itself is always plate (fixes borderMm 0 → vanish)
         if (hasWasher) {
           const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
           v = Math.max(v, (outerR - Math.hypot(x - cx, y - cy)) * s); // washer union
