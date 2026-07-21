@@ -52,6 +52,36 @@
         return { x0: bx0, y0: by0, wMm: bx1 - bx0, hMm: by1 - by0 };
       }
     }
+    // Free-form ("Frei"): the object IS the drawn silhouette dilated by borderMm,
+    // so the domain auto-fits the content (like the "image" branch) — the workpiece
+    // size fields (widthMm/heightMm) do NOT bound it. Union the silhouette-contributing
+    // elements' rotated bboxes, expand by borderMm + PAD, and union an overhanging Öse.
+    if (doc.body.shape === "free") {
+      const only = doc.body.freeOutlineFromElementId;
+      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity, any = false;
+      for (const el of doc.elements) {
+        if (only != null && el.id !== only) continue;
+        if (el.type === "image" && !el._img) continue;   // matches __silhouetteMask's inclusion
+        const bb = window.elementAABB(el);
+        if (bb.x0 < bx0) bx0 = bb.x0;
+        if (bb.y0 < by0) by0 = bb.y0;
+        if (bb.x1 > bx1) bx1 = bb.x1;
+        if (bb.y1 > by1) by1 = bb.y1;
+        any = true;
+      }
+      if (any) {
+        const border = doc.body.borderMm || 0;
+        let x0 = bx0 - border - PAD, y0 = by0 - border - PAD;
+        let x1 = bx1 + border + PAD, y1 = by1 + border + PAD;
+        if (m && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0) {
+          const oR = m.diameterMm / 2 + m.ringThicknessMm;
+          x0 = Math.min(x0, m.xMm - oR - PAD); y0 = Math.min(y0, m.yMm - oR - PAD);
+          x1 = Math.max(x1, m.xMm + oR + PAD); y1 = Math.max(y1, m.yMm + oR + PAD);
+        }
+        return { x0, y0, wMm: x1 - x0, hMm: y1 - y0 };
+      }
+      // No content → fall through to the body box (an empty free doc yields no plate anyway).
+    }
     if (m && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0) {
       const outerR = m.diameterMm / 2 + m.ringThicknessMm;
       const cx = m.xMm, cy = m.yMm;

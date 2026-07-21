@@ -20,6 +20,22 @@
     assert(wx > 12 && wy > 12, "plate includes the content plus its margin");
   });
 
+  test("entry (free): plate follows the silhouette even when it exceeds the workpiece size", async () => {
+    const img = await solidImg("#ffffff", 8, 8);
+    const v1 = defaultBookmark(); v1.widthMm=20; v1.heightMm=20; v1.resolution=180;  // small body box
+    // 30mm element centered at (10,10) — spans mm [-5,25], larger than the 20mm body
+    v1.elements=[ makeImageElement({src:"a", color:"#ffffff", cxMm:10,cyMm:10,wMm:30,hMm:30}) ];
+    const doc = migrateProject(v1);
+    doc.body.shape = "free"; doc.body.borderMm = 2; doc.elements[0]._img = img;
+    doc.mount = { type:"none", xMm:10, yMm:5, diameterMm:5, ringThicknessMm:0, ringHeightMm:2, marginMm:8 };
+    const parts = buildParts(doc);
+    assert(parts.length >= 1, "has parts");
+    const bb = bbox(parts.reduce((a, p) => a.concat(p.facets), []));
+    const wx = bb.mxx - bb.mnx, wy = bb.mxy - bb.mny;
+    // silhouette 30 + 2x2mm border = ~34mm; must NOT be clipped to the 20mm workpiece
+    assert(wx > 30 && wy > 30, "free plate spans the full silhouette+border, not the 20mm box (got " + wx.toFixed(1) + "x" + wy.toFixed(1) + ")");
+  });
+
   test("entry: rect body still equals buildEngravedParts for a pure-engraved doc (unchanged)", async () => {
     const img = await solidImg("#101010", 8, 8);
     const v1 = defaultBookmark(); v1.widthMm=40; v1.heightMm=80; v1.resolution=180;
