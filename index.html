@@ -8,6 +8,9 @@
 <meta http-equiv="Expires" content="0">
 <title>Ukibori · 浮彫</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#16161a">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
 <script>window.__errs=[];addEventListener('error',e=>window.__errs.push(String(e.message)))</script>
 </head>
@@ -587,5 +590,15 @@
 <script src="js/preview3d.js"></script>
 <script src="js/editor.js"></script>
 <script src="js/coachmarks.js"></script>
+<script>
+// Register the service worker for offline use + installability. Only over
+// http(s) — on file:// it is unavailable and would throw, so we skip it there
+// (double-click use keeps working exactly as before).
+if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  });
+}
+</script>
 </body>
 </html>

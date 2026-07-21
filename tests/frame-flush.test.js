@@ -260,16 +260,28 @@
     return setFrame(d, frameW, 2, "#00aa00");
   }
 
+  // Free objects auto-fit their domain and are emitted in domain-local coords, so the
+  // ring's absolute position isn't fixed — probe relative to the part's own bbox.
+  function xyBbox(part) {
+    let mnx = Infinity, mny = Infinity, mxx = -Infinity, mxy = -Infinity;
+    for (const t of part.facets) for (const p of t) {
+      if (p[0] < mnx) mnx = p[0]; if (p[0] > mxx) mxx = p[0];
+      if (p[1] < mny) mny = p[1]; if (p[1] > mxy) mxy = p[1];
+    }
+    return { mnx, mny, mxx, mxy, cx: (mnx + mxx) / 2, cy: (mny + mxy) / 2 };
+  }
+
   test("frame: free body emits a 'rand' RING along the free outline", async () => {
-    // silhouette [15,35]^2 + border 2 -> plate [13,37]^2; frame width 3 hugs the edge.
+    // silhouette [15,35]^2 + border 2 -> plate 24mm square; frame width 3 hugs the edge.
     const d = await freeFrameDoc(3);
     const rand = buildParts(d).find(p => p.name === "rand");
     assert(!!rand, "rand part exists on a free body");
     const zb = zbounds(rand.facets);
     assertClose(zb.mn, 3, 1e-6, "rand bottom at thicknessMm");
     assertClose(zb.mx, 5, 1e-6, "rand top at thicknessMm + frame.heightMm");
-    assert(faceCovers(rand, 14, 25, 5), "band covers cells near the outer edge");
-    assert(!faceCovers(rand, 25, 25, 5), "band is a RING — the interior stays clear");
+    const b = xyBbox(rand);
+    assert(faceCovers(rand, b.mnx + 1, b.cy, 5), "band covers cells near the outer edge");
+    assert(!faceCovers(rand, b.cx, b.cy, 5), "band is a RING — the interior stays clear");
   });
 
   test("frame: free ring stays a ring even when widthMm >= borderMm (no saturation swallow)", async () => {
@@ -278,7 +290,8 @@
     const d = await freeFrameDoc(4);
     const rand = buildParts(d).find(p => p.name === "rand");
     assert(!!rand, "rand present");
-    assert(faceCovers(rand, 14, 25, 5), "edge banded");
-    assert(!faceCovers(rand, 25, 25, 5), "interior clear despite widthMm > borderMm");
+    const b = xyBbox(rand);
+    assert(faceCovers(rand, b.mnx + 1, b.cy, 5), "edge banded");
+    assert(!faceCovers(rand, b.cx, b.cy, 5), "interior clear despite widthMm > borderMm");
   });
 })();

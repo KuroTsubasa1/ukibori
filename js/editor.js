@@ -1960,16 +1960,21 @@
     e.preventDefault();                               // stop page scroll
     if (cur === -1) { selectByIndex(0); return; }     // nothing selected → select first, don't move yet
     var stepMm = e.shiftKey ? 0.25 : 1;               // Shift = fine 0.25 mm, else 1 mm
+    // free/image auto-fit to the content, so elements aren't bound to the plate box.
+    var freeShape = doc.body.shape === "free" || doc.body.shape === "image";
+    var nbLo = freeShape ? -1e4 : 0;
+    var nbX = freeShape ? 1e4 : doc.body.widthMm;
+    var nbY = freeShape ? 1e4 : doc.body.heightMm;
     if (state.selectionIds.length > 1) {              // nudge the whole multi-selection together
       selectedEls().forEach(function (el) {
-        el.cxMm = clamp(el.cxMm + dx * stepMm, 0, doc.body.widthMm);
-        el.cyMm = clamp(el.cyMm + dy * stepMm, 0, doc.body.heightMm);
+        el.cxMm = clamp(el.cxMm + dx * stepMm, nbLo, nbX);
+        el.cyMm = clamp(el.cyMm + dy * stepMm, nbLo, nbY);
       });
       render2D(); scheduleRebuild3D();
     } else {
       withSelected(function (el) {
-        el.cxMm = clamp(el.cxMm + dx * stepMm, 0, doc.body.widthMm);
-        el.cyMm = clamp(el.cyMm + dy * stepMm, 0, doc.body.heightMm);
+        el.cxMm = clamp(el.cxMm + dx * stepMm, nbLo, nbX);
+        el.cyMm = clamp(el.cyMm + dy * stepMm, nbLo, nbY);
       });
     }
     refreshAdvancedForSelection();                    // keep advCx/advCy inputs in sync
@@ -2341,7 +2346,9 @@
     setHidden("cornerField", shape !== "rect");
     setHidden("edgeField", shape !== "rect" && shape !== "circle"); // Zierkante needs the analytic outline
     setHidden("lineField", shape !== "rect" && shape !== "circle"); // Zierlinie too
-    setHidden("simpleSizeSection", isImage);
+    // Free-form auto-fits the plate to the drawn content (see docDomain), so the
+    // workpiece size is irrelevant there — hide it like the Bild object does.
+    setHidden("simpleSizeSection", isImage || shape === "free");
     // A Bild object has no plate → mount (Befestigung) and plate-centered "Ausrichten" are
     // meaningless. Force mount off (so 2D marker, hit-test, and 3D geometry all agree) and hide
     // both control groups. Non-image shapes leave the mount untouched.
