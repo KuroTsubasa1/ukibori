@@ -32,6 +32,50 @@
     return el || els.find(e => e.type === "image") || els[0] || null;
   }
 
+  // Ink-aware bounding box (mm) of an element for the free-shape domain. Straight
+  // elements fill their nominal rotated box; Bogentext (arcDeg) and Pfadtext
+  // (textPath) draw glyphs well outside it, so measure the real glyph cloud with
+  // the same layout math __drawElement uses, then rotate/flip/translate to world mm.
+  function __elementInkAABB(el) {
+    const nominal = window.elementAABB(el);
+    if (el.type !== "text") return nominal;
+    const hasPath = el.textPath && el.textPath.length > 1;
+    const hasArc = !hasPath && !!el.arcDeg;
+    if (!hasPath && !hasArc) return nominal;
+    let lx0 = Infinity, ly0 = Infinity, lx1 = -Infinity, ly1 = -Infinity;  // element-local mm
+    if (hasPath) {
+      const pad = (el.hMm || 0) / 2;   // glyphs straddle the path by ~half the font height
+      for (const p of el.textPath) {
+        if (p.x < lx0) lx0 = p.x; if (p.x > lx1) lx1 = p.x;
+        if (p.y < ly0) ly0 = p.y; if (p.y > ly1) ly1 = p.y;
+      }
+      lx0 -= pad; ly0 -= pad; lx1 += pad; ly1 += pad;
+    } else {
+      const FPX = 100;
+      const cv = document.createElement("canvas"); const ctx = cv.getContext("2d");
+      ctx.font = `${el.fontWeight || "normal"} ${FPX}px ${el.fontFamily || "system-ui"}`;
+      const advances = Array.from(el.text || "").map((ch) => ctx.measureText(ch).width);
+      const layout = window.arcTextPositions(advances, el.arcDeg, FPX);
+      if (!layout) return nominal;                    // degenerates to straight text
+      const k = (el.hMm || 0) / FPX;                  // measured px @FPX -> mm (font px = hMm)
+      const hw = (layout.width / 2) * k, hh = (layout.height / 2) * k;
+      lx0 = -hw; lx1 = hw; ly0 = -hh; ly1 = hh;        // arc cloud is centered on the element
+    }
+    // local box -> world: flip (sign), rotate by rotationDeg, translate to center, AABB.
+    const fx = el.flipH ? -1 : 1, fy = el.flipV ? -1 : 1;
+    const a = (el.rotationDeg || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [lx, ly] of [[lx0, ly0], [lx1, ly0], [lx1, ly1], [lx0, ly1]]) {
+      const lxf = lx * fx, lyf = ly * fy;
+      const wx = el.cxMm + lxf * ca - lyf * sa, wy = el.cyMm + lxf * sa + lyf * ca;
+      if (wx < x0) x0 = wx; if (wx > x1) x1 = wx;
+      if (wy < y0) y0 = wy; if (wy > y1) y1 = wy;
+    }
+    // never smaller than the nominal box
+    return { x0: Math.min(x0, nominal.x0), y0: Math.min(y0, nominal.y0),
+             x1: Math.max(x1, nominal.x1), y1: Math.max(y1, nominal.y1) };
+  }
+
   function docDomain(doc) {
     const W = doc.body.widthMm, H = doc.body.heightMm;
     const m = doc.mount;
@@ -60,9 +104,10 @@
       const only = doc.body.freeOutlineFromElementId;
       let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity, any = false;
       for (const el of doc.elements) {
+        if (el._hidden) continue;                          // match __imageBodyElement (raw doc vs visibleDoc)
         if (only != null && el.id !== only) continue;
         if (el.type === "image" && !el._img) continue;   // matches __silhouetteMask's inclusion
-        const bb = window.elementAABB(el);
+        const bb = __elementInkAABB(el);                 // ink-aware: contains Bogentext/Pfadtext bows
         if (bb.x0 < bx0) bx0 = bb.x0;
         if (bb.y0 < by0) by0 = bb.y0;
         if (bb.x1 > bx1) bx1 = bb.x1;
