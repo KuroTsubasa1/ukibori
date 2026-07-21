@@ -144,16 +144,20 @@
     const sorted = floors.slice().sort((a, b) => zbounds(a.facets).mn - zbounds(b.facets).mn); // deepest first
     const areas = sorted.map(p => xyArea(p.facets));
     assert(areas[0] >= areas[1] && areas[1] >= areas[2], "deeper floors cover >= shallower (nested union)");
-    // Distinct recess depths spaced by ~step (k*step for k=1..3).
+    // AMS layer alignment (2026-07-22): the per-element bands palette IS the plate-band plan,
+    // so each motif floor's top == its plate band top, on the grid. The plan orders colors
+    // dark→light (index 0 = darkest = shallowest, flush at recess 0); a color at index j
+    // recesses j*bandThick. z0 = max(T - j*bandThick - floor, minBase). Sorted deepest first:
+    // light (index 2), mid (index 1), dark (index 0). (Old model recessed (index+1)*step.)
     const T2 = 3, layerH = 0.2;
     const floor = Math.min(2 * layerH, T2);
     const minBase = Math.min(Math.max(0.8, T2 * 0.34, 2 * layerH), Math.max(0, T2 - floor));
-    const maxRecess = Math.max(0, T2 - floor - minBase);
-    const baseUnder = (dd) => T2 - Math.max(0, Math.min(dd, maxRecess)) - floor;
+    const bandThick = layerH * Math.max(1, Math.floor(Math.min(step, (T2 - minBase) / 3) / layerH));
+    const alignedZ0 = (j) => Math.max(T2 - j * bandThick - floor, minBase);
     const z0s = sorted.map(p => zbounds(p.facets).mn);
-    assertClose(z0s[0], baseUnder(3 * step), 1e-6, "deepest floor at depth 3*step");
-    assertClose(z0s[1], baseUnder(2 * step), 1e-6, "mid floor at depth 2*step");
-    assertClose(z0s[2], baseUnder(1 * step), 1e-6, "shallowest floor at depth 1*step");
+    assertClose(z0s[0], alignedZ0(2), 1e-6, "deepest floor (light, index 2) aligned to its band");
+    assertClose(z0s[1], alignedZ0(1), 1e-6, "mid floor (index 1) aligned to its band");
+    assertClose(z0s[2], alignedZ0(0), 1e-6, "shallowest floor (dark, index 0) flush at recess 0");
     // One color per depth-layer: deepest floor = lightest, shallowest = darkest.
     const lum = (c) => 0.299*c[0] + 0.587*c[1] + 0.114*c[2];
     const lums = sorted.map(p => lum(p.color));
