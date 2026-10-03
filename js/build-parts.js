@@ -23,13 +23,57 @@
   // Degenerate loop (ringThicknessMm<=0 or diameterMm<=0) falls back to body box.
   // The element that defines a plate-free "Bild" object: body.freeOutlineFromElementId if set,
   // else the first image element, else the first element. null if the doc has no elements.
-  function __bildElement(doc) {
+  function __imageBodyElement(doc) {
     // Skip hidden elements so the 2D view (raw doc) and 3D/export (visibleDoc, which strips
     // _hidden) resolve the SAME defining element — otherwise hiding it silently resizes the object.
     const els = (doc.elements || []).filter(e => !e._hidden);
     const id = doc.body && doc.body.freeOutlineFromElementId;
     let el = id ? els.find(e => e.id === id) : null;
     return el || els.find(e => e.type === "image") || els[0] || null;
+  }
+
+  // Ink-aware bounding box (mm) of an element for the free-shape domain. Straight
+  // elements fill their nominal rotated box; Bogentext (arcDeg) and Pfadtext
+  // (textPath) draw glyphs well outside it, so measure the real glyph cloud with
+  // the same layout math __drawElement uses, then rotate/flip/translate to world mm.
+  function __elementInkAABB(el) {
+    const nominal = window.elementAABB(el);
+    if (el.type !== "text") return nominal;
+    const hasPath = el.textPath && el.textPath.length > 1;
+    const hasArc = !hasPath && !!el.arcDeg;
+    if (!hasPath && !hasArc) return nominal;
+    let lx0 = Infinity, ly0 = Infinity, lx1 = -Infinity, ly1 = -Infinity;  // element-local mm
+    if (hasPath) {
+      const pad = (el.hMm || 0) / 2;   // glyphs straddle the path by ~half the font height
+      for (const p of el.textPath) {
+        if (p.x < lx0) lx0 = p.x; if (p.x > lx1) lx1 = p.x;
+        if (p.y < ly0) ly0 = p.y; if (p.y > ly1) ly1 = p.y;
+      }
+      lx0 -= pad; ly0 -= pad; lx1 += pad; ly1 += pad;
+    } else {
+      const FPX = 100;
+      const cv = document.createElement("canvas"); const ctx = cv.getContext("2d");
+      ctx.font = `${el.fontWeight || "normal"} ${FPX}px ${el.fontFamily || "system-ui"}`;
+      const advances = Array.from(el.text || "").map((ch) => ctx.measureText(ch).width);
+      const layout = window.arcTextPositions(advances, el.arcDeg, FPX);
+      if (!layout) return nominal;                    // degenerates to straight text
+      const k = (el.hMm || 0) / FPX;                  // measured px @FPX -> mm (font px = hMm)
+      const hw = (layout.width / 2) * k, hh = (layout.height / 2) * k;
+      lx0 = -hw; lx1 = hw; ly0 = -hh; ly1 = hh;        // arc cloud is centered on the element
+    }
+    // local box -> world: flip (sign), rotate by rotationDeg, translate to center, AABB.
+    const fx = el.flipH ? -1 : 1, fy = el.flipV ? -1 : 1;
+    const a = (el.rotationDeg || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [lx, ly] of [[lx0, ly0], [lx1, ly0], [lx1, ly1], [lx0, ly1]]) {
+      const lxf = lx * fx, lyf = ly * fy;
+      const wx = el.cxMm + lxf * ca - lyf * sa, wy = el.cyMm + lxf * sa + lyf * ca;
+      if (wx < x0) x0 = wx; if (wx > x1) x1 = wx;
+      if (wy < y0) y0 = wy; if (wy > y1) y1 = wy;
+    }
+    // never smaller than the nominal box
+    return { x0: Math.min(x0, nominal.x0), y0: Math.min(y0, nominal.y0),
+             x1: Math.max(x1, nominal.x1), y1: Math.max(y1, nominal.y1) };
   }
 
   function docDomain(doc) {
@@ -40,7 +84,7 @@
     // (its rectangle IS the object). No plate box; mount/washer handled by the normal path below
     // once the image element defines the extent.
     if (doc.body.shape === "image") {
-      const bel = __bildElement(doc);
+      const bel = __imageBodyElement(doc);
       if (bel) {
         const cx = bel.cxMm, cy = bel.cyMm, hw = (bel.wMm || 0) / 2, hh = (bel.hMm || 0) / 2;
         const a = (bel.rotationDeg || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
@@ -51,6 +95,37 @@
         }
         return { x0: bx0, y0: by0, wMm: bx1 - bx0, hMm: by1 - by0 };
       }
+    }
+    // Free-form ("Frei"): the object IS the drawn silhouette dilated by borderMm,
+    // so the domain auto-fits the content (like the "image" branch) — the workpiece
+    // size fields (widthMm/heightMm) do NOT bound it. Union the silhouette-contributing
+    // elements' rotated bboxes, expand by borderMm + PAD, and union an overhanging Öse.
+    if (doc.body.shape === "free") {
+      const only = doc.body.freeOutlineFromElementId;
+      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity, any = false;
+      for (const el of doc.elements) {
+        if (el._hidden) continue;                          // match __imageBodyElement (raw doc vs visibleDoc)
+        if (only != null && el.id !== only) continue;
+        if (el.type === "image" && !el._img) continue;   // matches __silhouetteMask's inclusion
+        const bb = __elementInkAABB(el);                 // ink-aware: contains Bogentext/Pfadtext bows
+        if (bb.x0 < bx0) bx0 = bb.x0;
+        if (bb.y0 < by0) by0 = bb.y0;
+        if (bb.x1 > bx1) bx1 = bb.x1;
+        if (bb.y1 > by1) by1 = bb.y1;
+        any = true;
+      }
+      if (any) {
+        const border = doc.body.borderMm || 0;
+        let x0 = bx0 - border - PAD, y0 = by0 - border - PAD;
+        let x1 = bx1 + border + PAD, y1 = by1 + border + PAD;
+        if (m && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0) {
+          const oR = m.diameterMm / 2 + m.ringThicknessMm;
+          x0 = Math.min(x0, m.xMm - oR - PAD); y0 = Math.min(y0, m.yMm - oR - PAD);
+          x1 = Math.max(x1, m.xMm + oR + PAD); y1 = Math.max(y1, m.yMm + oR + PAD);
+        }
+        return { x0, y0, wMm: x1 - x0, hMm: y1 - y0 };
+      }
+      // No content → fall through to the body box (an empty free doc yields no plate anyway).
     }
     if (m && m.type === "loop" && (m.ringThicknessMm || 0) > 0 && (m.diameterMm || 0) > 0) {
       const outerR = m.diameterMm / 2 + m.ringThicknessMm;
@@ -149,13 +224,20 @@
       ctx.fillStyle = el.color;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = `${el.fontWeight} ${Math.max(1, Math.round(h))}px ${el.fontFamily}`;
-      ctx.fillText(el.text, 0, 0);
+      if (el.textPath && el.textPath.length > 1 && window.drawPathText) {
+        window.drawPathText(ctx, el.text,
+          el.textPath.map(function (p) { return { x: p.x * sx, y: p.y * sy }; }),
+          Math.max(1, Math.round(h)));
+      } else if (el.arcDeg) window.drawArcText(ctx, el.text, el.arcDeg, Math.max(1, Math.round(h)));
+      else ctx.fillText(el.text, 0, 0);
     } else if (el.type === "shape") {
       ctx.fillStyle = el.color;
-      ctx.beginPath();
-      if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
-      else ctx.rect(-w / 2, -h / 2, w, h);
-      ctx.fill();
+      if (!(window.drawShapeEdge && window.drawShapeEdge(ctx, el, w, h))) {
+        ctx.beginPath();
+        if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+        else ctx.rect(-w / 2, -h / 2, w, h);
+        ctx.fill();
+      }
     } else if (el._img) {
       ctx.drawImage(el._img, -w / 2, -h / 2, w, h);
     }
@@ -320,8 +402,9 @@
   // Engraved carve budget: color-floor slab thickness, solid base under the deepest
   // recess (user body.baseThicknessMm override, clamped to leave room for a color
   // floor, else auto-derived from the overall thickness), and the recess depth left
-  // for color floors. Shared by __engravedBaseAndFloors and the auto-layer-height
-  // preview (window.autoSolidHeightMm) so both see the same numbers.
+  // for color floors. Feeds both __amsEngravedPlan (the shared layer plan, via minBase)
+  // and the classic per-element compression fallback (via maxRecess), used by the build
+  // and by the auto-layer-height preview (window.autoSolidHeightMm) alike.
   function __engravedBudget(body) {
     const T = body.thicknessMm, layerH = body.layerHeightMm;
     const floor = Math.min(2 * layerH, T);
@@ -332,33 +415,29 @@
     return { floor, minBase, maxRecess };
   }
 
-  // Engraved AMS stack layout for `levels` stacked color layers (palette slots + Deckschicht).
-  // Every boundary must land on the printer's layer grid and every layer must be at least one
-  // printed layer thick — otherwise the slicer mixes two filaments in one layer and nested
-  // floors interpenetrate. So: snap the solid base down onto the grid, give each level a whole
-  // number of layers (colorStepLayers when it fits, else fewer, min 1), and when even 1 layer
-  // per level doesn't fit, take the missing layers from the solid base (keeping >= 1 layer).
-  // Returns the adjusted budget plus s = per-level step (mm); fits=false when the plate is too
-  // thin for the stack even then.
-  function __amsStackLayout(body, levels, stepLayers) {
-    const budget = __engravedBudget(body);
-    const T = body.thicknessMm, layerH = body.layerHeightMm, floor = budget.floor;
+  // Layer-grid stack layout: `levels` stacked color levels between the solid base and the
+  // plate top, with `reserveMm` kept free below the deepest level (the fallback's color-floor
+  // slab; 0 for the plate-band plan). Every boundary must land on the print-layer grid and
+  // every level must be at least one printed layer — otherwise the slicer mixes filaments in
+  // one layer and nested floors interpenetrate (the 5+ color clipping bug). So: snap the base
+  // down onto the grid, give each level whole layers (colorStepLayers when it fits, else
+  // fewer, min 1), and when even one layer per level doesn't fit, take the missing layers
+  // from the base (keeping >= 1 layer). fits=false: too thin for the stack even then.
+  function __gridStack(body, levels, stepLayers, reserveMm) {
+    const T = body.thicknessMm, layerH = body.layerHeightMm, eps = 1e-6;
     const want = Math.max(1, stepLayers || 2);
-    if (!(levels > 0) || !(layerH > 0)) return { ...budget, s: want * layerH, fits: true };
-    const eps = 1e-6;
-    const totalLayers = Math.floor((T - floor) / layerH + eps); // layers above the deepest floor slab
-    let baseLayers = Math.floor(budget.minBase / layerH + eps);
-    if (totalLayers - baseLayers < levels) baseLayers = Math.max(1, totalLayers - levels);
-    const room = Math.max(0, totalLayers - baseLayers);
-    const sLayers = Math.max(1, Math.min(want, Math.floor(room / levels)));
-    const minBase = baseLayers * layerH;
-    return { floor, minBase, maxRecess: Math.max(0, T - floor - minBase), s: sLayers * layerH, fits: levels <= room };
+    const { minBase } = __engravedBudget(body);
+    const total = Math.floor((T - (reserveMm || 0)) / layerH + eps);
+    let baseLayers = Math.floor(minBase / layerH + eps);
+    if (total - baseLayers < levels) baseLayers = Math.max(1, total - levels);
+    const room = Math.max(0, total - baseLayers);
+    const sLayers = Math.max(1, Math.min(want, Math.floor(room / Math.max(1, levels))));
+    return { minBase: baseLayers * layerH, s: sLayers * layerH, fits: levels <= room };
   }
 
-  // Höhe je Farbe engraved stack depth: the auto order length (palette + other colors + deck),
-  // but only when at least one engraved Einfarbig element actually takes an auto height (a
-  // manual heightOverrideMm opts out; base-colored elements join when a deck exists — they
-  // carve through it). 0 = no auto stack on the engraved side.
+  // Engraved "Höhe je Farbe" stack depth: the auto order length, when at least one engraved
+  // Einfarbig element actually takes an auto height (a manual heightOverrideMm opts out;
+  // base-colored elements join when a deck exists — they carve through it). 0 = none.
   function __autoEngravedLevels(doc) {
     if (!doc.autoLayerHeights) return 0;
     const order = __autoSolidOrder(doc, "engraved");
@@ -377,25 +456,29 @@
     return has ? order.length : 0;
   }
 
-  // Shared-palette AMS bands stack depth: palette slots + Deckschicht, when any colorLayers
-  // image element prints in the bands style (same criterion as the engraved builder).
-  function __amsBandsLevels(doc) {
-    const ams = (Array.isArray(doc.amsPalette) && doc.amsPalette.length) ? doc.amsPalette : null;
-    if (!ams) return 0;
-    const any = doc.elements.some(el => el && el.type === "image" && el.depth &&
-      el.depth.mode === "colorLayers" && colorStyleOf(el) === "bands");
-    if (!any) return 0;
+  // Stack depth for the NO-plan fallback (amsSolidBase, ambiguous multi-element bands, or
+  // auto heights without plate bands): shared palette slots (+ deck) when any colorLayers
+  // bands element exists, the auto order, or the largest per-element color count
+  // (legacyCount — only the build knows it from composed pixels).
+  function __fallbackLevels(doc, legacyCount) {
     const baseHex = String(doc.body.baseColor || "").toUpperCase();
     const deck = doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null;
-    return ams.length + ((deck && deck !== baseHex) ? 1 : 0);
+    const ams = (Array.isArray(doc.amsPalette) && doc.amsPalette.length) ? doc.amsPalette : null;
+    // Engraved only: raised bands stacks build upward and never touch the engraved budget.
+    const anyBands = doc.elements.some(el => el && el.type === "image" && !el._hidden && el._img && el.depth &&
+      el.depth.mode === "colorLayers" && colorStyleOf(el) === "bands" && el.depth.direction === "engraved");
+    const amsLevels = (ams && anyBands) ? ams.length + ((deck && deck !== baseHex) ? 1 : 0) : 0;
+    return Math.max(__autoEngravedLevels(doc), amsLevels, legacyCount || 0);
   }
 
-  // Engraved per-level step for the editor's height readout (the build computes the same
-  // layout inside __engravedBaseAndFloors; legacy palette-less bands counts need pixels and
-  // are only known there). null = no engraved stack.
-  function __engravedStackStep(doc) {
-    const levels = Math.max(__autoEngravedLevels(doc), __amsBandsLevels(doc));
-    return levels > 0 ? __amsStackLayout(doc.body, levels, doc.colorStepLayers).s : null;
+  // Engraved auto-height step when the color is NOT in the shared plan: the fallback stack's
+  // whole-layer step when one exists, else the classic budget compression (no stack at all,
+  // e.g. only overridden elements — kept for parity).
+  function __fallbackAutoStep(doc, stackStep, maxRecess) {
+    if (stackStep != null) return stackStep;
+    const len = __autoSolidOrder(doc, "engraved").length;
+    const step = Math.max(1, doc.colorStepLayers || 2) * doc.body.layerHeightMm;
+    return len > 0 ? Math.min(step, maxRecess / len) : step;
   }
 
   // --- Auto layer heights (Höhe je Farbe) -----------------------------------
@@ -409,9 +492,10 @@
   // color's rank so the other layers don't shift) and gets the same printability
   // clamp as depth.heightMm (0 = flush, else >= layerH). Elements that print
   // nothing (hidden, cutout holes, undecoded images) take no rank. Ranks are per
-  // direction (raised and engraved stacks are independent); the engraved path
-  // passes the shared stack step (__amsStackLayout: whole printed layers, the
-  // base yields layers before a step drops below one layer). Returns null when
+  // direction (raised and engraved stacks are independent); pass maxRecessMm on
+  // the engraved path to compress the stack into the carve budget (like AMS
+  // bands). Derived heights carry NO layerH floor so a compressed stack keeps
+  // DISTINCT floors (uncompressed step is >= layerH anyway). Returns null when
   // the feature is off / not applicable → classic depth.heightMm behavior.
   // Ordered auto-layer colors for one direction: the FULL doc.amsPalette leads
   // the order — used or not — so a palette color sits at its ABSOLUTE slot,
@@ -446,8 +530,8 @@
     return order;
   }
 
-  // engravedStepMm: per-level step of the engraved stack layout (__engravedStackStep) —
-  // whole printed layers, shared with the plate bands. null = uncompressed (raised).
+  // engravedStepMm: the engraved per-level step (whole printed layers, from __gridStack /
+  // the shared plan). null = uncompressed colorStepLayers*layerH (raised).
   function __autoSolidHeight(doc, el, engravedStepMm, ignoreOverride) {
     if (!doc.autoLayerHeights) return null;
     if (!el || !el.depth || el.depth.mode !== "solid") return null;
@@ -489,6 +573,65 @@
     return out;
   }
 
+  // --- Shared engraved layer plan (AMS layer alignment, 2026-07-22) ------------
+  // The single ordered color→z-band plan that the plate/Öse bands AND the engraved
+  // motif floors both carve to (spec docs/…/2026-07-22-ams-layer-alignment-design.md).
+  // This is the ONE source of truth for `bandHexes`, the grid-snapped `bandThick`, and
+  // `recessOf(hex)` (= planIndex*bandThick, null when the color is not in the plan).
+  // Both __engravedBaseAndFloors (the build) and window.autoSolidHeightMm (the editor
+  // "Höhe je Farbe" badge) call it, so the previewed depth matches the carved depth.
+  //
+  // `preScan` = { bandHexSet, bandsElemCount } comes from the build's pixel-level scan of
+  // the special `bands` elements (which colors are actually present). The badge has no
+  // composed pixels, so it passes null → treated as "no bands element" (bandsElemCount 0),
+  // which selects the auto-heights branch of the plan. That is exact for the reported
+  // scenario (solid engraved + Höhe je Farbe, no bands element) and any bands-free doc;
+  // a doc mixing a bands image with auto-height solids is an unchanged badge approximation.
+  function __amsEngravedPlan(doc, preScan) {
+    const body = doc.body;
+    const baseHex = String(body.baseColor || "").toUpperCase();
+    const lumHex = (hex) => { const c = window.hexToRgb(hex); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
+    // AMS shared palette: a color's layer index (and thus depth) is its position in the
+    // global palette, so the same color lands at the same depth across every element.
+    const ams = (Array.isArray(doc.amsPalette) && doc.amsPalette.length) ? doc.amsPalette : null;
+    // Deckschicht on the shared palette: the deck color becomes the topmost plate band
+    // and every palette layer carves ONE STEP DEEPER (through the deck). Motif pixels
+    // never quantize to the deck color — it is the workpiece's face, not a palette slot.
+    const deckHexE = doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null;
+    const deckShiftE = (deckHexE && deckHexE !== baseHex && ams) ? 1 : 0;
+    const bandHexSet = (preScan && preScan.bandHexSet) || new Set();
+    const bandsElemCount = (preScan && preScan.bandsElemCount) || 0;
+    // bandHexes: the ordered color plan for the plate bands. amsSolidBase / no bands
+    // element → none; shared palette → full palette (multi-element safe); else a single
+    // bands element's own palette (by luminance).
+    let bandHexes = (doc.amsSolidBase || bandsElemCount === 0)
+      ? []
+      : (ams ? (deckShiftE ? [deckHexE].concat(ams) : ams.slice())
+             : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []));
+    // Auto layer heights (Höhe je Farbe): engraved Einfarbig elements split the plate the
+    // same way. The FACE stays the base color (band 1); a valid Deckschicht replaces the
+    // face and leads the order.
+    if (!bandHexes.length && doc.autoLayerHeights && !doc.amsSolidBase && bandsElemCount === 0) {
+      const order = __autoSolidOrder(doc, "engraved");
+      const deckValidE = !!(deckHexE && deckHexE !== baseHex);
+      if (__autoEngravedLevels(doc) > 0) bandHexes = deckValidE ? [order[0], baseHex].concat(order.slice(1)) : [baseHex].concat(order);
+    }
+    // Grid-snapped band thickness (spec §1, tightened): bandThick === 0 when there is no plan.
+    // Layout on the layer grid (__gridStack): base snapped down onto the grid, whole layers
+    // per band; when N bands don't fit even at one layer each, the base yields layers
+    // instead of dropping below a printed layer. The builder adopts planMinBase.
+    const N_plan = bandHexes.length;
+    const lay = N_plan > 0 ? __gridStack(body, N_plan, doc.colorStepLayers, 0) : null;
+    const bandThick = lay ? lay.s : 0;
+    const planMinBase = lay ? lay.minBase : null;
+    // recessOf(hex): a plan-aligned motif floor recess = index*bandThick (index into
+    // bandHexes), so the floor's visible top T-index*bandThick equals band-hex's top.
+    // Returns null when the color is not in the plan (fall back to compression).
+    const planIndex = new Map(); bandHexes.forEach((h, i) => { if (!planIndex.has(h)) planIndex.set(h, i); });
+    const recessOf = (hex) => planIndex.has(hex) ? planIndex.get(hex) * bandThick : null;
+    return { bandHexes, bandThick, recessOf, minBase: planMinBase };
+  }
+
   // Engraved base slab + risers + per-color recess floors, from a pre-composed grid.
   // (Body extracted verbatim from buildEngravedParts so a pure-engraved comp is
   // unchanged — parity preserved. buildParts feeds it a comp where non-engraved
@@ -496,15 +639,20 @@
   // band: optional Rand-Rahmen mask (see __frameBand). Ring wins: band cells emit
   // no color floors/recesses — they are treated as full-height base instead (the
   // "rand" part sits on top of them). band == null => byte-identical to pre-band code.
-  function __engravedBaseAndFloors(doc, comp, cols, rows, pitch, footprint, band) {
+  function __engravedBaseAndFloors(doc, comp, cols, rows, pitch, footprint, band, grooveBand) {
     const T = doc.body.thicknessMm, layerH = doc.body.layerHeightMm;
     const baseHex = doc.body.baseColor.toUpperCase();
     const idx = (c, r) => r * cols + c;
     const inBand = band ? ((i) => band[i] === 1) : (() => false);
+    // Zierlinie (vertieft): groove depth carved into the plate top, clamped so a
+    // solid floor always remains. 0 = off → every emission below is unchanged.
+    const inGroove = grooveBand ? ((i) => grooveBand[i] === 1) : (() => false);
     const colorParts = [], baseParts = [];
     const tracedFacets = (member, thickness, z0) => window.orientOutward(
       window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
 
+    // minBase/maxRecess are adopted from the layer-grid layout below (shared plan, or the
+    // no-plan fallback stack) when an AMS / Höhe-je-Farbe stack is present.
     let { floor, minBase, maxRecess } = __engravedBudget(doc.body);
     const recessOf = (d) => Math.max(0, Math.min(d, maxRecess));
     const baseUnder = (d) => T - recessOf(d) - floor;
@@ -524,37 +672,100 @@
     });
     const isSpecial = (i) => special.has(comp.owner[i]);
 
-    // AMS bands stack: one shared layout (per-level step + layer-grid base) for the inlay
-    // floors AND the plate bands, so they line up and never interpenetrate. Levels = palette
-    // slots (+ Deckschicht) with the shared palette, else the largest per-element color count.
+    // --- Shared layer plan (AMS layer alignment, 2026-07-22) --------------------
+    // The plate/Öse color bands and the engraved motif floors share ONE ordered
+    // color→z-band plan snapped to the print-layer grid, so a given AMS color prints
+    // at the SAME height everywhere and every boundary lands on a whole layer. The plan
+    // is computed HERE (by __amsEngravedPlan, below), before any motif floor is emitted,
+    // so both the special `bands` pass and the auto-height solid floors carve to it.
+    // Colors not in the plan (or when there is no plan) fall back to the classic
+    // per-element compression below — no alignment target exists for them. ams/deckShiftE/
+    // lumHex are also read by the fallback compression (amsRank/amsStep) in the bands pass.
+    const lumHex = (hex) => { const c = window.hexToRgb(hex); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
+    // AMS shared palette: a color's layer index (and thus depth) is its position in the
+    // global palette, so the same color lands at the same depth across every element.
     const ams = (Array.isArray(doc.amsPalette) && doc.amsPalette.length) ? doc.amsPalette : null;
+    // Deckschicht on the shared palette: the deck color becomes the topmost plate band
+    // and every palette layer carves ONE STEP DEEPER (through the deck). Motif pixels
+    // never quantize to the deck color — it is the workpiece's face, not a palette slot.
     const deckHexE = doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null;
     const deckShiftE = (deckHexE && deckHexE !== baseHex && ams) ? 1 : 0;
-    let stackLevels = 0;
+    // Pre-scan the engraved bands elements to learn the base-band palette + count WITHOUT
+    // emitting geometry (the special pass below reuses the same set as it emits floors).
+    const bandHexSet = new Set();
+    let bandsElemCount = 0;
     for (const ei of special) {
-      if (colorStyleOf(doc.elements[ei]) !== "bands") continue;
-      if (ams) { stackLevels = ams.length + deckShiftE; break; }
-      const seen = new Set();
+      const el = doc.elements[ei];
+      if (colorStyleOf(el) !== "bands") continue; // flush never bands the plate
+      const remap = (el.depth.reduce && el.depth.reduce.remap) || {};
+      const elemHexes = __orderedNaturalHexesV2(el).map(nat => { const c = window.hexToRgb(remap[nat] || nat); return __hex(c[0], c[1], c[2]); });
+      const present = new Set();
       for (let i = 0; i < cols * rows; i++) {
         if (comp.owner[i] !== ei || comp.isBase[i] || comp.cutout[i] || inBand(i)) continue;
-        seen.add(__hex(comp.r[i], comp.g[i], comp.b[i]));
+        present.add(__hex(comp.r[i], comp.g[i], comp.b[i]));
       }
-      stackLevels = Math.max(stackLevels, seen.size);
+      // Hidden / empty / fully-overlapped bands elements contribute no present pixels
+      // here, so they add nothing to any/bandsElemCount and DON'T suppress plate banding
+      // — an invisible element must not force the ambiguous multi-element fallback.
+      let any = false;
+      for (const h of elemHexes) if (present.has(h)) { bandHexSet.add(h); any = true; }
+      for (const h of present) if (elemHexes.indexOf(h) === -1) { bandHexSet.add(h); any = true; }
+      if (any) bandsElemCount++;
     }
-    // Höhe je Farbe shares the same stack (one step, one layer grid for the whole piece).
-    stackLevels = Math.max(stackLevels, __autoEngravedLevels(doc));
-    const stack = stackLevels > 0 ? __amsStackLayout(doc.body, stackLevels, doc.colorStepLayers) : null;
-    if (stack) { minBase = stack.minBase; maxRecess = stack.maxRecess; }
+    // The shared layer plan (bandHexes + grid-snapped bandThick + planRecess) is built by
+    // the ONE source of truth __amsEngravedPlan, from the pre-scan above; the "Höhe je Farbe"
+    // badge (window.autoSolidHeightMm) calls the same helper so preview == carve.
+    const { bandHexes, bandThick, recessOf: planRecess, minBase: planMinBase } = __amsEngravedPlan(doc, { bandHexSet, bandsElemCount });
+    // No plan (amsSolidBase, ambiguous multi-element bands, auto heights without plate bands)
+    // but still a color stack → the same layer-grid layout for the classic floors, keeping a
+    // color-floor slab of room under the deepest level. legacyCount = largest per-element
+    // color count of palette-less bands elements (only known here, from composed pixels).
+    let fallbackStack = null;
+    if (planMinBase == null) {
+      let legacyCount = 0;
+      if (!ams) for (const ei of special) {
+        if (colorStyleOf(doc.elements[ei]) !== "bands") continue;
+        const seen = new Set();
+        for (let i = 0; i < cols * rows; i++) {
+          if (comp.owner[i] !== ei || comp.isBase[i] || comp.cutout[i] || inBand(i)) continue;
+          seen.add(__hex(comp.r[i], comp.g[i], comp.b[i]));
+        }
+        legacyCount = Math.max(legacyCount, seen.size);
+      }
+      const levels = __fallbackLevels(doc, legacyCount);
+      if (levels > 0) fallbackStack = __gridStack(doc.body, levels, doc.colorStepLayers, floor);
+    }
+    const adoptedBase = planMinBase != null ? planMinBase : (fallbackStack ? fallbackStack.minBase : null);
+    if (adoptedBase != null) { minBase = adoptedBase; maxRecess = Math.max(0, T - floor - minBase); }
+    // Engraved step for the classic (non-plan) floors: whole layers when a stack exists.
+    const stackStep = fallbackStack ? fallbackStack.s : null;
+    const groove = grooveBand
+      ? Math.min(doc.body.line.depthMm, Math.max(0, T - minBase - layerH))
+      : 0;
 
     // Per-element recess depth: solid/text recess by the element's relief height (depth.heightMm);
     // stepped colorLayers split that height evenly across their colors (topmost color = full
     // height). Depth is per element, so each element's relief height is independent of the others.
     const depthForOwnerHex = (ei, hex) => {
       const el = doc.elements[ei];
-      // Auto layer heights: Einfarbig recess derived from the element's color, on the
-      // shared engraved stack step (whole layers, aligned with the plate bands).
-      const engr = el && el.depth && el.depth.direction === "engraved";
-      const autoD = __autoSolidHeight(doc, el, (engr && stack) ? stack.s : null);
+      // Auto layer heights: Einfarbig recess derived from the element's color. When the
+      // color participates in the shared plan, align to it (motif floor top == plate band
+      // top). A manual heightOverrideMm opts the element out — it keeps its pinned recess
+      // (its color still holds a plan slot, so the OTHER floors don't shift). Otherwise
+      // compress the stack into the carve budget (maxRecess) like before.
+      const isAuto = !!(doc.autoLayerHeights && el && el.depth && el.depth.mode === "solid");
+      const overridden = !!(el && el.depth && el.depth.heightOverrideMm != null);
+      if (isAuto && !overridden) {
+        const pr = planRecess(hex);
+        if (pr != null) return pr;
+        // Base-colored auto element with a valid deck carves through it; its color is the
+        // baseHex plan slot, so planRecess(baseHex) already covers it. Fall through only
+        // when there is no plan (raised-only / all-overridden) → classic compression.
+      }
+      // Auto layer heights fallback: Einfarbig recess derived from the element's color,
+      // stack compressed into the carve budget (maxRecess) like AMS bands.
+      const engr = !!(el && el.depth && el.depth.direction === "engraved");
+      const autoD = __autoSolidHeight(doc, el, engr ? __fallbackAutoStep(doc, stackStep, maxRecess) : null);
       if (autoD != null) return autoD;
       const hm = (el && el.depth && el.depth.heightMm != null) ? el.depth.heightMm : layerH;
       const h = hm <= 0 ? 0 : Math.max(hm, layerH); // Relief-Höhe 0 = no recess (off)
@@ -574,11 +785,28 @@
     };
 
     let cn = 0;
-    // thick: slab thickness (default = the 2-layer color floor). Nested AMS floors pass the
-    // stack step so each one ends exactly where the next deeper floor begins.
-    const addFloor = (member, hex, depthMm, thick) => {
-      const t = thick == null ? floor : thick;
-      const facets = tracedFacets(member, t, T - recessOf(depthMm) - t);
+    // z0 (base-under height) for a floor at recess depthMm. Plan-aligned floors (color in
+    // the shared plan, recess == its plan recess) pin their TOP to the plate band's top
+    // (T-depthMm) and clamp the bottom to minBase, so the floor top == band top exactly and
+    // never punches below the solid base. All other floors keep the classic budget-clamped
+    // baseUnder with a fixed `floor` thickness (fallback / parity).
+    const floorZ0 = (hex, depthMm) => {
+      const pr = planRecess(hex);
+      if (pr != null && Math.abs(pr - depthMm) <= 1e-9) return Math.max(T - depthMm - floor, minBase);
+      return baseUnder(depthMm);
+    };
+    const floorThick = (hex, depthMm, z0) => {
+      const pr = planRecess(hex);
+      if (pr != null && Math.abs(pr - depthMm) <= 1e-9) return (T - depthMm) - z0; // top pinned to band top
+      return floor;
+    };
+    // maxThick: nested AMS floors pass the gap to the next deeper floor, so each one ends
+    // exactly where that floor begins instead of interpenetrating it (top stays pinned).
+    const addFloor = (member, hex, depthMm, maxThick) => {
+      let z0 = floorZ0(hex, depthMm);
+      let thick = floorThick(hex, depthMm, z0);
+      if (maxThick != null && maxThick > 1e-9 && thick > maxThick) { z0 += thick - maxThick; thick = maxThick; }
+      const facets = tracedFacets(member, thick, z0);
       if (facets.length) colorParts.push({ name: "farbe-" + (++cn), color: window.hexToRgb(hex), facets });
     };
 
@@ -599,25 +827,20 @@
     }
 
     // --- flush / bands color floors (per-element). ---
-    // effDepth[i] = the DEEPEST floor recess depth at pixel i (used for base-fill-behind).
-    // For special pixels it is set here; for stepped pixels it stays depthFor(hex) below.
-    const effDepth = new Float32Array(cols * rows);
-    // Global luminance helper + collector of the effective (remap-applied) band colors across
-    // all engraved 'bands' elements — used below to split the surrounding plate into AMS bands.
-    const lumHex = (hex) => { const c = window.hexToRgb(hex); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
-    const bandHexSet = new Set();
-    let bandsElemCount = 0;
-    // AMS shared palette: when set, a color's layer index (and thus depth) is its position in the
-    // global palette, so the same color lands at the same depth across every element.
+    // effH: ei -> the DEEPEST floor base-under HEIGHT for that special element (all of a
+    // special element's pixels carve to the same deepest floor, so one value per element is
+    // enough). Kept as a double (not a per-pixel Float32Array) so the base-fill-behind slab
+    // top is byte-identical to the pre-plan build for the non-plan flush/bands-fallback path
+    // (the old code stored the recess in a Float32Array, so its baseUnder rounded the recess
+    // first — replicated here via Math.fround on the recess — but did NOT re-round the height).
+    const effH = new Map();
+    // amsRank/amsStep: the CLASSIC compressed depth used only when a color is NOT in the
+    // shared plan (fallback). The plan itself (bandHexes/bandThick/planRecess) is computed
+    // above and takes precedence via depthOfPos below. ams/deckHexE/deckShiftE/lumHex/
+    // bandHexSet/bandsElemCount are already defined with the plan.
     const amsRank = ams ? ((hex) => { const i = ams.indexOf(hex); return i < 0 ? ams.length - 1 : i; }) : null;
-    // Deckschicht on the shared palette: the deck color becomes the topmost plate band
-    // and every palette layer carves ONE STEP DEEPER (through the deck). The deck also
-    // counts in the carve-budget compression. Motif pixels never quantize to the deck
-    // color — it is the workpiece's face, not a palette slot.
-    // (deckHexE / deckShiftE are resolved above, next to the stack layout.)
-    // Per-level step from the shared stack layout: whole printed layers, compressed only as far
-    // as needed so deep palettes keep DISTINCT, non-overlapping floors.
-    const bandStep = stack ? stack.s : step;
+    const amsStep = stackStep != null ? stackStep : (ams ? Math.min(step, maxRecess / (ams.length + deckShiftE)) : step);
+    const legacyStep = stackStep != null ? stackStep : step;
     for (const ei of special) {
       const el = doc.elements[ei];
       const style = colorStyleOf(el);
@@ -641,23 +864,33 @@
           const set = presentSets.get(hex);
           addFloor((c, r) => set[idx(c, r)] === 1, hex, step);
         }
-        for (let i = 0; i < cols * rows; i++) if (comp.owner[i] === ei && !comp.isBase[i] && !comp.cutout[i] && !inBand(i)) effDepth[i] = step;
+        // Flush floors carve to ONE recess (step) and take the classic base-under height.
+        // A flush color is NOT treated as a plan slot even if an AMS-quantized color happens
+        // to coincide with a plan color — the inlay still carves to `step` and the geometry
+        // stays correct. Compute the height the OLD way (baseUnder of the float32-rounded
+        // recess) so a non-plan flush doc stays byte-identical (the old code stored `step` in
+        // a Float32Array, so its baseUnder saw the float32-rounded recess).
+        effH.set(ei, baseUnder(Math.fround(step)));
       } else {
         // bands (AMS), engraved = downward mirror of raised bands. Sort colors by
-        // luminance ASCENDING (rank 1 = darkest). region(rank k) = union of ranks <= k,
-        // depth = k*step. So each pixel's OWN color is the SHALLOWEST floor covering it
-        // (visible from the top); deeper floors are the lighter colors nested beneath.
-        // Emit DEEPEST first (largest region) so shallower nested floors sit inside.
-        // Order colors by LAYER INDEX: global amsPalette index when the shared palette is active
-        // (so a color sits at the same depth in every element), else per-element luminance.
+        // luminance ASCENDING (rank 1 = darkest). region(rank k) = union of ranks <= k.
+        // So each pixel's OWN color is the SHALLOWEST floor covering it (visible from the
+        // top); deeper floors are the lighter colors nested beneath. Emit DEEPEST first
+        // (largest region) so shallower nested floors sit inside. Order colors by LAYER
+        // INDEX: global amsPalette index when the shared palette is active, else per-element
+        // luminance. (bandHexSet/bandsElemCount are populated by the pre-scan above.)
         const sorted = orderedPresent.slice().sort((a, b) => ams ? amsRank(a) - amsRank(b) : lumHex(a) - lumHex(b));
-        sorted.forEach(h => bandHexSet.add(h)); // contribute to the AMS base-band palette
-        bandsElemCount++;
         const N = sorted.length;
         const n = cols * rows;
-        // depth of the color at sorted position k: global (amsRank+1)*step, else per-element (k+1)*step.
-        // deckShiftE: with a Deckschicht, every palette layer carves one step deeper (through the deck).
-        const depthOfPos = (k) => ams ? (amsRank(sorted[k]) + 1 + deckShiftE) * bandStep : (k + 1) * bandStep;
+        // Recess of the color at sorted position k. PRIMARY: the shared layer plan
+        // (planRecess = index*bandThick → floor top == plate band top, grid-snapped).
+        // FALLBACK (color not in the plan, e.g. amsSolidBase or ambiguous multi-palette):
+        // the classic compressed depth (global (amsRank+1+deck)*amsStep, else (k+1)*step).
+        const depthOfPos = (k) => {
+          const pr = planRecess(sorted[k]);
+          if (pr != null) return pr;
+          return ams ? (amsRank(sorted[k]) + 1 + deckShiftE) * amsStep : (k + 1) * legacyStep;
+        };
         // cumUpTo[k] = union of pixels of the colors at sorted positions 0..k (layer index <= this).
         const cumUpTo = new Array(N);
         cumUpTo[0] = presentSets.get(sorted[0]);
@@ -667,19 +900,22 @@
           cumUpTo[k] = u;
         }
         // Deepest first: the highest-index present color has the largest region (all) + deepest floor.
-        // Shallower floors are exactly as thick as the gap to the next deeper floor (no overlap);
-        // only the deepest one keeps the full color-floor slab.
+        // Shallower (nested) floors are capped at the gap to the next deeper floor.
         for (let k = N - 1; k >= 0; k--) {
           const region = cumUpTo[k];
-          const thick = k === N - 1 ? floor : depthOfPos(k + 1) - depthOfPos(k);
-          addFloor((c, r) => region[idx(c, r)] === 1, sorted[k], depthOfPos(k), thick);
+          const gap = k < N - 1 ? depthOfPos(k + 1) - depthOfPos(k) : null;
+          addFloor((c, r) => region[idx(c, r)] === 1, sorted[k], depthOfPos(k), gap);
         }
-        // Base beneath a pixel reaches the deepest floor covering it = the deepest present color.
-        const deepest = depthOfPos(N - 1);
-        for (let i = 0; i < cols * rows; i++) {
-          if (comp.owner[i] !== ei || comp.isBase[i] || comp.cutout[i] || inBand(i)) continue;
-          effDepth[i] = deepest;
-        }
+        // Base beneath a pixel reaches the deepest floor covering it = the deepest present
+        // color. Store the floor's base-under HEIGHT (plan-aware) so the behind-fill below
+        // meets the floor exactly. PLAN path: floorZ0 pins the top to the band grid — keep
+        // the plan build byte-identical (it stored fround(deepestZ0) via a Float32Array).
+        // FALLBACK path (color not in the plan): round the recess to float32 first, matching
+        // the pre-plan `baseUnder(fround(deepest))` byte-for-byte.
+        const deepestHex = sorted[N - 1], deepestRecess = depthOfPos(N - 1);
+        effH.set(ei, planRecess(deepestHex) != null
+          ? Math.fround(floorZ0(deepestHex, deepestRecess))
+          : baseUnder(Math.fround(deepestRecess)));
       }
     }
 
@@ -695,57 +931,45 @@
     // shallowest), lightest at the bottom of the stack; below the deepest band the interior stays
     // base color. No bands element → single full-height base slab (byte-identical parity).
     const surroundMember = (c, r) => { const i = idx(c, r); return comp.isBase[i] === 1 || inBand(i); };
-    // Split the plate only when EXACTLY ONE engraved element uses bands — its palette then maps
-    // 1:1 onto its own inlay. Multiple bands elements with distinct palettes are ambiguous (a
-    // global sort/count would carve deeper than any single inlay), so fall back to a plain base.
-    // AMS shared palette → band the base with the FULL palette in layer order (multi-element safe).
-    // No shared palette → legacy: only band for a single bands element (else plain base).
-    // Band the base ONLY when an engraved bands element is actually present in this build — a
-    // lingering (populated-but-unused) amsPalette must NOT stripe the plate of a non-AMS design.
-    // amsSolidBase keeps the surrounding plate one solid base color (only the inlay is multicolor).
-    let bandHexes = (doc.amsSolidBase || bandsElemCount === 0)
-      ? []
-      : (ams ? (deckShiftE ? [deckHexE].concat(ams) : ams.slice())
-             : (bandsElemCount === 1 ? [...bandHexSet].sort((a, b) => lumHex(a) - lumHex(b)) : []));
-    // Auto layer heights (Höhe je Farbe): engraved Einfarbig elements split the plate
-    // the same way — the whole workpiece becomes solid single-color layers. The FACE
-    // of the plate is band 1 and stays the BASE color: base-colored elements are
-    // flush with it, so the surface prints as ONE solid base-colored layer; rank-k
-    // colors band one step further down, where their carve floors actually sit.
-    // (Without the base band, the rank-0 color capped the plate while flush elements
-    // stayed base-colored — a two-color top layer, and a base-colored Deckschicht
-    // seemed to "vanish".) A valid (non-base) Deckschicht replaces the face — it
-    // already leads the order, so no base band is prepended then. Only when no
-    // colorLayers-bands element is in the build (those keep the AMS palette above),
-    // and only if at least one auto-ranked engraved solid element actually prints
-    // (a manual heightOverrideMm opts an element out; its color still holds its rank).
-    if (!bandHexes.length && doc.autoLayerHeights && !doc.amsSolidBase && bandsElemCount === 0) {
-      const order = __autoSolidOrder(doc, "engraved");
-      const deckValidE = !!(deckHexE && deckHexE !== baseHex);
-      if (__autoEngravedLevels(doc) > 0) {
-        // Valid deck = band 1 (the face); the BASE band sits directly below it —
-        // base-colored elements carve through the deck and level with that band.
-        bandHexes = deckValidE ? [order[0], baseHex].concat(order.slice(1)) : [baseHex].concat(order);
-      }
-    }
+    // The plate-band plan (bandHexes) + grid-snapped bandThick were computed at the top of
+    // this function (see "Shared layer plan"): a single bands element's own palette, the full
+    // shared amsPalette (multi-element safe), or the auto-heights order — the same plan the
+    // motif floors carve to. amsSolidBase / no bands element → bandHexes empty (plain plate).
+    // The FACE of the plate stays the base color (band 1); a valid Deckschicht replaces it.
     if (bandHexes.length > 0) {
       const N = bandHexes.length;
-      const avail = Math.max(0, T - minBase);
-      // Shared stack step (AMS bands and Höhe je Farbe), so plate bands line up with the
-      // carve floors; the fallback only covers a band list without a stack.
-      const bandThick = stack ? stack.s : Math.min(step, avail / N);
       const interiorTop = T - N * bandThick;
       // The Rand-Rahmen understructure bands together with the interior — the border is
       // part of the workpiece, so its printed layers stay one solid color too (the frame
       // cap in frame.color still sits on top of it, above T).
       if (interiorTop - minBase > 1e-6) baseAdd(surroundMember, interiorTop - minBase, minBase); // base below the bands
       // Rank k (1=darkest .. N=lightest) occupies [T-k*bandThick, T-(k-1)*bandThick].
+      // A Zierlinie groove carves the portion above T-groove out of the affected bands.
       for (let k = N; k >= 1; k--) {
         const zBot = T - k * bandThick;
         if (bandThick <= 1e-6) continue;
-        const facets = tracedFacets(surroundMember, bandThick, zBot);
-        if (facets.length) baseParts.push({ name: "grundplatte-band-" + k, color: window.hexToRgb(bandHexes[k - 1]), facets });
+        const zTop = zBot + bandThick;
+        const bandName = "grundplatte-band-" + k, bandColor = window.hexToRgb(bandHexes[k - 1]);
+        if (groove > 1e-6 && zTop > T - groove + 1e-9) {
+          const zCut = Math.max(zBot, T - groove);
+          if (zCut - zBot > 1e-6) {
+            const lower = tracedFacets(surroundMember, zCut - zBot, zBot);
+            if (lower.length) baseParts.push({ name: bandName, color: bandColor, facets: lower });
+          }
+          if (zTop - zCut > 1e-6) {
+            const upper = tracedFacets((c, r) => surroundMember(c, r) && !inGroove(idx(c, r)), zTop - zCut, zCut);
+            if (upper.length) baseParts.push({ name: bandName, color: bandColor, facets: upper });
+          }
+        } else {
+          const facets = tracedFacets(surroundMember, bandThick, zBot);
+          if (facets.length) baseParts.push({ name: bandName, color: bandColor, facets });
+        }
       }
+    } else if (groove > 1e-6) {
+      // Zierlinie (vertieft) on the plain plate: full slab up to the groove
+      // floor, top slab minus the groove band.
+      if (T - groove - minBase > 1e-6) baseAdd(surroundMember, T - groove - minBase, minBase);
+      baseAdd((c, r) => surroundMember(c, r) && !inGroove(idx(c, r)), groove, T - groove);
     } else {
       baseAdd(surroundMember, T - minBase, minBase);
     }
@@ -753,10 +977,17 @@
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const i = idx(c, r);
       if (comp.cutout[i] || comp.isBase[i] || inBand(i)) continue;
-      // Fill the base beneath the DEEPEST floor at this pixel down to minBase.
-      // Stepped/solid/text: per-element depth. flush/bands: effDepth[i] set above.
-      const d = isSpecial(i) ? effDepth[i] : depthForOwnerHex(comp.owner[i], __hex(comp.r[i], comp.g[i], comp.b[i]));
-      const h = baseUnder(d);
+      // Fill the base beneath the DEEPEST floor at this pixel down to minBase. effH
+      // (flush/bands) already holds the special element's base-under HEIGHT; for
+      // stepped/solid/text derive it plan-aware from the per-element recess (floorZ0 pins
+      // plan-aligned floors to the band grid, else the classic budget-clamped baseUnder).
+      let h;
+      if (isSpecial(i)) {
+        h = effH.get(comp.owner[i]);
+      } else {
+        const hex = __hex(comp.r[i], comp.g[i], comp.b[i]);
+        h = floorZ0(hex, depthForOwnerHex(comp.owner[i], hex));
+      }
       if (h - minBase <= 1e-6) continue;
       const key = h.toFixed(4);
       let set = behind.get(key); if (!set) behind.set(key, set = { h, m: new Uint8Array(cols * rows) });
@@ -779,7 +1010,16 @@
   // engraved colored floors + raised prisms + heightmap slabs. Mount ring no longer
   // emitted (Öse is now a flat tab via footprint union on the expanded domain).
   // Handles rect/circle/free bodies.
-  function buildParts(doc) {
+  function buildParts(doc, opts) {
+    // Schaukasten: stacked paper-cut plates — separate assembly path. Only
+    // rect/circle bodies (the opening field needs the analytic perimeter).
+    // Disabled or unsupported shapes fall through untouched (parity).
+    if (doc.shadowbox && doc.shadowbox.enabled &&
+        (doc.body.shape === "rect" || doc.body.shape === "circle")) {
+      const sbLayout = opts && opts.layout === "bed" ? "bed" : "stack";
+      const sbExplode = (opts && typeof opts.explodeMm === "number" && opts.explodeMm > 0) ? opts.explodeMm : 0;
+      return buildShadowboxParts(doc, sbLayout, sbExplode);
+    }
     // Compute a single shared grid over the expanded domain (expanded only when the
     // Öse washer overhangs the body box; default = body box, byte-identical path).
     const domain = docDomain(doc);
@@ -856,12 +1096,32 @@
     // band === null => frame off => all content builders byte-identical (parity).
     const band = __frameBand(doc, grid, footprint, comp, domainExpanded);
 
+    // Zierlinie band (rect/circle only): footprint cells whose decorated-SDF
+    // distance to the plate edge falls into one of the line rings. Follows the
+    // Zierkante automatically (bodySdfMm is the decorated SDF). null = off.
+    const lineBand = __zierlinieBand(doc, grid, footprint, comp, band, domainExpanded);
+    const lineMode = lineBand ? doc.body.line.mode : "none";
+
+    return [
+      ...__contentParts(doc, comp, grid, footprint, band,
+        lineMode === "engraved" ? lineBand : null),
+      ...buildFrameParts(doc, band, cols, rows, pitch),
+      ...buildZierlinieParts(doc, lineMode === "raised" ? lineBand : null, cols, rows, pitch),
+      ...buildMountRingParts(doc),
+    ];
+  }
+
+  // Content assembly shared by buildParts and buildShadowboxParts: reclassifies
+  // non-engraved pixels as base for the engraved pass, then concatenates the
+  // three content builders. Extracted verbatim — order and output byte-identical.
+  function __contentParts(doc, comp, grid, footprint, band, grooveBand) {
+    const { cols, rows, pitch } = grid;
     const isEngravedEi = (ei) => {
       const d = doc.elements[ei] && doc.elements[ei].depth;
       return !!(d && d.direction === "engraved" && d.mode !== "heightmap");
     };
     const base = window.hexToRgb(doc.body.baseColor);
-    // depthMm and cutout are shared read-only (alias intentional; only r/g/b/isBase/owner are sliced because only they are rewritten).
+    // depthMm and cutout are shared read-only (alias intentional; only r/g/b/isBase/owner are rewritten).
     const engComp = {
       r: comp.r.slice(), g: comp.g.slice(), b: comp.b.slice(),
       depthMm: comp.depthMm, cutout: comp.cutout,
@@ -875,12 +1135,603 @@
       }
     }
     return [
-      ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint, band),
+      ...__engravedBaseAndFloors(doc, engComp, cols, rows, pitch, footprint, band, grooveBand),
       ...buildRaisedParts(doc, footprint, comp, grid, band),
       ...buildHeightmapParts(doc, footprint, grid, band),
-      ...buildFrameParts(doc, band, cols, rows, pitch),
-      ...buildMountRingParts(doc),
     ];
+  }
+
+  // Facet translation — creates new vertex arrays to avoid double-shifting
+  // shared vertices (extrudeLoops reuses corner arrays across wall quads).
+  function __shiftFacets(parts, dx, dy, dz) {
+    for (const p of parts) {
+      p.facets = p.facets.map(f => f.map(v => [v[0] + dx, v[1] + dy, v[2] + dz]));
+    }
+    return parts;
+  }
+
+  // mm bounds of set cells in a flat Uint8Array mask (cell-center mapping).
+  // sx = cols/W, sy = rows/H. Returns {x0, x1, y0, y1} in mm; all Infinity
+  // when no cell is set (caller must guard on empty masks before using bbox).
+  function __maskBBoxMm(mask, cols, rows, sx, sy) {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (!mask[r * cols + c]) continue;
+        const xMm = (c + 0.5) / sx;
+        const yMm = (r + 0.5) / sy;
+        if (xMm < x0) x0 = xMm;
+        if (xMm > x1) x1 = xMm;
+        if (yMm < y0) y0 = yMm;
+        if (yMm > y1) y1 = yMm;
+      }
+    }
+    return { x0, x1, y0, y1 };
+  }
+
+  const __SB_MOUNT_NONE = Object.freeze({ type: "none", xMm: 0, yMm: 0, diameterMm: 0, ringThicknessMm: 0, ringHeightMm: 0, marginMm: 0 });
+
+  // Schaukasten assembly: one plate per layer, shared opening field thresholded
+  // at k*insetPerLayerMm, content via the standard per-plate pipeline.
+  // layout 'stack' = assembled preview (front plate on top); 'bed' = print
+  // layout, every plate at z0=0 side-by-side, stand beside the plates.
+  function buildShadowboxParts(doc, layout, explodeMm) {
+    const g = (typeof explodeMm === "number" && explodeMm > 0) ? explodeMm : 0;
+    const sb = doc.shadowbox;
+    const n = window.__sbClampLayers(sb.layers);
+    const T = doc.body.thicknessMm;
+    const W = doc.body.widthMm, H = doc.body.heightMm;
+    const colors = window.shadowboxPlateColors(Object.assign({}, sb, { layers: n }));
+    const inset = Math.max(0.5, sb.insetPerLayerMm || 4);
+    // Domain never expands: mount is 'hole' at most (loop stripped below).
+    const domain = docDomain(Object.assign({}, doc, { mount: __SB_MOUNT_NONE }));
+    const grid = gridForDomain(domain, doc.resolution);
+    const { cols, rows, pitch } = grid;
+    const f = window.shadowboxOpeningField(doc, grid);
+    const layerOf = (el) => el.sbLayer == null ? n - 1 : Math.max(0, Math.min(n - 1, el.sbLayer | 0));
+    const modeOf = (el) => el.sbMode === "rim" || el.sbMode === "float" ? el.sbMode : (el.sbMode == null && el.sbOverhang ? "rim" : "plate");
+    const sx = cols / W, sy = rows / H, s = (sx + sy) / 2;
+    const gapMm = 5;
+    // Separately printed pieces need lateral air against the plate rings.
+    const SEAM_CLEARANCE_MM = 0.2;
+    const out = [];
+
+    // B: minimum border around a rim object on its own plate.
+    const B = Math.max(2, inset);
+    // pmm: pixel size in mm (average of x and y pitch).
+    const pmm = (1 / sx + 1 / sy) / 2;
+
+    // Collect rim elements once (before the plate loop). Each entry carries
+    // the raw silhouette mask, the resolved level, and a signed-mm distance
+    // field dC (NEGATIVE inside the rim object, POSITIVE outside — mm from
+    // the silhouette edge): dC[i] = mask[i] ? -dIn[i]*pmm : +dOut[i]*pmm.
+    // Two chamfer DT passes (same cost class as the drawn opening field).
+    const rims = [];
+    if (f) {
+      const dk0rim = Object.assign({}, doc, { shadowbox: null });
+      for (const el of doc.elements) {
+        if (modeOf(el) !== "rim") continue;
+        if (el.type === "image" && !el._img) continue;
+        const level = layerOf(el);
+        const rendered = __renderElementV2(el, dk0rim, cols, rows, grid);
+        if (!rendered || !rendered.mask) continue;
+        const mask = rendered.mask;
+        // Build inside/outside masks for two DT passes.
+        const inv = new Uint8Array(cols * rows);
+        for (let i = 0; i < inv.length; i++) inv[i] = mask[i] ? 0 : 1;
+        const dIn = window.__chamferDT(inv, cols, rows);   // distance inward (from outside edge)
+        const dOut = window.__chamferDT(mask, cols, rows); // distance outward (from inside edge)
+        const dC = new Float32Array(cols * rows);
+        for (let i = 0; i < dC.length; i++) {
+          dC[i] = mask[i] ? -dIn[i] * pmm : dOut[i] * pmm;
+        }
+        // Sign: inside rim dC < 0, outside dC > 0 (mm from rim edge).
+        // openAt requires dC > B+delta+seam → only holds far outside the rim.
+        // Cut term: B+delta-dC > 0 when cell is inside or within B+delta of rim
+        // → max() makes it plate material (protected ring around the object).
+        rims.push({ el, level, mask, dC });
+      }
+    }
+
+    // Collect float elements once (before the plate loop). Each entry carries
+    // the clipped silhouette mask and the resolved level (clamped to n-2 so
+    // the back plate — which has no opening — is never a float target).
+    // Floats are collected AFTER rims so their masks can use rim dC fields.
+    const floats = [];
+    if (f) {
+      for (const el of doc.elements) {
+        if (modeOf(el) !== "float") continue;
+        if (el.type === "image" && !el._img) continue; // skip unloaded images
+        const level = Math.max(0, Math.min(n - 2, el.sbLayer == null ? n - 2 : el.sbLayer | 0));
+        const levelInset = level * inset;
+        // Render the element silhouette against a neutral doc (no plate-specific transforms).
+        const dk0 = Object.assign({}, doc, { shadowbox: null });
+        const rendered = __renderElementV2(el, dk0, cols, rows, grid);
+        if (!rendered || !rendered.mask) continue;
+        // Clip silhouette to the adapted opening at this level (includes rim terms).
+        // openAt(level, c, r, SEAM_CLEARANCE_MM): f > level*inset+seam AND all rims with
+        // level<=level have dC > B + (level-rm.level)*inset + seam.
+        const raw = rendered.mask;
+        const mask = new Uint8Array(cols * rows);
+        for (let i = 0; i < mask.length; i++) {
+          if (!raw[i]) continue;
+          const c = i % cols, r2 = (i / cols) | 0;
+          if (f(c, r2) <= levelInset + SEAM_CLEARANCE_MM) continue;
+          // Check all rim terms at this level.
+          let blocked = false;
+          for (const rm of rims) {
+            if (rm.level > level) continue;
+            if (rm.dC[i] <= B + (level - rm.level) * inset + SEAM_CLEARANCE_MM) { blocked = true; break; }
+          }
+          if (!blocked) mask[i] = 1;
+        }
+        // Compute per-piece design doc + composition for content pass (colorLayers/heightmap raised).
+        // Cached here so pin-spot flat-mask derivation and emission both reuse the same objects.
+        let compP = null;
+        let dp = null;
+        let flatMask = null; // null = piece is fully flat (no content pass)
+        const d = el.depth;
+        if (d && d.direction !== "engraved" && (d.mode === "colorLayers" || d.mode === "heightmap")) {
+          dp = Object.assign({}, doc, { topLayerColor: null, elements: [el], shadowbox: null });
+          compP = composeDesignV2(dp, cols, rows, grid);
+          flatMask = new Uint8Array(cols * rows);
+          for (let i = 0; i < flatMask.length; i++) flatMask[i] = compP.owner[i] < 0 ? 1 : 0;
+        }
+        floats.push({ el, level, mask, compP, dp, flatMask });
+      }
+    }
+
+    // Montagestifte: peg on the rear part's face, blind hole in the front part.
+    const pinCfg = sb.pins || {};
+    const pinsOn = pinCfg.enabled !== false;
+    const pegR = (pinCfg.diameterMm || 3) / 2;
+    const holeR = ((pinCfg.diameterMm || 3) + (pinCfg.clearanceMm != null ? pinCfg.clearanceMm : 0.35)) / 2;
+    const pegH = Math.min(1.2, 0.6 * T);
+    const holeDepth = Math.min(T - 0.4, pegH + 0.2);
+    const pinList = []; // { lower: float|"back", upper: float, spots }
+    if (pinsOn && floats.length) {
+      for (const lo of floats) for (const up of floats) {
+        if (up.level !== lo.level - 1) continue;
+        const overlap = new Uint8Array(cols * rows);
+        let any = false;
+        for (let i = 0; i < overlap.length; i++) if (lo.mask[i] && up.mask[i]) { overlap[i] = 1; any = true; }
+        if (!any) continue;
+        // Peg base on the LOWER face must be flat (no raised content underneath the peg foot).
+        // The upper piece's underside is always flat: holes drill into the slab body [0, holeDepth],
+        // while raised content sits on the front face (z ≥ T). No upper-side intersection needed.
+        let spotMask = overlap;
+        if (lo.flatMask) {
+          const m = new Uint8Array(cols * rows);
+          for (let i = 0; i < m.length; i++) m[i] = spotMask[i] & lo.flatMask[i];
+          spotMask = m;
+        }
+        const spots = window.shadowboxPinSpots(spotMask, cols, rows, sx, sy, holeR + 1.0, 12);
+        if (spots.length) pinList.push({ lower: lo, upper: up, spots });
+      }
+      // Back-plate back-anchor spots are deferred into the plate loop (after comp/flatTop)
+      // so pegs only land on flat plate face (owner < 0 ⇒ no element → top at T).
+    }
+    // Platten-Ausrichtungs-Dübel: two through-holes in the bottom strip (y = H-4)
+    // punched into EVERY plate, plus printed dowel parts spanning the full stack.
+    // Gated on pinsOn. Spots computed once (pure, deterministic) before the plate loop.
+    // holeR reused from above: (diameterMm + clearanceMm) / 2.
+    const dowelR = (pinCfg.diameterMm || 3) / 2; // printed dowel radius (no clearance)
+    const dowelSpots = [];
+    if (pinsOn) {
+      const plateSdf = window.bodySdfMm(doc.body); // decorated SDF (includes Zierkante)
+      // Elements from ALL plates whose mode is plate or rim (not float) — for AABB check.
+      const aabbs = doc.elements.filter((el) => modeOf(el) !== "float").map((el) => window.elementAABB(el));
+      const edgeClear = holeR + 1.2;
+      const fieldClear = holeR + 0.8;
+      // AABB inflation: 1mm clearance measured from the printed dowel cylinder edge.
+      // Center must be at least (1 + dowelR) from any AABB face.
+      const aabbInflate = 1 + dowelR;
+      // Mount-hole clearance (only relevant when the back plate has a hanging hole).
+      const mountHole = (doc.mount && doc.mount.type === "hole") ? doc.mount : null;
+      const mountClear = mountHole ? holeR + mountHole.diameterMm / 2 + 1 : 0;
+      // Scan one row at yMm; return { yMm, xs: [...valid x values] } or null if none.
+      const scanRow = (yMm) => {
+        const rr = Math.round(yMm * sy - 0.5);
+        const xs = [];
+        for (let xMm = 6; xMm <= W - 6; xMm++) {
+          if (plateSdf(xMm, yMm) < edgeClear) continue;
+          const cc = Math.round(xMm * sx - 0.5);
+          if (f && f(cc, rr) > -fieldClear) continue;
+          let blocked = false;
+          for (const aabb of aabbs) {
+            if (xMm > aabb.x0 - aabbInflate && xMm < aabb.x1 + aabbInflate &&
+                yMm > aabb.y0 - aabbInflate && yMm < aabb.y1 + aabbInflate) {
+              blocked = true; break;
+            }
+          }
+          if (blocked) continue;
+          if (mountHole && Math.hypot(xMm - mountHole.xMm, yMm - mountHole.yMm) < mountClear) continue;
+          xs.push(xMm);
+        }
+        return xs.length ? { yMm, xs } : null;
+      };
+      // Try bottom strip first (hidden by stand pocket), fall back to top strip.
+      const row = scanRow(H - 4) || scanRow(4);
+      if (row) {
+        const { yMm: yUsed, xs } = row;
+        if (xs.length >= 2) {
+          // Pick the pair maximizing separation with min 20 mm apart.
+          let bestX1 = -1, bestX2 = -1, bestSep = -1;
+          for (let i = 0; i < xs.length; i++) {
+            for (let j = i + 1; j < xs.length; j++) {
+              const sep = xs[j] - xs[i];
+              if (sep >= 20 && sep > bestSep) { bestSep = sep; bestX1 = xs[i]; bestX2 = xs[j]; }
+            }
+          }
+          if (bestX1 >= 0) {
+            dowelSpots.push({ xMm: bestX1, yMm: yUsed });
+            dowelSpots.push({ xMm: bestX2, yMm: yUsed });
+          } else {
+            // No valid pair ≥ 20 mm apart → single dowel at the first valid x.
+            dowelSpots.push({ xMm: xs[0], yMm: yUsed });
+          }
+        } else {
+          dowelSpots.push({ xMm: xs[0], yMm: yUsed });
+        }
+      }
+      // If no valid x on either row: skip silently (dowelSpots stays empty).
+    }
+
+    // Rand-Wolken piece records collected during the plate loop (masks exist in-loop).
+    const randPieces = [];
+
+    let pegIdx = 0;
+    const pegParts = (spots, levelForName, color) => spots.map((sp) => {
+      const m = new Uint8Array(cols * rows);
+      window.__sbStampDisk(m, cols, rows, sx, sy, sp.xMm, sp.yMm, pegR, 1);
+      return { name: "ebene-" + (levelForName + 1) + "-stift-" + (++pegIdx),
+               color, facets: window.traceMaskToFacets((c, r) => m[r * cols + c] === 1, cols, rows, pitch, pegH, T) };
+    }).filter((p) => p.facets.length);
+
+    for (let k = 0; k < n; k++) {
+      const isBack = k === n - 1;
+      const dk = Object.assign({}, doc, {
+        body: Object.assign({}, doc.body, {
+          baseColor: colors[k],
+          frame: { widthMm: 0, heightMm: 2, color: "#000000" },   // v1: off on all plates
+          line: { mode: "none", insetMm: 2.5, widthMm: 0.8, depthMm: 0.6, count: 1, color: "#000000" },
+        }),
+        topLayerColor: null,
+        // back plate keeps a hanging hole; 'loop' (Öse) is not supported in v1
+        mount: (isBack && doc.mount && doc.mount.type === "hole") ? doc.mount : __SB_MOUNT_NONE,
+        elements: doc.elements.filter((el) => layerOf(el) === k && modeOf(el) === "plate"),
+        shadowbox: null,
+      });
+      const base = window.shapeFootprintField(cols, rows, dk.body, dk.mount);
+      let fp = base;
+      if (!isBack && f) {
+        // Adapted opening footprint: plate material where NOT openAt(k, c, r, 0).
+        // openAt(j, c, r, seam) := f > j*inset+seam AND all rims with level<=j have
+        // dC > B + (j-level)*inset + seam.
+        // Implemented as: fp = min(base, s * max(cutF, max_rims cutC))
+        //   cutF = k*inset - f(c,r)  (POSITIVE → outside the opening → plate MATERIAL)
+        //   cutC_rm = B + (k-rm.level)*inset - rm.dC[i]  (POSITIVE → inside the rim
+        //   protection zone → plate MATERIAL)
+        // A cell is hollow (open) only when ALL terms are <= 0; any positive
+        // term keeps it plate material — that is how a rim object grows its
+        // own plate and makes deeper rings wrap around it.
+        // Back plate: skip (isBack guard above keeps fp = base).
+        const insetK = k * inset;
+        const rimsAtOrBelow = rims.filter((rm) => rm.level <= k);
+        if (rimsAtOrBelow.length === 0) {
+          // No rim terms: same as old opening cut.
+          fp = (c, r) => Math.min(base(c, r), (insetK - f(c, r)) * s);
+        } else {
+          fp = (c, r) => {
+            const bv = base(c, r);
+            if (bv <= 0) return bv;
+            const i = r * cols + c;
+            let cut = insetK - f(c, r); // f-term (positive → plate material)
+            for (const rm of rimsAtOrBelow) {
+              const rimCut = B + (k - rm.level) * inset - rm.dC[i];
+              if (rimCut > cut) cut = rimCut;
+            }
+            return Math.min(bv, cut * s);
+          };
+        }
+      }
+      // Dowel through-holes: punch every plate's footprint at the two alignment spots.
+      // Uses the mount-hole min pattern: fp'' = min(fp', (hypot(x-hx, y-hy) - holeR) * s).
+      if (dowelSpots.length) {
+        const fpPrev = fp;
+        fp = (c, r) => {
+          let v = fpPrev(c, r);
+          if (v <= 0) return v;
+          const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
+          for (const ds of dowelSpots) v = Math.min(v, (Math.hypot(x - ds.xMm, y - ds.yMm) - holeR) * s);
+          return v;
+        };
+      }
+      // Collect rim masks for this plate (for rand prism pieces).
+      // The old 'over' union block is removed — the adapted fp above subsumes it.
+      const rimMasks = rims
+        .filter((rm) => rm.level === k)
+        .map((rm) => ({ el: rm.el, mask: rm.mask }));
+      const comp = composeDesignV2(dk, cols, rows, grid);
+      // fp is the adapted opening footprint for tunnel plates (base for the back plate).
+      // __contentParts clips all content to fp; rim objects extend plate material via
+      // the B-border cut term (no separate union needed).
+      const plateParts = __contentParts(dk, comp, grid, fp, null, null);
+
+      // flatTop: cells no element owns → plain plate face at exactly T. Used to
+      // restrict peg spots to flat surface (owner < 0 ⇒ no raised/engraved content).
+      const flatTop = new Uint8Array(cols * rows);
+      if (pinsOn) {
+        for (let i = 0; i < flatTop.length; i++) flatTop[i] = comp.owner[i] < 0 ? 1 : 0;
+      }
+      // Local helper: bitwise AND of two same-length Uint8Arrays.
+      const __andMasks = (a, b) => { const r = new Uint8Array(a.length); for (let i = 0; i < r.length; i++) r[i] = a[i] & b[i]; return r; };
+
+      // Rand-Wolken: compute clipped prism mask per rim element, collect as standalone
+      // piece records. Pegs (when pins on) land on flat cells of this plate
+      // (plateParts, after rename, before shift); hole spots travel with the piece
+      // record for emission later.
+      // Adapted prism clip: keep cell iff base > 0 AND (k===0 OR openAt(k-1, c, r, SEAM)).
+      // openAt(k-1,...): f > (k-1)*inset+seam AND all rims with level<=k-1 have
+      // dC > B + (k-1-rm.level)*inset + seam. A rim at level k never fires at k-1
+      // (level > k-1), so the object's own term never clips it here (correct).
+      const insetFront = (k - 1) * inset;
+      const rimsFront = f ? rims.filter((rm) => rm.level <= k - 1) : [];
+      const randPegsThisPlate = []; // buffered; appended after rename, before shift
+      for (const rm of rimMasks) {
+        const prismMask = new Uint8Array(cols * rows);
+        for (let i = 0; i < prismMask.length; i++) {
+          const c = i % cols, r = (i / cols) | 0;
+          if (!rm.mask[i] || base(c, r) <= 0) continue;
+          if (k !== 0 && f) {
+            // Must satisfy openAt(k-1): f term
+            if (f(c, r) <= insetFront + SEAM_CLEARANCE_MM) continue;
+            // Rim terms at levels <= k-1
+            let blocked = false;
+            for (const rr of rimsFront) {
+              if (rr.dC[i] <= B + (k - 1 - rr.level) * inset + SEAM_CLEARANCE_MM) { blocked = true; break; }
+            }
+            if (blocked) continue;
+          }
+          prismMask[i] = 1;
+        }
+        let holeSpots = [];
+        if (pinsOn) {
+          const spots = window.shadowboxPinSpots(__andMasks(prismMask, flatTop), cols, rows, sx, sy, holeR + 1.0, 12);
+          if (spots.length) {
+            holeSpots = spots;
+            randPegsThisPlate.push(...pegParts(spots, k, window.hexToRgb(colors[k])));
+          }
+        }
+        randPieces.push({ el: rm.el, level: k, mask: prismMask, kind: "rand", holeSpots });
+      }
+
+      for (const p of plateParts) p.name = "ebene-" + (k + 1) + "-" + p.name;
+      // Rand pegs: already named by pegParts, appended after rename, before shift so
+      // they travel with the plate as one unit (same pattern as back-plate pegs).
+      plateParts.push(...randPegsThisPlate);
+      // Back-plate pegs (Abstands-Zapfen): computed here (after comp/flatTop) so spots
+      // only land on flat plate top (owner < 0). Append after rename, before shift.
+      // Eligible: every float that is NOT the upper member of any float-float pin
+      // (i.e., the chain's deepest member). spacer = (n-2-level)*T extends the peg
+      // through intermediate slabs. Spots are constrained to the adapted open(n-2)
+      // region so the spacer shaft clears all traversed rings.
+      if (isBack && pinsOn) {
+        const hasFloatAbove = new Set(pinList.filter((p) => p.lower !== "back").map((p) => p.upper));
+        // openAt(n-2, SEAM) mask: cells where the opening is clear at the deepest tunnel level.
+        // Nested openings guarantee this is the tightest constraint for all traversed plates.
+        const insetBack = (n - 2) * inset;
+        const rimsForBack = f ? rims.filter((rm) => rm.level <= n - 2) : [];
+        const openN2 = new Uint8Array(cols * rows);
+        if (f) {
+          for (let i = 0; i < openN2.length; i++) {
+            const c = i % cols, r = (i / cols) | 0;
+            if (f(c, r) <= insetBack + SEAM_CLEARANCE_MM) continue;
+            let blocked = false;
+            for (const rm of rimsForBack) {
+              if (rm.dC[i] <= B + (n - 2 - rm.level) * inset + SEAM_CLEARANCE_MM) { blocked = true; break; }
+            }
+            if (!blocked) openN2[i] = 1;
+          }
+        } else {
+          openN2.fill(1);
+        }
+        const backColor = window.hexToRgb(colors[n - 1]);
+        for (const up of floats) {
+          if (hasFloatAbove.has(up)) continue;
+          const spacer = (n - 2 - up.level) * T;
+          // Back anchor: hole drills into the piece's underside slab [0, holeDepth]; raised
+          // content lives on the front face (z ≥ T). The piece underside is always flat —
+          // only the back plate's own flat-top (owner < 0) and open(n-2) constraints apply.
+          const spotMask = __andMasks(__andMasks(up.mask, flatTop), openN2);
+          const spots = window.shadowboxPinSpots(spotMask, cols, rows, sx, sy, holeR + 1.0, 12);
+          if (spots.length) {
+            pinList.push({ lower: "back", upper: up, spots });
+            const pegHeight = spacer + pegH;
+            const spacerPegs = spots.map((sp) => {
+              const m = new Uint8Array(cols * rows);
+              window.__sbStampDisk(m, cols, rows, sx, sy, sp.xMm, sp.yMm, pegR, 1);
+              const facets = window.traceMaskToFacets((c, r) => m[r * cols + c] === 1, cols, rows, pitch, pegHeight, T);
+              return { name: "ebene-" + n + "-stift-" + (++pegIdx), color: backColor, facets };
+            }).filter((p) => p.facets.length);
+            plateParts.push(...spacerPegs);
+          }
+        }
+      }
+      if (layout === "stack") __shiftFacets(plateParts, 0, 0, (n - 1 - k) * (T + g));
+      else __shiftFacets(plateParts, k * (W + gapMm), 0, 0);
+      out.push(...plateParts);
+    }
+
+    const stand = window.buildStandParts(Object.assign({}, sb, { layers: n }), W, T);
+    if (stand.length) {
+      const dx = layout === "stack" ? W + 2 * gapMm : n * (W + gapMm) + gapMm;
+      out.push(...__shiftFacets(stand, dx, 0, 0));
+    }
+
+    // Emit dowel parts: printed alignment cylinders spanning the full stack.
+    // Stack: z = [0.3, stackH - 0.3] (0.3 mm recess per side; stretches with explode).
+    // stackH with explode = (n-1)*(T+g) + T (top of the front plate).
+    // Bed: standing cylinders placed in the pieces row via the bedX cursor.
+    // Stand-width term mirrors buildStandParts' L = (W + tol) + 2*rail
+    // (js/shadowbox.js) — keep the two in sync if the stand length ever changes.
+    const __stTol = sb.stand && sb.stand.tolMm != null ? sb.stand.tolMm : 0.4;
+    const __stRail = Math.max(2, (sb.stand && sb.stand.railMm) || 5);
+    let bedX = n * (W + gapMm) + gapMm + (stand.length ? (W + __stTol) + 2 * __stRail + gapMm : 0);
+    if (dowelSpots.length && layout !== "bed") {
+      const stackH = (n - 1) * (T + g) + T;
+      const dowelLen = stackH - 0.6; // 0.3 mm recess per side
+      const dowelColor = window.hexToRgb(sb.colorBack || "#1B5E9E");
+      for (let di = 0; di < dowelSpots.length; di++) {
+        const ds = dowelSpots[di];
+        const dm = new Uint8Array(cols * rows);
+        window.__sbStampDisk(dm, cols, rows, sx, sy, ds.xMm, ds.yMm, dowelR, 1);
+        const facets = window.traceMaskToFacets((c, r) => dm[r * cols + c] === 1, cols, rows, pitch, dowelLen, 0.3);
+        if (facets.length) out.push({ name: "duebel-" + (di + 1), color: dowelColor, facets });
+      }
+    }
+    if (dowelSpots.length && layout === "bed") {
+      const dowelLen = n * T - 0.6; // bed: total stack height without explode
+      const dowelColor = window.hexToRgb(sb.colorBack || "#1B5E9E");
+      for (let di = 0; di < dowelSpots.length; di++) {
+        const ds = dowelSpots[di];
+        const dm = new Uint8Array(cols * rows);
+        window.__sbStampDisk(dm, cols, rows, sx, sy, ds.xMm, ds.yMm, dowelR, 1);
+        const facets = window.traceMaskToFacets((c, r) => dm[r * cols + c] === 1, cols, rows, pitch, dowelLen, 0);
+        if (facets.length) {
+          const part = { name: "duebel-" + (di + 1), color: dowelColor, facets };
+          const bb = __maskBBoxMm(dm, cols, rows, sx, sy);
+          __shiftFacets([part], bedX - bb.x0, 0, 0);
+          out.push(part);
+          bedX += (bb.x1 - bb.x0) + gapMm;
+        }
+      }
+    }
+
+    // Emit floating pieces: one or two slab parts per element (split when holes
+    // are drilled), ordered by doc.elements index (M is 1-based over all floats).
+    // Pegs on the piece are appended before the shift so they travel with it.
+    let pieceIdx = 0;
+    for (const fl of floats) {
+      pieceIdx++;
+      const holeSpots = pinList.filter((p) => p.upper === fl).flatMap((p) => p.spots);
+      const baseName = "ebene-" + (fl.level + 1) + "-schwebeteil-" + pieceIdx;
+      const color = window.hexToRgb(fl.el.color || "#000000");
+      const pieceParts = [];
+      if (holeSpots.length) {
+        const bm = fl.mask.slice();
+        for (const sp of holeSpots) window.__sbStampDisk(bm, cols, rows, sx, sy, sp.xMm, sp.yMm, holeR, 0);
+        pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => bm[r * cols + c] === 1, cols, rows, pitch, holeDepth, 0) });
+        pieceParts.push({ name: baseName + "-oben", color, facets: window.traceMaskToFacets((c, r) => fl.mask[r * cols + c] === 1, cols, rows, pitch, T - holeDepth, holeDepth) });
+      } else {
+        pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => fl.mask[r * cols + c] === 1, cols, rows, pitch, T, 0) });
+      }
+      for (const pin of pinList) if (pin.lower === fl) pieceParts.push(...pegParts(pin.spots, fl.level, color));
+      // Content pass: raised colorLayers / heightmap on the piece face.
+      // Emits BEFORE the shift so the content rides stack/bed/explode with the piece.
+      if (fl.compP) {
+        const fpPiece = (c, r) => fl.mask[r * cols + c] ? 0.5 : -1;
+        const contentParts = [
+          ...buildRaisedParts(fl.dp, fpPiece, fl.compP, grid, null),
+          ...buildHeightmapParts(fl.dp, fpPiece, grid, null),
+        ];
+        for (const p of contentParts) {
+          p.name = baseName + "-" + p.name;
+          pieceParts.push(p);
+        }
+      }
+      const alive = pieceParts.filter((p) => p.facets.length);
+      if (!alive.length) continue;
+      if (layout === "stack") {
+        __shiftFacets(alive, 0, 0, (n - 1 - fl.level) * (T + g));
+      } else {
+        const bb = __maskBBoxMm(fl.mask, cols, rows, sx, sy);
+        __shiftFacets(alive, bedX - bb.x0, 0, 0);
+        bedX += (bb.x1 - bb.x0) + gapMm;
+      }
+      out.push(...alive);
+    }
+
+    // Emit rand (rim) pieces: standalone slabs in element color, one level forward
+    // of their plate. Holes drilled from underside when pegs were placed in-loop.
+    // M-counter is independent from schwebeteil's pieceIdx.
+    let randIdx = 0;
+    for (const rp of randPieces) {
+      const anySet = rp.mask.some((v) => v);
+      if (!anySet) continue;
+      randIdx++;
+      const baseName = "ebene-" + (rp.level + 1) + "-rand-" + randIdx;
+      const color = window.hexToRgb(rp.el.color || "#FFFFFF");
+      const pieceParts = [];
+      if (rp.holeSpots.length) {
+        const bm = rp.mask.slice();
+        for (const sp of rp.holeSpots) window.__sbStampDisk(bm, cols, rows, sx, sy, sp.xMm, sp.yMm, holeR, 0);
+        pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => bm[r * cols + c] === 1, cols, rows, pitch, holeDepth, 0) });
+        pieceParts.push({ name: baseName + "-oben", color, facets: window.traceMaskToFacets((c, r) => rp.mask[r * cols + c] === 1, cols, rows, pitch, T - holeDepth, holeDepth) });
+      } else {
+        pieceParts.push({ name: baseName, color, facets: window.traceMaskToFacets((c, r) => rp.mask[r * cols + c] === 1, cols, rows, pitch, T, 0) });
+      }
+      const alive = pieceParts.filter((p) => p.facets.length);
+      if (!alive.length) continue;
+      // Stack shift: one level forward of the plate (dz = (n-1-level)*(T+g) + T).
+      // The trailing +T is plain T — the rand cloud is pinned to its plate.
+      // Bed: flat at z=0, shifted right of all plates+stand+floats.
+      if (layout === "stack") {
+        __shiftFacets(alive, 0, 0, (n - 1 - rp.level) * (T + g) + T);
+      } else {
+        const bb = __maskBBoxMm(rp.mask, cols, rows, sx, sy);
+        __shiftFacets(alive, bedX - bb.x0, 0, 0);
+        bedX += (bb.x1 - bb.x0) + gapMm;
+      }
+      out.push(...alive);
+    }
+
+    return out;
+  }
+
+  // Zierlinie band mask (Uint8Array, 1 = line cell), or null when off. Cells
+  // whose decorated-SDF distance d lies in [inset_k, inset_k + widthMm] for one
+  // of the count lines (gap = 1.5 × width). Requires the analytic rect/circle
+  // SDF; excluded: cutouts, mount hole (footprint <= 0) and the Rand-Rahmen
+  // band (the line never runs under or onto the frame ring).
+  function __zierlinieBand(doc, grid, footprint, comp, frameBand, domainExpanded) {
+    const l = doc.body.line;
+    if (!l || !l.mode || l.mode === "none") return null;
+    if (!(l.widthMm > 0) || !(l.depthMm > 0) || !(l.insetMm >= 0)) return null;
+    if (doc.body.shape !== "rect" && doc.body.shape !== "circle") return null;
+    const { cols, rows, pitch } = grid;
+    const sx = cols / doc.body.widthMm, sy = rows / doc.body.heightMm;
+    const sdf = window.bodySdfMm(doc.body);
+    const nLines = Math.max(1, Math.min(3, Math.round(l.count || 1)));
+    const gap = l.widthMm * 1.5;
+    const band = new Uint8Array(cols * rows);
+    let any = false;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const i = r * cols + c;
+      if (comp && comp.cutout[i]) continue;
+      if (frameBand && frameBand[i]) continue;
+      if (!(footprint(c, r) > 0)) continue;
+      const x = domainExpanded ? grid.x0 + (c + 0.5) * pitch : (c + 0.5) / sx;
+      const y = domainExpanded ? grid.y0 + (r + 0.5) * pitch : (r + 0.5) / sy;
+      const d = sdf(x, y);
+      for (let k = 0; k < nLines; k++) {
+        const lo = l.insetMm + k * (l.widthMm + gap);
+        if (d >= lo && d <= lo + l.widthMm) { band[i] = 1; any = true; break; }
+      }
+    }
+    return any ? band : null;
+  }
+
+  // The raised Zierlinie: the band extruded from the plate top by depthMm in
+  // line.color — a slim inset sibling of the Rand-Rahmen.
+  function buildZierlinieParts(doc, band, cols, rows, pitch) {
+    if (!band) return [];
+    const l = doc.body.line;
+    const facets = window.orientOutward(window.traceMaskToFacets(
+      (c, r) => band[r * cols + c] === 1, cols, rows, pitch, l.depthMm, doc.body.thicknessMm));
+    return facets.length
+      ? [{ name: "zierlinie", color: window.hexToRgb((l.color || "#000000").toUpperCase()), facets }]
+      : [];
   }
 
   // Compute the Rand-Rahmen band mask (Uint8Array[cols*rows], 1 = band cell), or
@@ -1293,6 +2144,7 @@
       return (c, r) => {
         const x = x0 + (c + 0.5) * pitch, yy = y0 + (r + 0.5) * pitch;
         let v = borderCells - dt[idx(c, r)];            // >0 within borderCells of silhouette
+        if (dt[idx(c, r)] === 0) v = Math.max(v, 0.5);  // the silhouette itself is always plate (fixes borderMm 0 → vanish)
         if (hasWasher) {
           const washerSdf = (outerR - Math.hypot(x - cx, yy - cy)) * s; // >0 inside washer disk
           v = Math.max(v, washerSdf);                   // union: inside plate OR inside washer
@@ -1311,6 +2163,7 @@
       // outerR already computed above (hasWasher controls whether to apply it).
       return (c, r) => {
         let v = borderCells - dt[idx(c, r)];            // >0 within borderCells of silhouette
+        if (dt[idx(c, r)] === 0) v = Math.max(v, 0.5);  // the silhouette itself is always plate (fixes borderMm 0 → vanish)
         if (hasWasher) {
           const x = (c + 0.5) / sx, y = (r + 0.5) / sy;
           v = Math.max(v, (outerR - Math.hypot(x - cx, y - cy)) * s); // washer union
@@ -1410,6 +2263,21 @@
     const n = cols * rows;
     const mask = new Uint8Array(n);
     for (let i = 0; i < n; i++) mask[i] = (!comp.isBase[i] && !comp.cutout[i] && comp.owner[i] >= 0) ? 1 : 0;
+    // With a Zierkante the plate itself can pinch below the nozzle width
+    // (necks between perforation holes, teeth tips), which element-only
+    // probing never sees — union the decorated footprint. Undecorated plates
+    // keep the element-only mask (unchanged results for existing docs).
+    const edge = doc.body.edge;
+    const edgeOn = !!(edge && edge.style && edge.style !== "none" && edge.sizeMm > 0 && edge.periodMm > 0);
+    if (edgeOn && (doc.body.shape === "rect" || doc.body.shape === "circle")) {
+      const fp = window.shapeFootprintField(cols, rows, doc.body, doc.mount);
+      for (let r0 = 0; r0 < rows; r0++) {
+        for (let c0 = 0; c0 < cols; c0++) {
+          const i = r0 * cols + c0;
+          if (!comp.cutout[i] && fp(c0, r0) > 0) mask[i] = 1;
+        }
+      }
+    }
     const r = ((minWidthMm || 0.4) / 2) / pitch;   // radius in cells
     const inv = new Uint8Array(n);
     for (let i = 0; i < n; i++) inv[i] = mask[i] ? 0 : 1;
@@ -1425,18 +2293,35 @@
   window.thinFeatureMask = thinFeatureMask;
 
   // Editor UI: preview the AUTO height (Höhe je Farbe) an Einfarbig element falls
-  // back to — ignores a set override (the input shows that itself) and applies the
-  // engraved stack step (whole layers, shared with the plate bands) so the shown value
-  // matches the build.
-  window.autoSolidHeightMm = (doc, el) => __autoSolidHeight(
-    doc, el,
-    (el && el.depth && el.depth.direction) === "engraved" ? __engravedStackStep(doc) : null,
-    true);
+  // back to — ignores a set override (the input shows that itself). Engraved elements
+  // return a per-color RECESS depth (mm): the plate/motif carve depth. To keep preview ==
+  // carve, an engraved color that participates in the shared layer plan returns its
+  // plan-aligned recess (index*bandThick — the same __amsEngravedPlan the build uses),
+  // NOT the old maxRecess-compressed height. The badge has no composed pixels, so the plan
+  // is built without a bands pre-scan (auto-heights branch) — exact for the reported
+  // "Höhe je Farbe, no bands element" scenario and any bands-free doc. Only when the color
+  // is not in the plan / there is no plan (raised elements, all-overridden, no palette)
+  // does it fall back to the classic carve-budget-compressed height — the SAME fallback
+  // rule as the build. Raised elements always take the classic (grid-aligned) path.
+  window.autoSolidHeightMm = (doc, el) => {
+    const isEngraved = !!(el && el.depth && el.depth.direction === "engraved");
+    if (isEngraved && doc.autoLayerHeights && el.depth.mode === "solid") {
+      const hex = String(el.color || "").toUpperCase();
+      const pr = __amsEngravedPlan(doc, null).recessOf(hex);
+      if (pr != null) return pr; // in the shared plan → preview matches the carved floor
+    }
+    // Fallback: classic per-element compression (engraved) or raised stack (raised).
+    if (!isEngraved) return __autoSolidHeight(doc, el, null, true);
+    const levels = __fallbackLevels(doc, 0);
+    const budget = __engravedBudget(doc.body);
+    const fb = levels > 0 ? __gridStack(doc.body, levels, doc.colorStepLayers, budget.floor) : null;
+    return __autoSolidHeight(doc, el, __fallbackAutoStep(doc, fb ? fb.s : null, budget.maxRecess), true);
+  };
   // Footprint = the defining image element's rotated rectangle (plate-free "Bild" object).
   // >0 inside the rectangle, in cell units. borderMm is ignored (the image IS the object).
   function imageFootprintField(doc, cols, rows, pitch, grid) {
     const x0 = grid ? grid.x0 : 0, y0 = grid ? grid.y0 : 0;
-    const el = __bildElement(doc);
+    const el = __imageBodyElement(doc);
     if (!el) return () => -1;
     const cx = el.cxMm, cy = el.cyMm, hw = (el.wMm || 0) / 2, hh = (el.hMm || 0) / 2;
     const a = -(el.rotationDeg || 0) * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a); // inverse rotate
@@ -1449,9 +2334,94 @@
     };
   }
 
+  // 2D workbench opening contours adapted for rim objects.
+  // Mirrors shadowboxOpeningLoops (coarse grid, longest side 160) but composites the
+  // base opening field with rim silhouette distance terms — so each plate's contour
+  // wraps around any rim elements assigned to that plate or shallower layers.
+  // When no rim elements apply, delegates to shadowboxOpeningLoops for byte-identical output.
+  function shadowboxAdaptedOpeningLoops(doc, k) {
+    const body = doc.body;
+    const sb = doc.shadowbox;
+
+    // Coarse grid — mirrors shadowboxOpeningLoops exactly.
+    const RES = 160;
+    const W = body.widthMm, H = body.heightMm;
+    const long = Math.max(W, H);
+    const cols = Math.max(8, Math.round((W / long) * RES));
+    const rows = Math.max(8, Math.round((H / long) * RES));
+    const grid = { cols, rows, pitch: long / RES, x0: 0, y0: 0 };
+
+    // Inset — mirror engine normalization exactly.
+    const inset = Math.max(0.5, sb.insetPerLayerMm || 4);
+    // B — minimum border around a rim object on its own plate (same as engine).
+    const B = Math.max(2, inset);
+
+    const n = window.__sbClampLayers(sb.layers);
+    const layerOf = (el) => el.sbLayer == null ? n - 1 : Math.max(0, Math.min(n - 1, el.sbLayer | 0));
+    const modeOf = (el) => el.sbMode === "rim" || el.sbMode === "float" ? el.sbMode
+      : (el.sbMode == null && el.sbOverhang ? "rim" : "plate");
+
+    // Collect rim elements, skipping unloaded images and empty masks.
+    const rimEls = (doc.elements || []).filter((el) => {
+      if (modeOf(el) !== "rim") return false;
+      if (el.type === "image" && !el._img) return false;
+      return true;
+    });
+
+    // No rims at or above level k → delegate to base fn for byte-identical output.
+    const rimsForK = rimEls.filter((el) => layerOf(el) <= k);
+    if (rimsForK.length === 0) return window.shadowboxOpeningLoops(doc, k);
+
+    const f = window.shadowboxOpeningField(doc, grid);
+    if (!f) return [];
+
+    const sx = cols / W, sy = rows / H;
+    const pmm = (1 / sx + 1 / sy) / 2;
+
+    // Build coarse-grid dC fields for each applicable rim element.
+    // dC[i] = negative inside the silhouette, positive outside (mm from edge).
+    const dk0rim = Object.assign({}, doc, { shadowbox: null });
+    const rimData = [];
+    for (const el of rimsForK) {
+      const level = layerOf(el);
+      const rendered = __renderElementV2(el, dk0rim, cols, rows, grid);
+      if (!rendered || !rendered.mask) continue;
+      const mask = rendered.mask;
+      const inv = new Uint8Array(cols * rows);
+      for (let i = 0; i < inv.length; i++) inv[i] = mask[i] ? 0 : 1;
+      const dIn = window.__chamferDT(inv, cols, rows);   // inward distance
+      const dOut = window.__chamferDT(mask, cols, rows); // outward distance
+      const dC = new Float32Array(cols * rows);
+      for (let i = 0; i < dC.length; i++) {
+        dC[i] = mask[i] ? -dIn[i] * pmm : dOut[i] * pmm;
+      }
+      rimData.push({ level, dC });
+    }
+
+    if (rimData.length === 0) return window.shadowboxOpeningLoops(doc, k);
+
+    // Composite field: g = min(f - k*inset, min over rims of (dC - B - (k-level)*inset)).
+    const g = (c, r) => {
+      let v = f(c, r) - k * inset;
+      const i = r * cols + c;
+      for (const rm of rimData) {
+        const term = rm.dC[i] - B - (k - rm.level) * inset;
+        if (term < v) v = term;
+      }
+      return v;
+    };
+
+    return window.marchingSquaresLoops(g, cols, rows)
+      .filter((lp) => lp.length >= 3)
+      .map((lp) => lp.map(([c, r]) => ({ xMm: (c + 0.5) / sx, yMm: (r + 0.5) / sy })));
+  }
+
   window.freeFootprintField = freeFootprintField;
   window.imageFootprintField = imageFootprintField;
+  // Shared with js/shadowbox.js (drawn-opening signed field). Engine-internal.
+  window.__chamferDT = __chamferDT;
   // Test-only: expose __renderElementV2 so island-removal.test.js can inspect mask/r/g/b
   // directly without going through full buildParts. Not called by production code.
   window.__renderElementV2ForTest = __renderElementV2;
+  window.shadowboxAdaptedOpeningLoops = shadowboxAdaptedOpeningLoops;
 })();

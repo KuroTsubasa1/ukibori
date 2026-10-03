@@ -8,6 +8,9 @@
 <meta http-equiv="Expires" content="0">
 <title>Ukibori · 浮彫</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#16161a">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="styles.css">
 <script>window.__errs=[];addEventListener('error',e=>window.__errs.push(String(e.message)))</script>
 </head>
@@ -41,10 +44,17 @@
     <button type="button" id="newBtn" title="Neues, leeres Projekt beginnen (Strg/Cmd+Z bringt das alte zurück)">Neu</button>
     <div id="scatterPanel" class="popover" hidden>
       <div class="pop-row"><strong>Streuen</strong></div>
+      <div class="pop-row">
+        <div id="scModeSeg" class="seg-group seg-sm" style="width:100%">
+          <button type="button" id="scModeRegion" class="seg seg-active" style="flex:1" title="Zufällig in einem Bereich streuen">Bereich</button>
+          <button type="button" id="scModePath" class="seg" style="flex:1" title="Gleichmäßig entlang eines gezeichneten Pfads verteilen">Pfad</button>
+        </div>
+      </div>
       <label class="pop-row">Anzahl <input id="scCount" type="number" min="1" max="200" value="12"></label>
       <label class="pop-row">Drehung° <input id="scRotMin" type="number" value="0"> – <input id="scRotMax" type="number" value="360"></label>
       <label class="pop-row">Skalierung× <input id="scScaleMin" type="number" step="0.1" value="0.6"> – <input id="scScaleMax" type="number" step="0.1" value="1.4"></label>
-      <label class="pop-row"><input id="scAvoid" type="checkbox"> Überlappung vermeiden</label>
+      <label class="pop-row" id="scAvoidRow"><input id="scAvoid" type="checkbox"> Überlappung vermeiden</label>
+      <label class="pop-row" id="scAlignRow" hidden><input id="scAlign" type="checkbox" checked> An Pfad ausrichten</label>
       <p class="hint" id="scHint">Ziehe auf der Fläche einen Bereich auf (sonst ganze Platte).</p>
       <div class="pop-row">
         <button type="button" id="scReroll" class="btn">Neu würfeln</button>
@@ -63,8 +73,8 @@
     <div class="panel-head">Dokument</div>
     <div class="adv-scroll">
 
-      <!-- 1. Werkstueck: alles, was die Platte/das Objekt selbst beschreibt -->
-      <details class="acc" id="accWerkstueck" open>
+      <!-- 1. "Werkstück": everything describing the plate/object itself -->
+      <details class="acc" id="accWorkpiece" open>
         <summary>Werkstück</summary>
         <div class="acc-body adv-section">
           <div class="adv-field">
@@ -88,15 +98,43 @@
           </div>
           <div class="adv-field">
             <label for="advThickness" class="adv-label">Dicke (mm)</label>
-            <input type="number" id="advThickness" class="sp-num adv-num-full" step="0.5" min="0.5" value="3" title="Gesamtdicke des Objekts in mm">
+            <input type="number" id="advThickness" class="sp-num adv-num-full" step="0.5" min="0.5" value="2" title="Gesamtdicke des Objekts in mm">
           </div>
           <div class="adv-field" id="cornerField">
             <label for="cornerMm" class="adv-label">Ecken (mm)</label>
-            <input type="number" id="cornerMm" class="sp-num adv-num-full" min="0" max="40" step="0.5" value="4" title="Eckenradius des Rechtecks in mm (0 = scharfe Ecken)">
+            <input type="number" id="cornerMm" class="sp-num adv-num-full" min="0" max="40" step="0.5" value="6.5" title="Eckenradius des Rechtecks in mm (0 = scharfe Ecken)">
           </div>
           <div class="adv-field" id="borderField" hidden>
             <label for="borderMm" class="adv-label">Rand (mm)</label>
             <input type="number" id="borderMm" class="sp-num adv-num-full" min="0" max="50" step="0.5" value="2" title="Randbreite in mm (Freiform)">
+          </div>
+          <div class="adv-field" id="edgeField">
+            <label for="edgeStyle" class="adv-label">Zierkante</label>
+            <select id="edgeStyle" class="text-input" title="Zierkante am Plattenrand">
+              <option value="none" selected>Keine</option>
+              <option value="wave">Wellenrand</option>
+              <option value="teeth">Zackenrand</option>
+              <option value="perforation">Briefmarke</option>
+            </select>
+            <div id="edgeParams" style="display:flex;gap:6px;align-items:center;margin-top:4px" hidden>
+              <input type="number" id="edgeSizeMm" class="sp-num" style="flex:1" min="0.4" max="10" step="0.2" value="2" title="Stärke in mm — Tiefe der Wellen/Zacken bzw. Lochdurchmesser (Briefmarke)" aria-label="Stärke der Zierkante in mm">
+              <input type="number" id="edgePeriodMm" class="sp-num" style="flex:1" min="2" max="40" step="0.5" value="8" title="Abstand der Wiederholungen in mm entlang des Randes" aria-label="Abstand der Zierkanten-Wiederholungen in mm">
+            </div>
+          </div>
+          <div class="adv-field" id="lineField">
+            <label for="lineMode" class="adv-label">Zierlinie</label>
+            <select id="lineMode" class="text-input" title="Ziernaht, die dem Plattenrand in festem Abstand folgt — auch um Zierkante und runde Ecken">
+              <option value="none" selected>Keine</option>
+              <option value="engraved">Vertieft (Nut)</option>
+              <option value="raised">Erhaben</option>
+            </select>
+            <div id="lineParams" style="display:flex;gap:6px;align-items:center;margin-top:4px" hidden>
+              <input type="number" id="lineInset" class="sp-num" style="flex:1" min="0.5" max="30" step="0.5" value="2.5" title="Abstand vom Rand (mm)" aria-label="Abstand der Zierlinie vom Rand in mm">
+              <input type="number" id="lineWidth" class="sp-num" style="flex:1" min="0.3" max="5" step="0.1" value="0.8" title="Breite der Linie (mm)" aria-label="Breite der Zierlinie in mm">
+              <input type="number" id="lineDepth" class="sp-num" style="flex:1" min="0.2" max="5" step="0.1" value="0.6" title="Tiefe (vertieft) bzw. Höhe (erhaben) in mm" aria-label="Tiefe oder Höhe der Zierlinie in mm">
+              <input type="number" id="lineCount" class="sp-num" style="width:44px" min="1" max="3" step="1" value="1" title="Anzahl Linien (2 = Doppellinie)" aria-label="Anzahl der Zierlinien">
+              <input type="color" id="lineColor" value="#000000" title="Farbe der erhabenen Linie" aria-label="Farbe der Zierlinie">
+            </div>
           </div>
           <div class="adv-field">
             <label for="advBaseColor" class="adv-label">Grundfarbe</label>
@@ -121,8 +159,99 @@
         </div>
       </details>
 
-      <!-- Stapelung: doc-weite Farb-/Höhen-Politik des Ebenen-Stapels -->
-      <details class="acc" id="accStapelung" open>
+      <!-- "Schaukasten": layered paper-cut stack (shadowbox mode) -->
+      <details class="acc" id="accShadowbox">
+        <summary>Schaukasten</summary>
+        <div class="acc-body adv-section">
+          <div class="adv-field">
+            <label class="adv-label toggle">
+              <input type="checkbox" id="sbEnabled" title="Schaukasten-Modus: das Werkstück wird ein Stapel einzelner Platten mit organischen, nach hinten kleiner werdenden Öffnungen (Paper-Cut-Effekt). Elemente liegen auf wählbaren Ebenen; die hinterste Platte trägt das Motiv."> Schaukasten-Modus
+            </label>
+            <div id="sbShapeHint" class="hint" hidden>Nur für Rechteck- und Kreis-Platten verfügbar.</div>
+          </div>
+          <div id="sbParams" hidden>
+            <div class="adv-two-col">
+              <div class="adv-field">
+                <label for="sbLayers" class="adv-label">Ebenen</label>
+                <input type="number" id="sbLayers" class="sp-num adv-num-full" min="3" max="10" step="1" value="6" title="Anzahl der Platten inklusive Rückwand">
+              </div>
+              <div class="adv-field">
+                <label for="sbInset" class="adv-label">Versatz (mm)</label>
+                <input type="number" id="sbInset" class="sp-num adv-num-full" min="1" max="20" step="0.5" value="4" title="Wie viel kleiner jede Öffnung je Ebene nach hinten wird">
+              </div>
+            </div>
+            <div class="adv-field">
+              <label class="adv-label">Öffnung</label>
+              <div id="sbOpeningSeg" class="seg-group seg-sm" style="width:100%">
+                <button type="button" id="sbOpeningAuto" class="seg seg-active" style="flex:1" title="Automatisch erzeugte organische Öffnung">Automatisch</button>
+                <button type="button" id="sbOpeningDrawn" class="seg" style="flex:1" title="Öffnung frei auf der Arbeitsfläche zeichnen">Gezeichnet</button>
+              </div>
+            </div>
+            <div id="sbAutoParams">
+              <div class="adv-two-col">
+                <div class="adv-field">
+                  <label for="sbMargin" class="adv-label">Randabstand (mm)</label>
+                  <input type="number" id="sbMargin" class="sp-num adv-num-full" min="4" max="40" step="1" value="12" title="Abstand der vordersten Öffnung vom Plattenrand">
+                </div>
+                <div class="adv-field">
+                  <label for="sbPeriod" class="adv-label">Wellenlänge (mm)</label>
+                  <input type="number" id="sbPeriod" class="sp-num adv-num-full" min="10" max="120" step="5" value="40" title="Länge einer Welle entlang des Randes">
+                </div>
+              </div>
+              <div class="adv-field">
+                <label for="sbWaviness" class="adv-label">Welligkeit</label>
+                <input type="range" id="sbWaviness" min="0" max="1" step="0.05" value="0.5" style="width:100%" title="Wie stark die Öffnung wellt (0 = glatt)">
+              </div>
+              <div class="adv-field">
+                <button type="button" id="sbReroll" class="btn" style="width:100%" title="Neue zufällige Wellenform">Neu würfeln</button>
+              </div>
+            </div>
+            <div id="sbDrawnParams" hidden>
+              <div class="adv-field">
+                <button type="button" id="sbDrawBtn" class="btn" style="width:100%" title="Geschlossene Öffnungsform auf der Arbeitsfläche zeichnen">Öffnung zeichnen</button>
+                <div id="sbDrawHint" class="hint" hidden>Auf der Arbeitsfläche ziehen — Loslassen schließt die Form.</div>
+              </div>
+            </div>
+            <div class="adv-two-col">
+              <div class="adv-field">
+                <label for="sbColorFront" class="adv-label">Farbe vorne</label>
+                <input type="color" id="sbColorFront" value="#DDEEFA" title="Farbe der vordersten Platte">
+              </div>
+              <div class="adv-field">
+                <label for="sbColorBack" class="adv-label">Farbe hinten</label>
+                <input type="color" id="sbColorBack" value="#1B5E9E" title="Farbe der Rückwand">
+              </div>
+            </div>
+            <div class="adv-field adv-field-row">
+              <label class="adv-label toggle" style="flex:1">
+                <input type="checkbox" id="sbStand" checked title="Ständer mit Schlitz für den Plattenstapel mitdrucken"> Ständer
+              </label>
+            </div>
+            <div class="adv-two-col">
+              <div class="adv-field">
+                <label for="sbStandHeight" class="adv-label">Höhe (mm)</label>
+                <input type="number" id="sbStandHeight" class="sp-num adv-num-full" min="8" max="40" step="1" value="15" title="Höhe des Ständers in mm">
+              </div>
+              <div class="adv-field">
+                <label for="sbStandRadius" class="adv-label">Rundung (mm)</label>
+                <input type="number" id="sbStandRadius" class="sp-num adv-num-full" min="0" max="8" step="0.5" value="3" title="Kantenrundung der Ständer-Ecken in mm (0 = eckig)">
+              </div>
+            </div>
+            <div class="adv-field">
+              <label class="adv-label toggle">
+                <input type="checkbox" id="sbPins" checked title="Zapfen und Sacklöcher zwischen gestapelten Schwebeteilen (und zur Rückwand) mitdrucken — hilft beim Ausrichten und Verkleben"> Montagestifte
+              </label>
+            </div>
+            <div class="adv-field">
+              <label class="adv-label" for="sbExplode">Explosion (mm)</label>
+              <input type="range" id="sbExplode" min="0" max="20" step="0.5" value="0" style="width:120px" title="Explosionsansicht — zieht die Ebenen in der 3D-Vorschau auseinander (nur Ansicht, kein Export)">
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- "Stapelung": doc-wide color/height policy of the layer stack -->
+      <details class="acc" id="accStacking" open>
         <summary>Stapelung</summary>
         <div class="acc-body adv-section">
           <div class="adv-field">
@@ -145,7 +274,7 @@
           </div>
           <div class="adv-field">
             <label for="advColorStep" class="adv-label">Farbschichten</label>
-            <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="2" title="Höhenunterschied zwischen Farbschichten in Druck-Schichten">
+            <input type="number" id="advColorStep" class="sp-num adv-num-full" step="1" min="1" value="4" title="Höhenunterschied zwischen Farbschichten in Druck-Schichten">
           </div>
           <div class="adv-field" id="amsPaletteField" hidden>
             <label class="adv-label">AMS-Filament-Palette (1 = unterste Schicht)</label>
@@ -154,8 +283,8 @@
         </div>
       </details>
 
-      <!-- 4. Druck (Parameter; Export sitzt in der Topbar) -->
-      <details class="acc" id="accDruck" open>
+      <!-- 4. "Druck": print parameters (export lives in the topbar) -->
+      <details class="acc" id="accPrint" open>
         <summary>Druck</summary>
         <div class="acc-body adv-section">
           <div class="adv-field">
@@ -164,7 +293,7 @@
           </div>
           <div class="adv-field">
             <label for="advLayerHeight" class="adv-label">Schichthöhe (mm)</label>
-            <input type="number" id="advLayerHeight" class="sp-num adv-num-full" step="0.01" min="0.01" value="0.2" title="Schichthöhe des 3D-Druckers in mm (z. B. 0,2)">
+            <input type="number" id="advLayerHeight" class="sp-num adv-num-full" step="0.01" min="0.01" value="0.4" title="Schichthöhe des 3D-Druckers in mm (z. B. 0,2)">
           </div>
           <div class="adv-field">
             <label for="advResolution" class="adv-label">Auflösung</label>
@@ -212,16 +341,16 @@
         <button type="button" id="heroExampleBtn" title="Lädt die Ukibori-Münze als Beispiel-Projekt">Beispiel öffnen: die Ukibori-Münze</button>
       </div>
     </div>
-    <div class="pane pane-2d"><canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf. Beim Skalieren an den Ecken hält Umschalt das Seitenverhältnis."></canvas></div>
+    <div class="pane pane-2d"><canvas id="canvas2d" width="800" height="1000" tabindex="0" role="application" aria-label="Design-Arbeitsfläche. Tab wählt das nächste Element, Umschalt+Tab das vorherige, Pfeiltasten verschieben das ausgewählte Element, Escape hebt die Auswahl auf. Beim Skalieren an den Ecken hält Umschalt das Seitenverhältnis. Mausrad zoomt, mittlere Taste oder Leertaste und Ziehen schwenkt."></canvas><button type="button" id="zoom2dChip" hidden title="Zoom zurücksetzen — Ansicht einpassen">100 %</button></div>
     <div class="pane pane-3d"><canvas id="preview3dCanvas" width="800" height="1000" hidden></canvas></div>
   </section>
   <div id="rightCol">
   <aside id="sidebarElement" class="sidebar">
     <div class="panel-head">Element</div>
     <div class="adv-scroll">
-      <!-- Hinzufuegen: neue Elemente entstehen dort, wo sie bearbeitet werden -->
+      <!-- Add dock: new elements are created where they are edited -->
       <div class="adv-section add-dock"><div class="sp-add-row"><button type="button" id="addImageBtn" class="btn" title="Bild hinzufügen">+ Bild</button><button type="button" id="addTextBtn" class="btn" title="Text hinzufügen">+ Text</button><button type="button" id="addQrBtn" class="btn" title="QR-Code hinzufügen">+ QR</button></div><div class="sp-add-row"><button type="button" id="addRectBtn" class="btn" title="Rechteck hinzufügen">+ Rechteck</button><button type="button" id="addCircleBtn" class="btn" title="Kreis hinzufügen (frei skalierbar zur Ellipse)">+ Kreis</button></div></div>
-      <!-- 3. Element: alles am ausgewählten Element -->
+      <!-- 3. "Element": everything about the selected element -->
       <div id="accElement">
         <div class="acc-body adv-section">
           <p class="element-empty hint">Kein Element ausgewählt.<br>Füge oben eines hinzu oder klicke ein Element auf der Arbeitsfläche an.</p>
@@ -236,14 +365,37 @@
               <button type="button" id="fontUploadBtn" class="btn" title="Eigene Schrift laden (.ttf/.otf/.woff)">Schrift laden…</button>
             </div>
           </div>
+            <div class="adv-field" id="advArcField" hidden>
+            <label for="advArc" class="adv-label">Bogen°</label>
+            <input type="number" id="advArc" class="text-input" min="-350" max="350" step="5" value="0" title="Text auf Kreisbogen: 0 = gerade, positiv = Bogen nach oben, negativ = nach unten">
+          </div>
+            <div class="adv-field" id="advTextPathField" hidden>
+            <label class="adv-label">Pfadtext</label>
+            <div style="display:flex;gap:6px">
+              <button type="button" id="textPathDrawBtn" class="btn" style="flex:1" title="Freien Schwung auf der Fläche zeichnen — der Text folgt ihm">Pfad zeichnen</button>
+              <button type="button" id="textPathClearBtn" class="btn" hidden title="Pfad entfernen — Text wieder gerade bzw. auf Bogen">Entfernen</button>
+            </div>
+            <p class="hint" id="textPathHint" hidden>Zeichne jetzt einen Schwung auf der Fläche.</p>
+          </div>
             <div class="adv-field" id="advShapeField" hidden>
             <label class="adv-label">Form</label>
             <div id="advShapeSeg" class="seg-group seg-sm" style="width:100%">
               <button type="button" id="advShapeRect" class="seg seg-active" style="flex:1" title="Rechteckige Fläche — füllt Breite × Höhe des Elements">Rechteck</button>
               <button type="button" id="advShapeCircle" class="seg" style="flex:1" title="Kreis — wird zur Ellipse, wenn Breite ≠ Höhe">Kreis</button>
             </div>
+            <label class="adv-label" for="advEdgeStyle" style="margin-top:6px">Zierkante</label>
+            <select id="advEdgeStyle" class="text-input" title="Zierkante am Rand der Form">
+              <option value="none" selected>Keine</option>
+              <option value="wave">Wellenrand</option>
+              <option value="teeth">Zackenrand</option>
+              <option value="perforation">Briefmarke</option>
+            </select>
+            <div id="advEdgeParams" style="display:flex;gap:6px;align-items:center;margin-top:4px" hidden>
+              <input type="number" id="advEdgeSize" class="sp-num" style="flex:1" min="0.4" max="10" step="0.2" value="1.5" title="Stärke in mm — Tiefe der Wellen/Zacken bzw. Lochdurchmesser (Briefmarke)" aria-label="Stärke der Element-Zierkante in mm">
+              <input type="number" id="advEdgePeriod" class="sp-num" style="flex:1" min="1" max="40" step="0.5" value="6" title="Abstand der Wiederholungen in mm entlang des Randes" aria-label="Abstand der Element-Zierkanten-Wiederholungen in mm">
+            </div>
           </div>
-            <div class="adv-field" id="simpleBildSection" hidden>
+            <div class="adv-field" id="simpleBgRemovalSection" hidden>
             <button type="button" id="removeBgBtn" class="btn" style="width:100%" title="Hintergrund per KI entfernen">Hintergrund entfernen (KI)</button>
             <div id="bgStatus" class="hint" aria-live="polite"></div>
           </div>
@@ -351,12 +503,23 @@
               <button type="button" id="centerV" class="btn" style="flex:1" title="Element vertikal zentrieren (Mitte der Platte)">↕ Zentrieren</button>
             </div>
           </div>
+          <div class="adv-field" id="sbLayerRow" hidden>
+            <label for="sbLayerSel" class="adv-label">Schaukasten-Ebene</label>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <select id="sbLayerSel" class="text-input" style="width:100%" title="Auf welcher Platte das Element liegt (1 = vorne)"></select>
+              <div id="sbModeSeg" class="seg-group seg-sm" style="width:100%;margin-top:4px">
+                <button type="button" id="sbModePlate" class="seg seg-active" style="flex:1" title="Inhalt liegt auf der Platte und wird am Öffnungsrand beschnitten">Auf Platte</button>
+                <button type="button" id="sbModeRim" class="seg" style="flex:1" title="Mit dem Rand verbunden und ragt eine Ebene nach vorn (wie die Wolken im Beispiel)">Mit Rand</button>
+                <button type="button" id="sbModeFloat" class="seg" style="flex:1" title="Schwebt als eigenes Teil in der Öffnung — Kollision mit dem Rand wird abgeschnitten; Montagestifte verbinden gestapelte Teile">Schwebend</button>
+              </div>
+            </div>
+          </div>
           </div>
         </div>
       </div>
     </div><!-- /adv-scroll -->
   </aside>
-  <aside id="sidebarEbenen" class="sidebar">
+  <aside id="sidebarLayers" class="sidebar">
     <div class="panel-head">Ebenen <span id="layerCount" class="panel-count" hidden>0</span></div>
     <div class="adv-scroll">
       <div class="acc-body adv-section">
@@ -388,6 +551,7 @@
           <button id="exportSvg" class="btn" type="button" title="Als SVG-Vektorgrafik exportieren (je Farbe)">SVG <span class="hint">Vektor, je Farbe</span></button>
           <button id="exportMf" class="btn btn-primary" type="button" title="Als 3MF-Datei exportieren (3D-Druck, Farbe)">3MF <span class="hint">3D · S/W &amp; Farbe</span></button>
           <button id="exportStl" class="btn" type="button" title="Als STL-Datei exportieren (3D-Geometrie)">STL <span class="hint">3D · Geometrie</span></button>
+          <button id="exportPause" class="btn" type="button" title="Pausen-Liste für manuellen Farbwechsel ohne AMS (.txt)">Pausen <span class="hint">Farbwechsel-Zettel</span></button>
         </div>
       </div>
       <p id="exportStatus" class="status"></p>
@@ -398,7 +562,7 @@
 <!-- Hidden file inputs for add-image (button wired in Task 4) -->
 <input type="file" id="addImageInput" accept="image/*" hidden>
 <input type="file" id="fontUploadInput" accept=".ttf,.otf,.woff,.woff2" hidden>
-<!-- Hidden file input for Öffnen (Open project) -->
+<!-- Hidden file input for "Öffnen" (open project) -->
 <input type="file" id="openInput" accept="application/json,.json" hidden>
 
 <script src="vendor/qrcode.js"></script>
@@ -407,18 +571,34 @@
 <script src="js/geometry.js"></script>
 <script src="js/trace.js"></script>
 <script src="js/sources.js"></script>
+<script src="js/arc-text.js"></script>
+<script src="js/path-text.js"></script>
+<script src="js/shape-edge.js"></script>
 <script src="js/bg-removal.js"></script>
 <script src="js/bookmark-model.js"></script>
 <script src="js/example-project.js"></script>
 <script src="js/geom-util.js"></script>
+<script src="js/view2d.js"></script>
 <script src="js/selection-ops.js"></script>
 <script src="js/transform-ops.js"></script>
 <script src="js/align-ops.js"></script>
 <script src="js/scatter.js"></script>
+<script src="js/pause-sheet.js"></script>
 <script src="js/bookmark-export.js"></script>
+<script src="js/shadowbox.js"></script>
 <script src="js/build-parts.js"></script>
 <script src="js/preview3d.js"></script>
 <script src="js/editor.js"></script>
 <script src="js/coachmarks.js"></script>
+<script>
+// Register the service worker for offline use + installability. Only over
+// http(s) — on file:// it is unavailable and would throw, so we skip it there
+// (double-click use keeps working exactly as before).
+if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  });
+}
+</script>
 </body>
 </html>

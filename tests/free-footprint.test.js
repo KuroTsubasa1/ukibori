@@ -17,6 +17,19 @@
     assert(f(78, 49) < 0, "~6mm beyond the element is outside the plate");
   });
 
+  test("freeFootprint: borderMm 0 keeps the silhouette itself as the plate", async () => {
+    const img = await solidImg("#ffffff", 8, 8);
+    const v1 = defaultBookmark(); v1.widthMm=40; v1.heightMm=40; v1.resolution=100;
+    v1.elements=[ makeImageElement({src:"a", color:"#ffffff", cxMm:20,cyMm:20,wMm:10,hMm:10}) ];
+    const v2 = migrateProject(v1); v2.body.shape = "free"; v2.body.borderMm = 0; v2.elements[0]._img = img;
+    v2.mount = { type:"none", xMm:20, yMm:10, diameterMm:5, ringThicknessMm:0, ringHeightMm:2, marginMm:8 };
+    const { cols, rows, pitch } = gridForBody(v2.body, v2.resolution);
+    const f = freeFootprintField(v2, cols, rows, pitch);
+    // With border 0 the plate collapses to exactly the silhouette — it must NOT vanish.
+    assert(f(50, 50) > 0, "silhouette center is still plate at border 0");
+    assert(f(78, 49) < 0, "well outside the silhouette is not plate");
+  });
+
   test("freeFootprint: mount hole is cut from the free plate", async () => {
     const img = await solidImg("#ffffff", 8, 8);
     const v1 = defaultBookmark(); v1.widthMm=40; v1.heightMm=40; v1.resolution=100;

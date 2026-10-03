@@ -194,8 +194,8 @@
   #sidebarElement { flex: 1 1 auto; min-height: 0; }
   /* FIXED height: adding layers never reflows the column — the list scrolls inside.
      (#rightCol prefix out-ranks the #rightCol .sidebar basis reset above.) */
-  #rightCol #sidebarEbenen { flex: 0 0 42%; min-height: 235px; }
-  #sidebarEbenen .adv-scroll { padding-top: var(--sp-2); }
+  #rightCol #sidebarLayers { flex: 0 0 42%; min-height: 235px; }
+  #sidebarLayers .adv-scroll { padding-top: var(--sp-2); }
 
   /* Slim identity header per panel */
   .panel-head {
@@ -297,7 +297,7 @@
     transition: background .12s, color .12s;
   }
   #selToolbar button:hover { background: var(--surface2); color: var(--ink); }
-  /* Spiegeln ist ein Zustand, kein Einmal-Befehl: aktive Achse bleibt markiert. */
+  /* Mirroring is a state, not a one-shot command: the active axis stays marked. */
   #selToolbar button.tb-on { background: var(--ink); color: var(--panel); }
   #selToolbar button.tb-on:hover { background: var(--ink); color: var(--panel); }
   #selToolbar #selDelBtn:hover { background: var(--danger); color: #fff; }
@@ -737,7 +737,7 @@
     #editor { flex-direction: column; padding: var(--sp-2) var(--sp-2); }
     .sidebar { flex: 0 0 auto; width: 100%; max-height: none; }
     #rightCol { flex: 0 0 auto; width: 100%; }
-    #rightCol #sidebarEbenen { flex: 0 0 auto; height: 340px; }
+    #rightCol #sidebarLayers { flex: 0 0 auto; height: 340px; }
     #sidebarAdvanced { max-height: none; }
     #editor #preview { min-height: 420px; }
     #topbar { flex-wrap: wrap; height: auto; padding: var(--sp-2) var(--sp-2); gap: var(--sp-2); }
@@ -843,3 +843,21 @@
 #scatterPanel { position:absolute; top:44px; right:12px; z-index:40; background:var(--panel,#fff); color:inherit; border:1px solid var(--line,#d9d2c4); border-radius:8px; padding:8px 10px; box-shadow:0 6px 24px rgba(0,0,0,.18); min-width:220px; }
 #scatterPanel .pop-row { display:flex; gap:6px; align-items:center; margin:4px 0; }
 #scatterPanel input[type=number] { width:56px; }
+
+/* 2D-Zoom: reset chip in the workbench pane (visible only while zoomed in) */
+#preview .pane-2d { position: relative; }
+#zoom2dChip {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 30;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.10);
+  cursor: pointer;
+}
+#zoom2dChip:hover { border-color: var(--ink); }

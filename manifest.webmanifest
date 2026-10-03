@@ -1,0 +1,19 @@
+{
+  "id": "ukibori",
+  "name": "Ukibori · 浮彫",
+  "short_name": "Ukibori",
+  "description": "Lesezeichen, Untersetzer, Schlüsselanhänger und Schaukästen für den 3D-Druck gestalten — komplett offline im Browser.",
+  "lang": "de",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#16161a",
+  "theme_color": "#16161a",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

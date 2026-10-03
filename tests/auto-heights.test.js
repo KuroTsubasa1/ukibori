@@ -204,18 +204,23 @@
     assertClose(byColor["#101010"].mx, T, 1e-4, "base-colored floor flush with the plate top");
   });
 
-  test("auto-heights engraved: tight carve budget keeps whole-layer, DISTINCT floors (base yields)", async () => {
+  test("auto-heights engraved: tight carve budget keeps floors DISTINCT and grid-aligned", async () => {
+    // AMS layer alignment (2026-07-22): floors now share the plate-band plan. bandHexes =
+    // [base, #FF0000, #00FF00] (N=3); avail = T-minBase = 0.6; bandThick = layerH * floor(
+    // min(step, 0.6/3=0.2)/layerH) = 0.2 (snapped, still a whole layer). Each floor TOP == its
+    // plate band top (T - index*bandThick), distinct per color; their bottoms both meet the
+    // solid base (minBase=2.4) so distinctness lives at the visible TOP, on the grid. (Old
+    // model compressed z0 to 0.1/0.2mm off-grid steps below T-floor.)
     const img = await imgSolid(20, 20);
     const d = autoDoc();
-    // floor=0.4, minBase=2.4 leaves 1 layer of recess for 2 levels → the base gives up one
-    // layer (→ 2.2mm) so each level stays one whole printed layer (never a 0.1mm sub-step).
-    d.body.baseThicknessMm = 2.4;
+    d.body.baseThicknessMm = 2.4; // floor=0.4, minBase=2.4 → avail=0.6
     d.elements = [solidEl(img, "#FF0000", 15, "engraved"), solidEl(img, "#00FF00", 45, "engraved")];
     const floors = buildParts(d).filter(p => p.name.indexOf("farbe-") === 0);
-    const byColor = {}; floors.forEach(p => { byColor[hexOf(p.color)] = zbounds(p.facets).mn; });
-    const bu = (dd) => T - Math.min(dd, 0.4) - floor; // local budget: maxRecess = 3 - 0.4 - 2.2 = 0.4
-    assertClose(byColor["#FF0000"], bu(0.2), 1e-4, "rank 0 at one layer (0.2mm)");
-    assertClose(byColor["#00FF00"], bu(0.4), 1e-4, "rank 1 at two layers — floors stay distinct");
+    const topByColor = {}; floors.forEach(p => { topByColor[hexOf(p.color)] = zbounds(p.facets).mx; });
+    const bandThick = 0.2; // snapped
+    assertClose(topByColor["#FF0000"], T - 1 * bandThick, 1e-4, "rank 0 floor top == its band top (T-bandThick)");
+    assertClose(topByColor["#00FF00"], T - 2 * bandThick, 1e-4, "rank 1 floor top == its band top (distinct)");
+    assert(Math.abs(topByColor["#FF0000"] - topByColor["#00FF00"]) > 1e-3, "floors stay distinct at the top");
   });
 
   test("auto-heights engraved: override recesses by its value, clamped to >= layerH", async () => {
@@ -227,9 +232,14 @@
     d.elements = [red, green, blue];
     const floors = buildParts(d).filter(p => p.name.indexOf("farbe-") === 0);
     const byColor = {}; floors.forEach(p => { byColor[hexOf(p.color)] = zbounds(p.facets).mn; });
-    const s3 = Math.min(step, maxRecess / 3); // overridden colors keep their ranks → 3 in the stack
-    assertClose(byColor["#FF0000"], baseUnder(1 * s3), 1e-4, "red automatic at rank-0 depth");
-    assertClose(byColor["#00FF00"], baseUnder(1.0), 1e-4, "green pinned at 1.0mm recess");
+    // AMS layer alignment (2026-07-22): overridden colors keep their plan slots, so bandHexes =
+    // [base, #FF0000, #00FF00, #0000FF] (N=4). Red is auto → aligned to its band (index 1,
+    // recess bandThick). Green/blue are pinned by heightOverrideMm (opt out of the plan), so
+    // they keep their classic baseUnder recess. (bandThick = 0.4 here → red z0 == old rank-0.)
+    const bandThick = layerH * Math.max(1, Math.floor(Math.min(step, (T - minBase) / 4) / layerH));
+    const alignedZ0 = (j) => Math.max(T - j * bandThick - floor, minBase);
+    assertClose(byColor["#FF0000"], alignedZ0(1), 1e-4, "red automatic, aligned to band index 1");
+    assertClose(byColor["#00FF00"], baseUnder(1.0), 1e-4, "green pinned at 1.0mm recess (override opts out)");
     assertClose(byColor["#0000FF"], baseUnder(0.2), 1e-4, "blue 0.05 clamps up to layerH (printable)");
   });
 
@@ -343,7 +353,7 @@
     const img = await imgSolid(20, 20);
     const d = autoDoc();
     d.topLayerColor = "#FFFFFF";
-    d.body.baseThicknessMm = 2.4; // TIGHT budget: 3 levels (incl. deck) → base yields to 2.0mm, 1 layer per level
+    d.body.baseThicknessMm = 2.4; // TIGHT budget: maxRecess=0.2 → compression divisor (3, incl. deck) is live
     d.elements = [solidEl(img, "#FF0000", 12, "engraved"), solidEl(img, "#00FF00", 45, "engraved")];
     const parts = buildParts(d);
     const pb = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0)
@@ -352,12 +362,18 @@
     assertEqual(pb[0].hex, "#FFFFFF", "top band = Deckschicht");
     assertEqual(pb[1].hex, "#101010", "base band directly below the deck");
     assertClose(pb[0].zb.mx, T, 1e-4, "deck band at the plate top");
-    assertClose(pb[0].zb.mn, T - layerH, 1e-4, "band thickness = one whole layer (the stack step)");
-    const s = layerH, mr = T - floor - 2.0; // deck occupies rank 0 → 3 levels, NOT 2
-    const bu2 = (dd) => T - Math.min(dd, mr) - floor;
-    const byColor = {}; parts.filter(p => p.name.indexOf("farbe-") === 0).forEach(p => { byColor[hexOf(p.color)] = zbounds(p.facets).mn; });
-    assertClose(byColor["#FF0000"], bu2(2 * s), 1e-4, "red carves through the deck (rank 1, one-layer step)");
-    assertClose(byColor["#00FF00"], bu2(3 * s), 1e-4, "green at rank 2 — floors stay distinct");
+    // AMS layer alignment (2026-07-22): bandHexes = [deck, base, #FF0000, #00FF00] (N=4). avail =
+    // T-2.4 = 0.6 < N*layerH = 0.8: instead of an off-grid sub-layer band (0.15mm), the base
+    // yields one layer (2.4 → 2.2mm) so every band stays one whole printed layer.
+    // Each motif floor TOP == its plate band top = T - index*bandThick.
+    const bandThick = layerH;
+    assertClose(pb[0].zb.mn, T - bandThick, 1e-4, "deck band thickness = one whole layer (base yields)");
+    const basePlate = parts.filter(p => p.name === "grundplatte").map(p => zbounds(p.facets));
+    assert(basePlate.some(b => Math.abs(b.mx - 2.2) < 1e-4), "solid base snapped to 2.2mm to make room");
+    const topByColor = {}; parts.filter(p => p.name.indexOf("farbe-") === 0).forEach(p => { topByColor[hexOf(p.color)] = zbounds(p.facets).mx; });
+    assertClose(topByColor["#FF0000"], T - 2 * bandThick, 1e-4, "red floor top == its band top (index 2, through the deck)");
+    assertClose(topByColor["#00FF00"], T - 3 * bandThick, 1e-4, "green floor top == its band top (index 3, distinct)");
+    assert(Math.abs(topByColor["#FF0000"] - topByColor["#00FF00"]) > 1e-3, "floors stay distinct at the top");
   });
 
   test("Deckschicht AMS raised: shared-palette stack rides one step up on the full-face deck", async () => {
@@ -414,17 +430,14 @@
     assertEqual(pb[0].hex, "#FFCC00", "top band = Deckschicht");
     assertClose(pb[0].zb.mx, T, 1e-4, "deck band at the plate top");
     assertEqual(pb[1].hex, "#000000", "palette layer 1 below the deck");
-    // Deck counts as a stack level (3 levels). The set 2.4mm base leaves only 1 layer of
-    // recess, so the stack takes 2 layers from the base (→ 2.0mm) and every level gets one
-    // whole printed layer — never a sub-layer step.
-    const s = layerH, mr = T - floor - 2.0;
-    const bu2 = (dd) => T - Math.min(dd, mr) - floor;
-    const byColor = {}; parts.filter(p => p.name.indexOf("farbe-") === 0).forEach(p => { byColor[hexOf(p.color)] = zbounds(p.facets); });
-    // Floor TOPS = visible surfaces; the nested (non-deepest) floor is one step thick so it
-    // ends exactly on the deeper floor instead of interpenetrating it.
-    assertClose(byColor["#000000"].mx, T - 2 * s, 1e-4, "palette layer 1 carves through the deck");
-    assertClose(byColor["#000000"].mn, T - 3 * s, 1e-4, "nested floor ends where the next one starts");
-    assertClose(byColor["#F0F0F0"].mn, bu2(3 * s), 1e-4, "palette layer 2 one whole layer deeper — distinct");
+    // AMS layer alignment (2026-07-22): bandHexes = [deck, #000000, #F0F0F0] (deckShift=1, N=3).
+    // avail = T-2.4 = 0.6 == N*layerH, so bandThick snaps to 0.2 (one whole layer). Each motif
+    // floor TOP == its plate band top = T - index*bandThick (index = ams index + deck shift).
+    const bandThick = layerH * Math.max(1, Math.floor(Math.min(step, (T - 2.4) / 3) / layerH));
+    const topByColor = {}; parts.filter(p => p.name.indexOf("farbe-") === 0).forEach(p => { topByColor[hexOf(p.color)] = zbounds(p.facets).mx; });
+    assertClose(topByColor["#000000"], T - 1 * bandThick, 1e-4, "palette layer 1 floor top == its band top (through the deck)");
+    assertClose(topByColor["#F0F0F0"], T - 2 * bandThick, 1e-4, "palette layer 2 floor top == its band top (distinct)");
+    assert(Math.abs(topByColor["#000000"] - topByColor["#F0F0F0"]) > 1e-3, "floors stay distinct at the top");
   });
 
   test("auto-heights engraved: deck ≠ base → deck ONE band on top, flush level one band down (user scenario)", async () => {

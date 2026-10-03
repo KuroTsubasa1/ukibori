@@ -36,6 +36,14 @@
   const minBase = Math.min(Math.max(0.8, T * 0.34, 2 * layerH), Math.max(0, T - floor));
   const maxRecess = Math.max(0, T - floor - minBase);
   const baseUnder = (dd) => T - Math.max(0, Math.min(dd, maxRecess)) - floor;
+  // AMS layer alignment (2026-07-22): engraved motif floors now share the plate-band plan.
+  // For a palette of N colors the grid-snapped band thickness is
+  //   bandThick = layerH * max(1, floor(min(step, (T-minBase)/N) / layerH)).
+  // A color at palette index j carves recess j*bandThick, so its floor's z0 (base-under
+  // height) is max(T - j*bandThick - floor, minBase). The floor TOP == the plate band top
+  // == T - j*bandThick. (Old model recessed by (j+1)*step, one step too deep — the bug.)
+  const bandThickFor = (n) => layerH * Math.max(1, Math.floor(Math.min(step, (T - minBase) / n) / layerH));
+  const alignedZ0 = (j, n) => Math.max(T - j * bandThickFor(n) - floor, minBase);
 
   test("global quantize: a bands element snaps its colors to the shared amsPalette", async () => {
     const img = await imgFromBands(["#101010", "#808080", "#f0f0f0"], 30, 20);
@@ -54,9 +62,10 @@
     d.elements = [makeEl(img, "engraved")];
     const floors = buildParts(d).filter(p => p.name.indexOf("farbe-") === 0);
     const byColor = {}; floors.forEach(p => { byColor[hexOf(p.color)] = +zbounds(p.facets).mn.toFixed(4); });
-    // layer 0 (#000000) → depth 1*step ; layer 2 (#FFFFFF) → depth 3*step (NOT 2*step)
-    assertClose(byColor["#000000"], baseUnder(1 * step), 1e-4, "layer-0 color at global depth 1*step");
-    assertClose(byColor["#FFFFFF"], baseUnder(3 * step), 1e-4, "layer-2 color at global depth 3*step (gap at 1)");
+    // Alignment: layer 0 (#000000) floor top == its plate band top (flush, recess 0);
+    // layer 2 (#FFFFFF) floor top == its band top (recess 2*bandThick, gap at index 1).
+    assertClose(byColor["#000000"], alignedZ0(0, 3), 1e-4, "layer-0 color aligned to band index 0");
+    assertClose(byColor["#FFFFFF"], alignedZ0(2, 3), 1e-4, "layer-2 color aligned to band index 2 (gap at 1)");
   });
 
   test("shared layers: a color shared by two engraved elements sits at the SAME depth", async () => {
@@ -69,7 +78,8 @@
     const floors = buildParts(d).filter(p => p.name.indexOf("farbe-") === 0 && hexOf(p.color) === "#FFFFFF");
     assert(floors.length >= 2, "white appears in both elements");
     const depths = floors.map(p => +zbounds(p.facets).mn.toFixed(4));
-    for (const z of depths) assertClose(z, baseUnder(3 * step), 1e-4, "shared white at global depth 3*step in both");
+    // Alignment: white (palette index 2) sits at the SAME band-aligned depth in both elements.
+    for (const z of depths) assertClose(z, alignedZ0(2, 3), 1e-4, "shared white aligned to band index 2 in both");
   });
 
   test("base bands: full palette on the plate, and MULTI-element no longer falls back", async () => {
@@ -89,10 +99,12 @@
     const img = await imgFromBands(["#000000", "#ffffff"], 20, 20);
     const mk = (pal) => { const d = sqDoc(); d.amsPalette = pal; d.elements = [makeEl(img, "engraved")]; return d; };
     const depthOf = (d, hex) => { const p = buildParts(d).filter(q => q.name.indexOf("farbe-") === 0 && hexOf(q.color) === hex)[0]; return +zbounds(p.facets).mn.toFixed(4); };
-    const white1 = depthOf(mk(["#000000", "#FFFFFF"]), "#FFFFFF"); // white = layer 1 → depth 2*step
-    const white0 = depthOf(mk(["#FFFFFF", "#000000"]), "#FFFFFF"); // white = layer 0 → depth 1*step
-    assertClose(white1, baseUnder(2 * step), 1e-4, "white at layer index 1 → depth 2*step");
-    assertClose(white0, baseUnder(1 * step), 1e-4, "reordered: white at layer index 0 → depth 1*step");
+    const white1 = depthOf(mk(["#000000", "#FFFFFF"]), "#FFFFFF"); // white = band index 1
+    const white0 = depthOf(mk(["#FFFFFF", "#000000"]), "#FFFFFF"); // white = band index 0
+    // Alignment: white's floor top == its plate band top; index 0 is flush (recess 0),
+    // index 1 recesses one bandThick. (Old model: (index+1)*step, one step too deep.)
+    assertClose(white1, alignedZ0(1, 2), 1e-4, "white at band index 1 aligned to its band");
+    assertClose(white0, alignedZ0(0, 2), 1e-4, "reordered: white at band index 0 (flush)");
     assert(Math.abs(white1 - white0) > 1e-3, "reordering changed the depth");
   });
 

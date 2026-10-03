@@ -88,10 +88,39 @@ function defaultDepth(type) {
   };
 }
 
+// Zierkante: ornamental plate edge (rect/circle plates). style 'none' keeps
+// the classic outline; sizeMm = carve depth (wave/teeth) or hole Ø (perforation).
+function defaultEdge() {
+  return { style: "none", sizeMm: 2, periodMm: 8 };
+}
+
+// Zierlinie: contour-following decorative line (rect/circle plates). mode
+// 'engraved' carves a groove into the plate top (epoxy/lacquer fill), 'raised'
+// prints a slim ridge; count 1-3 lines, gap = 1.5 × width.
+function defaultLine() {
+  return { mode: "none", insetMm: 2.5, widthMm: 0.8, depthMm: 0.6, count: 1, color: "#000000" };
+}
+
 // Rand-Rahmen (raised ring frame) default for rect/circle/free bodies.
 // widthMm 0 = OFF (parity); heightMm = extrusion above the base top face.
 function defaultFrame() {
   return { widthMm: 0, heightMm: 2, color: "#000000" };
+}
+
+// Schaukasten: layered paper-cut stack. One opening field drives all plates;
+// plate k's opening = {field > k*insetPerLayerMm}. layers includes the solid
+// back plate. enabled=false keeps buildParts byte-identical (parity).
+function defaultShadowbox() {
+  return {
+    enabled: false,
+    layers: 6,
+    insetPerLayerMm: 4,
+    opening: { source: "auto", marginMm: 12, waviness: 0.5, periodMm: 40, seed: 1, points: null },
+    colorFront: "#DDEEFA",
+    colorBack: "#1B5E9E",
+    stand: { enabled: true, heightMm: 15, slotDepthMm: 8, railMm: 5, tolMm: 0.4, color: "#C8BBAE", cornerRadiusMm: 3 },
+    pins: { enabled: true, diameterMm: 3, clearanceMm: 0.35 },
+  };
 }
 
 function defaultDoc() {
@@ -99,18 +128,20 @@ function defaultDoc() {
     version: DOC_VERSION,
     body: {
       shape: "rect",
-      widthMm: 50, heightMm: 150, cornerRadiusMm: 4,
-      thicknessMm: 3, layerHeightMm: 0.2, baseColor: "#ffffff", borderMm: 2,
+      widthMm: 50, heightMm: 150, cornerRadiusMm: 6.5,
+      thicknessMm: 2, layerHeightMm: 0.4, baseColor: "#ffffff", borderMm: 2,
       // Solid base-plate floor thickness under engraved detail (0 = auto-derive from thickness).
       baseThicknessMm: 0,
       frame: defaultFrame(),
+      edge: defaultEdge(),
+      line: defaultLine(),
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
     // xMm/yMm = hole/loop CENTER (see migrateProject); yMm = marginMm + diameterMm/2.
     // ringThicknessMm = in-plane loop wall thickness; ringHeightMm = how far the loop
     // ring stands proud above the base top face (mm). Both used only when type === 'loop'.
     mount: { type: "none", xMm: 25, yMm: 10.5, diameterMm: 5, ringThicknessMm: 0, ringHeightMm: 2, marginMm: 8 },
-    resolution: 1024, colorStepLayers: 2,
+    resolution: 1024, colorStepLayers: 4,
     // AMS shared filament palette: ordered UPPERCASE hex layers (index 0 = layer 1 = bottom,
     // darkest by default). Empty = not in use → legacy per-element bands behavior (parity).
     amsPalette: [],
@@ -126,6 +157,7 @@ function defaultDoc() {
     // workpiece's face — engraved: topmost plate band; raised: full-face slab under the
     // motif stack), pushing element colors one step further. null = off.
     topLayerColor: null,
+    shadowbox: defaultShadowbox(),
     elements: [], groups: [], fonts: {},
   };
 }
@@ -154,10 +186,11 @@ function migrateElement(el, doc, layerHmm) {
     id: el.id, type: el.type,
     cxMm: el.cxMm, cyMm: el.cyMm, wMm: el.wMm, hMm: el.hMm, rotationDeg: el.rotationDeg || 0,
     flipH: false, flipV: false,
-    cutout: !!el.cutout, color: el.color, groupId: el.groupId != null ? el.groupId : null, depth,
+    cutout: !!el.cutout, color: el.color, groupId: el.groupId != null ? el.groupId : null,
+    sbLayer: null, sbOverhang: false, sbMode: "plate", depth,
   };
   if (el.type === "image") { out.src = el.src; out._img = null; }
-  if (el.type === "text") { out.text = el.text; out.fontFamily = el.fontFamily; out.fontWeight = el.fontWeight; }
+  if (el.type === "text") { out.text = el.text; out.fontFamily = el.fontFamily; out.fontWeight = el.fontWeight; out.arcDeg = el.arcDeg != null ? el.arcDeg : 0; }
   if (el.type === "qr") { out.qrData = el.qrData; out.qrEcLevel = el.qrEcLevel; }
   return out;
 }
@@ -167,6 +200,8 @@ function migrateProject(doc) {
   if (doc.version === DOC_VERSION) {
     // Already v2: fill fields added after the v2 schema shipped (older saves lack them).
     if (doc.body && doc.body.frame == null) doc.body.frame = defaultFrame();
+    if (doc.body && doc.body.edge == null) doc.body.edge = defaultEdge();
+    if (doc.body && doc.body.line == null) doc.body.line = defaultLine();
     // AMS shared palette: backfill if missing, else normalize (uppercase / dedup / drop invalid)
     // so a hand-edited or older save can't feed the engine a lowercase or malformed layer color.
     if (!Array.isArray(doc.amsPalette)) doc.amsPalette = [];
@@ -176,6 +211,14 @@ function migrateProject(doc) {
     if (doc.autoLayerHeights == null) doc.autoLayerHeights = false;
     if (doc.topLayerColor === undefined) doc.topLayerColor = null;
     if (doc.body && doc.body.baseThicknessMm == null) doc.body.baseThicknessMm = 0;
+    if (doc.shadowbox == null) doc.shadowbox = defaultShadowbox();
+    else {
+      const sd = defaultShadowbox();
+      if (doc.shadowbox.opening == null) doc.shadowbox.opening = sd.opening;
+      if (doc.shadowbox.stand == null) doc.shadowbox.stand = sd.stand;
+      if (doc.shadowbox.pins == null) doc.shadowbox.pins = sd.pins;
+      if (doc.shadowbox.stand.cornerRadiusMm == null) doc.shadowbox.stand.cornerRadiusMm = 0;
+    }
     if (!Array.isArray(doc.groups)) doc.groups = [];
     for (const el of doc.elements || []) {
       if (el.flipH == null) el.flipH = false;
@@ -188,7 +231,13 @@ function migrateProject(doc) {
         el.depth.colorLayerStyle = el.depth.flush ? "bands" : "stepped";
       }
       if (el.type === "shape" && el.shape == null) el.shape = "rect";
+      if (el.type === "shape" && el.edge == null) el.edge = { style: "none", sizeMm: 1.5, periodMm: 6 };
+      if (el.type === "text" && el.arcDeg == null) el.arcDeg = 0;
+      if (el.type === "text" && el.textPath === undefined) el.textPath = null;
       if (el.groupId === undefined) el.groupId = null;
+      if (el.sbLayer === undefined) el.sbLayer = null;
+      if (el.sbOverhang == null) el.sbOverhang = false;
+      if (el.sbMode == null) el.sbMode = el.sbOverhang ? "rim" : "plate";
     }
     return doc;
   }
@@ -204,6 +253,8 @@ function migrateProject(doc) {
       baseColor: doc.baseColor || "#000000", borderMm: 2,
       baseThicknessMm: 0,
       frame: defaultFrame(),
+      edge: defaultEdge(),
+      line: defaultLine(),
       autoSizeFromElementId: null, freeOutlineFromElementId: null,
     },
     // mount.xMm/yMm are the hole/loop CENTER (matches js/geometry.js roundedRectHoleField:
@@ -217,6 +268,7 @@ function migrateProject(doc) {
     colorStepLayers: doc.colorStepLayers != null ? doc.colorStepLayers : 2,
     amsPalette: [], amsSolidBase: false,
     autoLayerHeights: false, topLayerColor: null, // v1 saves predate the feature: keep manual heights
+    shadowbox: defaultShadowbox(),
     elements: (doc.elements || []).map(el => migrateElement(el, doc, layerH)),
     groups: [],
     fonts: doc.fonts || {},
@@ -232,11 +284,15 @@ function makeElementV2(type, props) {
     cxMm: 25, cyMm: 75, wMm: 30, hMm: 30, rotationDeg: 0,
     flipH: false, flipV: false,
     cutout: false, color: "#000000", groupId: null,
+    sbLayer: null, sbOverhang: false, sbMode: "plate",
     depth: defaultDepth(type),
   }, props);
   if (type === "image") { if (e.src == null) e.src = ""; e._img = e._img || null; }
-  if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; }
-  if (type === "shape") { if (e.shape == null) e.shape = "rect"; } // 'rect' | 'circle' (ellipse when wMm ≠ hMm)
+  if (type === "text") { if (e.text == null) e.text = "Text"; if (e.fontFamily == null) e.fontFamily = "system-ui"; if (e.fontWeight == null) e.fontWeight = "normal"; if (e.arcDeg == null) e.arcDeg = 0; if (e.textPath === undefined) e.textPath = null; }
+  if (type === "shape") {
+    if (e.shape == null) e.shape = "rect"; // 'rect' | 'circle' (ellipse when wMm ≠ hMm)
+    if (e.edge == null) e.edge = { style: "none", sizeMm: 1.5, periodMm: 6 }; // Zierkante für Formen
+  }
   return e;
 }
 
@@ -452,6 +508,8 @@ window.deserializeProject = deserializeProject;
 window.DOC_VERSION = DOC_VERSION;
 window.defaultDepth = defaultDepth;
 window.defaultFrame = defaultFrame;
+window.defaultEdge = defaultEdge;
+window.defaultLine = defaultLine;
 window.defaultDoc = defaultDoc;
 window.migrateProject = migrateProject;
 window.makeElementV2 = makeElementV2;

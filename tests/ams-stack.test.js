@@ -21,8 +21,10 @@
     const d = defaultDoc();
     d.body.widthMm = 60; d.body.heightMm = 60; d.body.cornerRadiusMm = 0; d.body.baseColor = "#FFFFFF";
     d.body.thicknessMm = o.T || 3; d.body.layerHeightMm = 0.2; d.resolution = 64; d.autoLayerHeights = false;
+    d.colorStepLayers = 2; // fixtures assume a 2-layer step (defaultDoc may change it)
     d.amsPalette = o.legacy ? [] : pal.slice();
     if (o.deck) d.topLayerColor = o.deck;
+    if (o.solidBase) d.amsSolidBase = true;
     const el = makeElementV2("image", { src: "a", cxMm: 30, cyMm: 30, wMm: 40, hMm: 40 });
     el.depth.direction = "engraved"; el.depth.mode = "colorLayers"; el.depth.colorLayerStyle = "bands";
     el.depth.reduce = { method: "palette", numColors: Math.min(N, 8), levels: 4, remap: {}, order: [] };
@@ -67,6 +69,10 @@
   test("ams stack: legacy per-element bands (no shared palette) with 6 colors stay separated", async () => {
     checkStack(await amsDoc(6, { legacy: true }), "legacy N=6");
   });
+  test("ams stack: 6 colors with a solid base (no plate bands → fallback layout) stay separated", async () => {
+    const { bands } = checkStack(await amsDoc(6, { solidBase: true }), "N=6 solid base");
+    assertEqual(bands.length, 0, "amsSolidBase keeps the plate one color");
+  });
   test("ams stack: plate bands use the SAME step as the inlay floors", async () => {
     const { floors, bands } = checkStack(await amsDoc(6), "N=6 align");
     const floorStep = floors[floors.length - 1].mx - floors[floors.length - 2].mx;
@@ -84,6 +90,7 @@
     const d = defaultDoc();
     d.body.widthMm = 120; d.body.heightMm = 40; d.body.cornerRadiusMm = 0; d.body.baseColor = "#FFFFFF";
     d.body.thicknessMm = 3; d.body.layerHeightMm = 0.2; d.resolution = 96; d.autoLayerHeights = true; d.amsPalette = [];
+    d.colorStepLayers = 2;
     if (o.base != null) d.body.baseThicknessMm = o.base;
     if (o.deck) d.topLayerColor = o.deck;
     d.elements = PAL.slice(0, N).map((hex, i) => {

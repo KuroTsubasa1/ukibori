@@ -6,16 +6,16 @@
     assertEqual(d.body.shape, "rect", "shape");
     assertEqual(d.body.widthMm, 50, "body width");
     assertEqual(d.body.heightMm, 150, "body height");
-    assertEqual(d.body.cornerRadiusMm, 4, "corner");
-    assertEqual(d.body.thicknessMm, 3, "thickness");
-    assertEqual(d.body.layerHeightMm, 0.2, "layerHeight");
+    assertEqual(d.body.cornerRadiusMm, 6.5, "corner");
+    assertEqual(d.body.thicknessMm, 2, "thickness");
+    assertEqual(d.body.layerHeightMm, 0.4, "layerHeight");
     assertEqual(d.body.baseColor, "#ffffff", "baseColor (default white so a black relief is visible in 2D+3D)");
     assertEqual(d.body.autoSizeFromElementId, null, "autoSize null");
     assertEqual(d.body.freeOutlineFromElementId, null, "freeOutline null");
     assertEqual(d.mount.type, "none", "mount none by default");
     assertEqual(d.mount.ringHeightMm, 2, "ring height default");
     assertEqual(d.resolution, 1024, "resolution");
-    assertEqual(d.colorStepLayers, 2, "colorStepLayers");
+    assertEqual(d.colorStepLayers, 4, "colorStepLayers");
     assertEqual(d.elements.length, 0, "no elements");
   });
 

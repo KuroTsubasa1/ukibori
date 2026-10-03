@@ -507,17 +507,124 @@ function roundedRectHoleField(cols, rows, p) {
 }
 window.roundedRectHoleField = roundedRectHoleField;
 
+// Analytic perimeter parameterization for rect/circle plates (Zierkante).
+// t is the clockwise arc length in mm, t=0 at the top (circle) or at the start
+// of the top edge after the top-left corner arc (rect). Returns
+// { length, point(t)->{x,y,nx,ny} (outward normal), nearest(x,y)->t },
+// or null for shapes without an analytic perimeter (free/image).
+function platePerimeterMm(body) {
+  const W = body.widthMm, H = body.heightMm, hw = W / 2, hh = H / 2;
+  if (body.shape === "circle") {
+    const R = Math.min(hw, hh);
+    if (!(R > 0)) return null;
+    const TAU = 2 * Math.PI;
+    return {
+      length: TAU * R,
+      point(t) {
+        const th = t / R - Math.PI / 2; // t=0 at the top of the circle
+        return { x: hw + R * Math.cos(th), y: hh + R * Math.sin(th), nx: Math.cos(th), ny: Math.sin(th) };
+      },
+      nearest(x, y) {
+        let th = Math.atan2(y - hh, x - hw) + Math.PI / 2;
+        if (th < 0) th += TAU;
+        return (th % TAU) * R;
+      },
+    };
+  }
+  if (body.shape !== "rect" || !(W > 0) || !(H > 0)) return null;
+  const rr = Math.min(body.cornerRadiusMm || 0, hw, hh);
+  const tw = W - 2 * rr, th_ = H - 2 * rr, la = Math.PI * rr / 2;
+  // clockwise offsets: top edge, TR arc, right edge, BR arc, bottom, BL arc, left, TL arc
+  const o1 = tw, o2 = o1 + la, o3 = o2 + th_, o4 = o3 + la, o5 = o4 + tw, o6 = o5 + la, o7 = o6 + th_;
+  const L = o7 + la;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+  function arcPt(ccx, ccy, psi) {
+    return { x: ccx + rr * Math.cos(psi), y: ccy + rr * Math.sin(psi), nx: Math.cos(psi), ny: Math.sin(psi) };
+  }
+  return {
+    length: L,
+    point(t) {
+      t = ((t % L) + L) % L;
+      if (t < o1) return { x: rr + t, y: 0, nx: 0, ny: -1 };
+      if (t < o2) return arcPt(W - rr, rr, -Math.PI / 2 + (t - o1) / rr);
+      if (t < o3) return { x: W, y: rr + (t - o2), nx: 1, ny: 0 };
+      if (t < o4) return arcPt(W - rr, H - rr, (t - o3) / rr);
+      if (t < o5) return { x: (W - rr) - (t - o4), y: H, nx: 0, ny: 1 };
+      if (t < o6) return arcPt(rr, H - rr, Math.PI / 2 + (t - o5) / rr);
+      if (t < o7) return { x: 0, y: (H - rr) - (t - o6), nx: -1, ny: 0 };
+      return arcPt(rr, rr, Math.PI + (t - o7) / rr);
+    },
+    nearest(x, y) {
+      const dxc = x - hw, dyc = y - hh;
+      const qx = Math.abs(dxc) - (hw - rr), qy = Math.abs(dyc) - (hh - rr);
+      if (qx > 0 && qy > 0 && rr > 0) {
+        // nearest point lies on a corner arc
+        const ccx = dxc > 0 ? W - rr : rr, ccy = dyc > 0 ? H - rr : rr;
+        const psi = Math.atan2(y - ccy, x - ccx);
+        if (dxc > 0 && dyc <= 0) return o1 + clamp((psi + Math.PI / 2) * rr, 0, la); // TR
+        if (dxc > 0) return o3 + clamp(psi * rr, 0, la);                              // BR
+        if (dyc > 0) return o5 + clamp((psi - Math.PI / 2) * rr, 0, la);              // BL
+        return o7 + clamp((psi + Math.PI) * rr, 0, la);                               // TL
+      }
+      if (qx > qy) {
+        // vertical edges (right runs top→bottom, left bottom→top)
+        if (dxc > 0) return o2 + clamp(y - rr, 0, th_);
+        return o6 + clamp((H - rr) - y, 0, th_);
+      }
+      // horizontal edges (top runs left→right, bottom right→left)
+      if (dyc <= 0) return clamp(x - rr, 0, tw);
+      return o4 + clamp((W - rr) - x, 0, tw);
+    },
+  };
+}
+window.platePerimeterMm = platePerimeterMm;
+
+// Zierkante: modulates a plate SDF along the perimeter parameter. The period
+// snaps to an integer count of repeats so the pattern closes seamlessly.
+// edge = {style:'none'|'wave'|'teeth'|'perforation', sizeMm, periodMm}.
+// Returns (d, t) -> d' in mm, or null when the edge is off/invalid.
+// wave/teeth carve up to sizeMm inward; perforation punches Ø sizeMm holes
+// centered on the nominal outline (postage-stamp edge).
+function plateEdgeDecorator(edge, L) {
+  if (!edge || !edge.style || edge.style === "none") return null;
+  if (!(edge.sizeMm > 0) || !(edge.periodMm > 0) || !(L > 0)) return null;
+  const n = Math.max(3, Math.round(L / edge.periodMm));
+  const p = L / n, a = edge.sizeMm;
+  if (edge.style === "wave") {
+    return (d, t) => d - a * 0.5 * (1 + Math.cos(2 * Math.PI * t / p));
+  }
+  if (edge.style === "teeth") {
+    return (d, t) => {
+      const f = t / p - Math.floor(t / p);
+      return d - a * (1 - Math.abs(2 * f - 1));
+    };
+  }
+  if (edge.style === "perforation") {
+    const r = a / 2;
+    return (d, t) => {
+      // local frame: d = distance to the outline (normal), dt = along it —
+      // exact on straight edges, a close approximation on arcs.
+      const dt = t - Math.round(t / p) * p;
+      return Math.min(d, Math.hypot(d, dt) - r);
+    };
+  }
+  return null;
+}
+window.plateEdgeDecorator = plateEdgeDecorator;
+
 // Signed mm-space SDF for a body shape: >0 inside the plate, <0 outside, in mm.
-// body={shape:'rect'|'circle', widthMm, heightMm, cornerRadiusMm}.
+// body={shape:'rect'|'circle', widthMm, heightMm, cornerRadiusMm, edge?}.
 // Extracted verbatim from shapeFootprintField (geometry is identical; units = mm).
 // Used by build-parts.js for footprint union and by editor.js for drag clamp.
+// A Zierkante (body.edge) modulates the SDF here — the single choke point —
+// so plate, frame band, color bands, Öse union, preview and exports all follow.
 function bodySdfMm(body) {
   const W = body.widthMm, H = body.heightMm;
   const hw = W / 2, hh = H / 2;
   const isCircle = body.shape === "circle";
   const rr = Math.min(body.cornerRadiusMm || 0, hw, hh);
   const bodyR = Math.min(hw, hh);                // inscribed circle radius
-  return (xMm, yMm) => {
+  const base = (xMm, yMm) => {
     if (isCircle) {
       return bodyR - Math.hypot(xMm - hw, yMm - hh);    // >0 inside circle, mm
     } else {
@@ -526,6 +633,10 @@ function bodySdfMm(body) {
       return -outside;                                   // >0 inside rounded-rect, mm
     }
   };
+  const per = (body.edge && (isCircle || body.shape === "rect")) ? platePerimeterMm(body) : null;
+  const deco = per ? plateEdgeDecorator(body.edge, per.length) : null;
+  if (!deco) return base;
+  return (xMm, yMm) => deco(base(xMm, yMm), per.nearest(xMm, yMm));
 }
 window.bodySdfMm = bodySdfMm;
 

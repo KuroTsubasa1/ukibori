@@ -29,6 +29,7 @@
   var _snapLoaded = (function () { try { var v = JSON.parse(localStorage.getItem(SNAP_KEY)); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; } }());
   const state = {
     selectedId: null, selectionIds: [], scale: 1, ox: 0, oy: 0, viewX0: 0, viewY0: 0, marginPx: 48,
+    zoom: 1, // 2D workbench zoom factor: 1 = fit, up to 16 (view state, never saved)
     snap: {
       plate:    _snapLoaded.plate    !== undefined ? !!_snapLoaded.plate    : _snapDefault.plate,
       elements: _snapLoaded.elements !== undefined ? !!_snapLoaded.elements : _snapDefault.elements,
@@ -40,6 +41,31 @@
 
   // Streuen (scatter) sub-mode state: null unless the panel is open.
   var scatter = null; // { sourceId, region:{x0,y0,x1,y1}|null, seed, previewIds:[] }
+
+  // Schaukasten: cache for nested opening contour loops (invalidated by param key).
+  var sbLoopsCache = { key: "", loops: null };
+  function sbContourLoops() {
+    var sb = doc.shadowbox;
+    if (!sb || !sb.enabled) return null;
+    var modeOf = function (el) {
+      return el.sbMode === "rim" || el.sbMode === "float" ? el.sbMode
+        : (el.sbMode == null && el.sbOverhang ? "rim" : "plate");
+    };
+    var rimFp = JSON.stringify((doc.elements || [])
+      .filter(function (el) { return modeOf(el) === "rim"; })
+      .map(function (el) { return [el.id, el.cxMm, el.cyMm, el.wMm, el.hMm, el.rotationDeg, el.sbLayer,
+        el.shape || null, el.text || null, el.flipH, el.flipV]; }));
+    var key = JSON.stringify([sb.layers, sb.insetPerLayerMm, sb.opening,
+      doc.body.shape, doc.body.widthMm, doc.body.heightMm, doc.body.cornerRadiusMm]) + rimFp;
+    if (sbLoopsCache.key !== key) {
+      var n = Math.max(3, Math.min(10, sb.layers));
+      var loopFn = window.shadowboxAdaptedOpeningLoops || window.shadowboxOpeningLoops;
+      var all = [];
+      for (var k = 0; k < n - 1; k++) all.push(loopFn(doc, k));
+      sbLoopsCache = { key: key, loops: all };
+    }
+    return sbLoopsCache.loops;
+  }
 
   var MARGIN_PX = 48;
 
@@ -198,9 +224,6 @@
     // transform handles never clip. The engine/export keep using docDomain unchanged.
     var domain = (window.viewportDomain ? window.viewportDomain(doc)
       : (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm }));
-    state.viewX0 = domain.x0;
-    state.viewY0 = domain.y0;
-    state.marginPx = MARGIN_PX;
     // Subtract 2× margin from each dimension so the plate fits within the usable area.
     var uw = availW - 2 * MARGIN_PX;
     var uh = availH - 2 * MARGIN_PX;
@@ -209,9 +232,67 @@
     // produce Infinity → NaN canvas dimensions.
     const dw = Math.max(1e-3, domain.wMm), dh = Math.max(1e-3, domain.hMm);
     const s = Math.max(0.2, Math.min(uw / dw, uh / dh));
-    state.scale = s;
-    cv.width = Math.round(domain.wMm * s + 2 * MARGIN_PX);
-    cv.height = Math.round(domain.hMm * s + 2 * MARGIN_PX);
+    if (!(state.zoom > 1.0001)) {
+      // Fit view — byte-identical to the pre-zoom behavior.
+      state.zoom = 1;
+      state.viewX0 = domain.x0;
+      state.viewY0 = domain.y0;
+      state.marginPx = MARGIN_PX;
+      state.scale = s;
+      cv.width = Math.round(domain.wMm * s + 2 * MARGIN_PX);
+      cv.height = Math.round(domain.hMm * s + 2 * MARGIN_PX);
+      updateZoomChip();
+      return;
+    }
+    // Zoomed: the canvas caps at the pane, the view keeps its center across
+    // re-fits (resize, plate change, endDrag) and clamps onto the domain.
+    const oldScale = state.scale || s;
+    const cxMm = state.viewX0 + (cv.width - 2 * state.marginPx) / (2 * oldScale);
+    const cyMm = state.viewY0 + (cv.height - 2 * state.marginPx) / (2 * oldScale);
+    state.marginPx = MARGIN_PX;
+    state.scale = s * state.zoom;
+    cv.width = Math.round(Math.min(availW, domain.wMm * state.scale + 2 * MARGIN_PX));
+    cv.height = Math.round(Math.min(availH, domain.hMm * state.scale + 2 * MARGIN_PX));
+    const visW = (cv.width - 2 * MARGIN_PX) / state.scale;
+    const visH = (cv.height - 2 * MARGIN_PX) / state.scale;
+    const o = window.clampViewOrigin(
+      { x0: cxMm - visW / 2, y0: cyMm - visH / 2 }, domain, visW, visH);
+    state.viewX0 = o.x0;
+    state.viewY0 = o.y0;
+    updateZoomChip();
+  }
+
+  // ---- 2D zoom & pan ----
+  function viewDomain() {
+    return (window.viewportDomain ? window.viewportDomain(doc)
+      : (window.docDomain ? window.docDomain(doc) : { x0: 0, y0: 0, wMm: doc.body.widthMm, hMm: doc.body.heightMm }));
+  }
+
+  function updateZoomChip() {
+    var chip = document.getElementById("zoom2dChip");
+    if (!chip) return;
+    chip.hidden = !(state.zoom > 1.0001);
+    if (!chip.hidden) chip.textContent = Math.round(state.zoom * 100) + " %";
+  }
+
+  // Set the workbench zoom; ax/ay (canvas-buffer px) anchor the point under
+  // the cursor, otherwise the view center is kept (fitScale does that).
+  function setZoom2d(z, ax, ay) {
+    z = Math.max(1, Math.min(16, z));
+    if (Math.abs(z - state.zoom) < 1e-6) return;
+    const oldScale = state.scale;
+    const oldOrigin = { x0: state.viewX0, y0: state.viewY0 };
+    state.zoom = z;
+    fitScale();
+    if (ax != null && state.zoom > 1.0001) {
+      const o = window.zoomAnchoredOrigin(oldOrigin, ax, ay, oldScale, state.scale, MARGIN_PX);
+      const visW = (cv.width - 2 * MARGIN_PX) / state.scale;
+      const visH = (cv.height - 2 * MARGIN_PX) / state.scale;
+      const c = window.clampViewOrigin(o, viewDomain(), visW, visH);
+      state.viewX0 = c.x0;
+      state.viewY0 = c.y0;
+    }
+    render2D();
   }
 
   // ---- Plate paths ----
@@ -229,6 +310,146 @@
     ctx.arcTo(x0, y1, x0, y0, rr);
     ctx.arcTo(x0, y0, x1, y0, rr);
     ctx.closePath();
+  }
+
+  // Zierkante active? (rect/circle plates with a decorated outline; the
+  // perimeter must be constructible — degenerate saved plates fall back to
+  // the plain outline instead of crashing render2D)
+  function edgeActive() {
+    var e = doc.body.edge;
+    return !!(e && e.style && e.style !== "none" && e.sizeMm > 0 && e.periodMm > 0 &&
+      (doc.body.shape === "rect" || doc.body.shape === "circle") &&
+      window.platePerimeterMm && window.platePerimeterMm(doc.body));
+  }
+
+  // Decorated (wave/teeth) plate outline as the current ctx path. Samples the
+  // analytic perimeter and offsets it inward by the same profile the SDF uses
+  // (geometry.js plateEdgeDecorator), so 2D and print agree. Perforation is
+  // handled by clipDecoratedPlate/strokeDecoratedPlate instead.
+  function decoratedPlatePath(ctx) {
+    var e = doc.body.edge;
+    var per = window.platePerimeterMm(doc.body);
+    var L = per.length;
+    var n = Math.max(3, Math.round(L / e.periodMm));
+    var p = L / n;
+    var depth = e.style === "teeth"
+      ? function (t) { var f = t / p - Math.floor(t / p); return e.sizeMm * (1 - Math.abs(2 * f - 1)); }
+      : function (t) { return e.sizeMm * 0.5 * (1 + Math.cos(2 * Math.PI * t / p)); };
+    var step = Math.min(p / 8, 1);
+    ctx.beginPath();
+    for (var t = 0, j = 0; t < L; t += step, j++) {
+      var q = per.point(t);
+      var d = depth(t);
+      var px = mmX(q.x - q.nx * d), py = mmY(q.y - q.ny * d);
+      if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+  }
+
+  // Nominal (undecorated) plate outline, sampled from the same perimeter.
+  function plateNominalPath(ctx, per) {
+    var L = per.length, step = Math.min(1, L / 64);
+    ctx.beginPath();
+    for (var t = 0, i = 0; t < L; t += step, i++) {
+      var q = per.point(t);
+      if (i === 0) ctx.moveTo(mmX(q.x), mmY(q.y)); else ctx.lineTo(mmX(q.x), mmY(q.y));
+    }
+    ctx.closePath();
+  }
+
+  // Perforation hole circles, appended to the current path (begin starts one).
+  function plateHolesPath(ctx, per, e, begin) {
+    var L = per.length, n = Math.max(3, Math.round(L / e.periodMm)), p = L / n;
+    var r = (e.sizeMm / 2) * state.scale;
+    if (begin) ctx.beginPath();
+    for (var k = 0; k < n; k++) {
+      var c = per.point(k * p);
+      ctx.moveTo(mmX(c.x) + r, mmY(c.y));
+      ctx.arc(mmX(c.x), mmY(c.y), r, 0, Math.PI * 2);
+    }
+  }
+
+  // Establish the decorated-plate clip (inside the caller's save/restore).
+  // Perforation must be "outline MINUS holes" — a single evenodd path would
+  // also include the OUTER half of each hole circle, painting content outside
+  // the plate. Intersecting a nonzero outline clip with a canvas-minus-holes
+  // evenodd clip kills those half-discs.
+  function clipDecoratedPlate(ctx) {
+    var e = doc.body.edge;
+    if (e.style === "perforation") {
+      var per = window.platePerimeterMm(doc.body);
+      plateNominalPath(ctx, per); ctx.clip();
+      ctx.beginPath(); ctx.rect(0, 0, cv.width, cv.height);
+      plateHolesPath(ctx, per, e, false);
+      ctx.clip("evenodd");
+      return;
+    }
+    decoratedPlatePath(ctx); ctx.clip();
+  }
+
+  // Stroke the decorated outline with the current stroke style. Perforation:
+  // outline segments outside the hole mouths + the inner half of each circle.
+  function strokeDecoratedPlate(ctx) {
+    var e = doc.body.edge;
+    if (e.style !== "perforation") { decoratedPlatePath(ctx); ctx.stroke(); return; }
+    var per = window.platePerimeterMm(doc.body);
+    ctx.save(); // outline, suppressed where a hole mouth opens
+    ctx.beginPath(); ctx.rect(0, 0, cv.width, cv.height);
+    plateHolesPath(ctx, per, e, false);
+    ctx.clip("evenodd");
+    plateNominalPath(ctx, per); ctx.stroke();
+    ctx.restore();
+    ctx.save(); // the bite arcs: circles clipped to the plate interior
+    plateNominalPath(ctx, per); ctx.clip();
+    plateHolesPath(ctx, per, e, true); ctx.stroke();
+    ctx.restore();
+  }
+
+  // Zierlinie 2D preview: stroke the contour-following line(s). The engine
+  // band mask is authoritative; on decorated edges this offsets the decorated
+  // outline along the nominal normals (a close preview approximation).
+  function strokeZierlinie(ctx, s) {
+    var l = doc.body.line;
+    var nLines = Math.max(1, Math.min(3, Math.round(l.count || 1)));
+    var gap = l.widthMm * 1.5;
+    ctx.save();
+    ctx.strokeStyle = l.mode === "raised" ? (l.color || "#000000") : "#3a3a44";
+    ctx.lineWidth = Math.max(1, l.widthMm * s);
+    if (l.mode === "engraved") ctx.globalAlpha = 0.55; // a groove reads lighter than ink
+    var per = edgeActive() ? window.platePerimeterMm(doc.body) : null;
+    var depthFn = function () { return 0; };
+    if (per) {
+      var e = doc.body.edge;
+      if (e.style === "wave" || e.style === "teeth") {
+        var deco = window.plateEdgeDecorator(e, per.length);
+        if (deco) depthFn = function (t) { return -deco(0, t); };
+      }
+    }
+    for (var k = 0; k < nLines; k++) {
+      var insetK = l.insetMm + k * (l.widthMm + gap) + l.widthMm / 2;
+      if (per) {
+        var L = per.length, step = Math.min(1, L / 128);
+        ctx.beginPath();
+        for (var t = 0, j = 0; t < L; t += step, j++) {
+          var q = per.point(t);
+          var off = insetK + depthFn(t);
+          var X = mmX(q.x - q.nx * off), Y = mmY(q.y - q.ny * off);
+          if (j) ctx.lineTo(X, Y); else ctx.moveTo(X, Y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      } else if (doc.body.shape === "circle") {
+        var r0 = Math.min(doc.body.widthMm, doc.body.heightMm) / 2 - insetK;
+        if (r0 * s > 1) {
+          ctx.beginPath();
+          ctx.arc(mmX(doc.body.widthMm / 2), mmY(doc.body.heightMm / 2), r0 * s, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      } else if (insetBodyPath(ctx, insetK)) {
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
   }
 
   // Rounded-rect path inset by insetMm on all sides (Rand-Rahmen 2D preview).
@@ -756,13 +977,20 @@
       ctx.fillStyle = el.color || "#ffffff";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.font = `${el.fontWeight || "normal"} ${Math.max(1, Math.round(h))}px ${el.fontFamily || "system-ui"}`;
-      ctx.fillText(el.text || "", 0, 0);
+      if (el.textPath && el.textPath.length > 1 && window.drawPathText) {
+        window.drawPathText(ctx, el.text || "",
+          el.textPath.map(function (p) { return { x: p.x * s, y: p.y * s }; }),
+          Math.max(1, Math.round(h)));
+      } else if (el.arcDeg) window.drawArcText(ctx, el.text || "", el.arcDeg, Math.max(1, Math.round(h)));
+      else ctx.fillText(el.text || "", 0, 0);
     } else if (el.type === "shape") {
       ctx.fillStyle = el.color || "#000000";
-      ctx.beginPath();
-      if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
-      else ctx.rect(-w / 2, -h / 2, w, h);
-      ctx.fill();
+      if (!(window.drawShapeEdge && window.drawShapeEdge(ctx, el, w, h))) {
+        ctx.beginPath();
+        if (el.shape === "circle") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+        else ctx.rect(-w / 2, -h / 2, w, h);
+        ctx.fill();
+      }
     } else if (el.type === "image") {
       if (el._img) {
         // Use processed display canvas (threshold/invert/reduce applied) so 2D == print.
@@ -828,39 +1056,54 @@
 
     if (shape === "rect") {
       // Rounded-rect plate: outline only (B5: no solid fill so elements/relief are visible).
-      // Clip elements inside the body outline.
-      ctx.save(); bodyPath(ctx); ctx.clip();
+      // Clip elements inside the body outline (decorated when a Zierkante is active).
+      const deco = edgeActive();
+      ctx.save();
+      if (deco) clipDecoratedPlate(ctx);
+      else { bodyPath(ctx); ctx.clip(); }
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
       ctx.restore();
       // Outline.
-      bodyPath(ctx); ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1;
+      if (deco) strokeDecoratedPlate(ctx);
+      else { bodyPath(ctx); ctx.stroke(); }
       // Rand-Rahmen preview: stroke inset by widthMm/2 with lineWidth widthMm*s
       // (drawn over the content — "ring wins"; exact band comes from the engine).
+      // With a Zierkante the ring is clipped to the decorated outline so its
+      // outer edge follows the waves/teeth like the printed band does.
       const frame = body.frame;
-      if (frame && frame.widthMm > 0 && insetBodyPath(ctx, frame.widthMm / 2)) {
+      if (frame && frame.widthMm > 0) {
         ctx.save();
-        ctx.strokeStyle = frame.color || "#000000";
-        ctx.lineWidth = frame.widthMm * s;
-        ctx.stroke();
+        if (deco) clipDecoratedPlate(ctx);
+        if (insetBodyPath(ctx, frame.widthMm / 2)) {
+          ctx.strokeStyle = frame.color || "#000000";
+          ctx.lineWidth = frame.widthMm * s;
+          ctx.stroke();
+        }
         ctx.restore();
       }
     } else if (shape === "circle") {
       // Circle plate: outline only (B5: no solid fill so elements/relief are visible).
       const r = Math.min(body.widthMm, body.heightMm) / 2 * s;
       const cx = mmX(body.widthMm / 2), cy = mmY(body.heightMm / 2);
-      // Clip to circle.
+      const decoC = edgeActive();
+      // Clip to circle (decorated when a Zierkante is active).
       ctx.save();
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip();
+      if (decoC) clipDecoratedPlate(ctx);
+      else { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.clip(); }
       for (const el of doc.elements) { if (!el._hidden) drawElement(ctx, el, s); }
       ctx.restore();
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.strokeStyle = "#3a3a44"; ctx.lineWidth = 1;
+      if (decoC) strokeDecoratedPlate(ctx);
+      else { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke(); }
       // Rand-Rahmen preview: ring stroke at r - widthMm/2 ("ring wins" over content).
+      // Clipped to the decorated outline when a Zierkante is active (see rect).
       const frame = body.frame;
       if (frame && frame.widthMm > 0) {
         const fr = r - (frame.widthMm / 2) * s;
         if (fr > 0) {
           ctx.save();
+          if (decoC) clipDecoratedPlate(ctx);
           ctx.beginPath(); ctx.arc(cx, cy, fr, 0, Math.PI * 2);
           ctx.strokeStyle = frame.color || "#000000";
           ctx.lineWidth = frame.widthMm * s;
@@ -893,6 +1136,34 @@
           ctx.restore();
         }
       }
+    }
+
+    // Zierlinie preview (rect/circle plates only — mirrors the engine's scope).
+    if ((shape === "rect" || shape === "circle") && doc.body.line &&
+        doc.body.line.mode !== "none" && doc.body.line.widthMm > 0) {
+      strokeZierlinie(ctx, s);
+    }
+
+    // Schaukasten: ghosted nested opening contours (front = strongest).
+    var sbLoops = sbContourLoops();
+    if (sbLoops) {
+      ctx.save();
+      ctx.setLineDash([]);
+      for (var sbk = 0; sbk < sbLoops.length; sbk++) {
+        ctx.strokeStyle = "rgba(30,90,158," + (0.55 - (0.4 * sbk) / Math.max(1, sbLoops.length - 1)) + ")";
+        ctx.lineWidth = sbk === 0 ? 1.5 : 1;
+        for (var sbi = 0; sbi < sbLoops[sbk].length; sbi++) {
+          var lp = sbLoops[sbk][sbi];
+          ctx.beginPath();
+          lp.forEach(function (p, i) {
+            var px = mmX(p.xMm), py = mmY(p.yMm);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          });
+          ctx.closePath();
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
     }
 
     // Mount marker: visible draggable circle + crosshair.
@@ -948,6 +1219,33 @@
       ctx.restore();
     }
 
+    // Scatter path overlay: the stroke being drawn (px) or the stored path (mm→px).
+    var scPathPts = (drag && (drag.handle === "scatterPath" || drag.handle === "textPath") && drag.ptsPx && drag.ptsPx.length > 1) ? drag.ptsPx
+      : (scatter && scatter.mode === "path" && scatter.path && scatter.path.length > 1 && !(drag && drag.handle === "scatterPath"))
+        ? scatter.path.map(function (p) { return { x: mmX(p.x), y: mmY(p.y) }; })
+        : null;
+    if (scPathPts) {
+      ctx.save();
+      ctx.strokeStyle = "#6b4fb0";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      scPathPts.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+      ctx.stroke();
+      ctx.restore();
+    }
+    // Shadowbox opening freehand overlay (closed polygon preview).
+    if (drag && drag.handle === "sbOpening" && drag.ptsPx && drag.ptsPx.length > 1) {
+      ctx.save();
+      ctx.strokeStyle = "#e0245e";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      drag.ptsPx.forEach(function (p, i) { if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); });
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
     if (drag && (drag.handle === "marquee" || drag.handle === "scatterRegion") && drag.rectPx) {
       ctx.save();
       ctx.strokeStyle = "#6b4fb0"; ctx.fillStyle = "rgba(107,79,176,0.10)";
@@ -1121,13 +1419,77 @@
 
   // ---- Pointer handlers (move / scale / rotate) ----
   let drag = null;
+  var spacePan = false; // Space held → next canvas drag pans the view
+  var textPathDraw = null; // text-element id waiting for a Pfadtext drag
+  var sbOpeningDraw = false; // true while waiting for one freehand opening capture
+  var sbExplodeMm = 0; // view-only explode offset in mm — NOT stored in doc, never serialized
+
+  // Mouse wheel zooms the workbench toward the cursor (same convention as the
+  // 3D stage); ctrl+wheel is the trackpad pinch (finer deltas, larger factor).
+  cv.addEventListener("wheel", function (e) {
+    e.preventDefault();
+    const rect = cv.getBoundingClientRect();
+    const scaleC = cv.width / rect.width;
+    const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+    const dy = e.deltaY * (e.deltaMode === 1 ? 33 : 1); // line-mode wheels (Firefox)
+    const factor = Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0015));
+    setZoom2d(state.zoom * factor, px, py);
+  }, { passive: false });
+
+  window.addEventListener("keydown", function (e) {
+    if (e.key !== " " || e.repeat) return;
+    var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || tag === "button" || (t && t.isContentEditable)) return;
+    spacePan = true;
+    cv.style.cursor = "grab";
+    e.preventDefault(); // keep the page from scrolling while the canvas has focus
+  });
+  window.addEventListener("keyup", function (e) {
+    if (e.key !== " ") return;
+    spacePan = false;
+    if (!drag) cv.style.cursor = "";
+  });
+
+  (function () {
+    var chip = document.getElementById("zoom2dChip");
+    if (chip) chip.addEventListener("click", function () { setZoom2d(1); });
+  }());
 
   cv.addEventListener("pointerdown", function (e) {
     const rect = cv.getBoundingClientRect();
     const scaleC = cv.width / rect.width;
     const px = (e.clientX - rect.left) * scaleC, py = (e.clientY - rect.top) * scaleC;
+    // Pan: middle button always, left button while Space is held.
+    if (e.button === 1 || (e.button === 0 && spacePan)) {
+      drag = { handle: "pan", px, py, ox: state.viewX0, oy: state.viewY0 };
+      cv.setPointerCapture(e.pointerId);
+      cv.style.cursor = "grabbing";
+      e.preventDefault(); // suppress middle-click autoscroll
+      return;
+    }
+    // Schaukasten Öffnung: one freehand capture for the opening shape.
+    if (sbOpeningDraw) {
+      drag = { handle: "sbOpening", px, py, ptsPx: [{ x: px, y: py }] };
+      cv.setPointerCapture(e.pointerId);
+      return;
+    }
+    // Pfadtext: the next canvas drag records the path for the waiting text element.
+    if (textPathDraw) {
+      const toMmT = function (p, v0) { return (p - state.marginPx) / state.scale + v0; };
+      drag = { handle: "textPath", px, py, ptsPx: [{ x: px, y: py }],
+               pathMm: [{ x: toMmT(px, state.viewX0), y: toMmT(py, state.viewY0) }] };
+      cv.setPointerCapture(e.pointerId);
+      return;
+    }
     // Scatter sub-mode: while the panel is open, a canvas drag defines the placement region.
     if (scatter) {
+      if (scatter.mode === "path") {
+        const toMm0 = function (p, v0) { return (p - state.marginPx) / state.scale + v0; };
+        drag = { handle: "scatterPath", px, py, ptsPx: [{ x: px, y: py }],
+                 pathMm: [{ x: toMm0(px, state.viewX0), y: toMm0(py, state.viewY0) }] };
+        cv.setPointerCapture(e.pointerId);
+        return;
+      }
       drag = { handle: "scatterRegion", px, py };
       cv.setPointerCapture(e.pointerId);
       return;
@@ -1302,6 +1664,37 @@
       scheduleRebuild3D();
       return;
     }
+    if (drag.handle === "pan") {
+      const visW = (cv.width - 2 * state.marginPx) / s;
+      const visH = (cv.height - 2 * state.marginPx) / s;
+      const o = window.clampViewOrigin(
+        { x0: drag.ox - (px - drag.px) / s, y0: drag.oy - (py - drag.py) / s },
+        viewDomain(), visW, visH);
+      state.viewX0 = o.x0;
+      state.viewY0 = o.y0;
+      render2D();
+      return;
+    }
+    if (drag.handle === "scatterPath" || drag.handle === "textPath") {
+      // freehand path: sample a point every few pixels
+      const last = drag.ptsPx[drag.ptsPx.length - 1];
+      if (Math.hypot(px - last.x, py - last.y) >= 4) {
+        const toMmP = function (p, v0) { return (p - state.marginPx) / s + v0; };
+        drag.ptsPx.push({ x: px, y: py });
+        drag.pathMm.push({ x: toMmP(px, state.viewX0), y: toMmP(py, state.viewY0) });
+        render2D();
+      }
+      return;
+    }
+    if (drag.handle === "sbOpening") {
+      // freehand opening shape: sample a point every few pixels
+      const last = drag.ptsPx[drag.ptsPx.length - 1];
+      if (Math.hypot(px - last.x, py - last.y) >= 4) {
+        drag.ptsPx.push({ x: px, y: py });
+        render2D();
+      }
+      return;
+    }
     if (drag.handle === "scatterRegion") {
       const toMm = function (p, v0) { return (p - state.marginPx) / s + v0; };
       scatter.region = {
@@ -1363,9 +1756,68 @@
 
   function endDrag() {
     if (!drag) return;
+    if (drag.handle === "pan") {
+      // Pure view change: no re-fit, no 3D rebuild, no inspector refresh.
+      drag = null;
+      cv.style.cursor = spacePan ? "grab" : "";
+      render2D();
+      return;
+    }
+    if (drag.handle === "sbOpening") {
+      // Schaukasten Öffnung: convert px points to doc-mm, smooth, store as closed polygon.
+      var sbPtsPx = drag.ptsPx;
+      drag = null;
+      sbOpeningDraw = false;
+      document.getElementById("sbDrawHint").hidden = true;
+      var s0 = state.scale;
+      var sbMm = sbPtsPx.map(function (p) {
+        return { xMm: (p.x - state.marginPx) / s0 + state.viewX0,
+                 yMm: (p.y - state.marginPx) / s0 + state.viewY0 };
+      });
+      var sbSm = window.smoothPath
+        ? window.smoothPath(sbMm.map(function (p) { return { x: p.xMm, y: p.yMm }; }), 2)
+            .map(function (p) { return { xMm: p.x, yMm: p.y }; })
+        : sbMm;
+      if (sbSm.length >= 3) {
+        sbState().opening.points = sbSm;
+        sbState().opening.source = "drawn";
+      }
+      syncShadowboxControls();
+      render2D();
+      scheduleRebuild3D();
+      return;
+    }
+    if (drag.handle === "textPath") {
+      // Pfadtext: store the smoothed path element-local (undo translate/rotate/flip).
+      var rawPath = drag.pathMm;
+      drag = null;
+      var tpEl = doc.elements.find(function (e2) { return e2.id === textPathDraw; });
+      textPathDraw = null;
+      if (tpEl && rawPath.length > 1) {
+        var smoothed = window.smoothPath ? window.smoothPath(rawPath, 2) : rawPath;
+        var ang = -(tpEl.rotationDeg || 0) * Math.PI / 180;
+        var ca = Math.cos(ang), sa = Math.sin(ang);
+        tpEl.textPath = smoothed.map(function (p) {
+          var dx = p.x - tpEl.cxMm, dy = p.y - tpEl.cyMm;
+          var lx = dx * ca - dy * sa, ly = dx * sa + dy * ca;
+          if (tpEl.flipH) lx = -lx;
+          if (tpEl.flipV) ly = -ly;
+          return { x: lx, y: ly };
+        });
+      }
+      refreshAdvancedForSelection();
+      render2D();
+      scheduleRebuild3D();
+      return;
+    }
     var wasScatter = drag.handle === "scatterRegion";
+    var pathMm = drag.handle === "scatterPath" ? drag.pathMm : null;
     drag = null;
     if (wasScatter && scatter) scatterGenerate(); // re-roll the preview into the new region
+    if (pathMm && scatter) {
+      if (pathMm.length > 1) { scatter.path = pathMm; scatterGenerate(); }
+      render2D();
+    }
     state.snapGuides = []; // clear transient guide lines
     // Re-fit the canvas: a move/scale/rotate (or mount move) may have pushed the element past
     // the old bounds. viewportDomain now includes element bboxes, so this keeps handles on-canvas.
@@ -1408,7 +1860,7 @@
         src: dataURL, _img: img,
         cxMm: body.widthMm / 2, cyMm: body.heightMm / 2,
         wMm, hMm,
-        // Dateiname (ohne Endung) — beschriftet die Ebene und liefert den Export-Namen.
+        // File name (without extension) — labels the layer and feeds the export name.
         name: fileName ? String(fileName).replace(/\.[^.]+$/, "") : undefined,
       });
       el.depth.direction = defaultDirection;
@@ -1480,6 +1932,11 @@
     }
 
     if (e.key === "Escape") {                         // deselect + release focus
+      if (sbOpeningDraw) {                            // cancel an armed opening draw
+        sbOpeningDraw = false;
+        var sbHint = document.getElementById("sbDrawHint");
+        if (sbHint) sbHint.hidden = true;
+      }
       if (state.selectedId != null) {
         clearSelection(); refreshAdvancedForSelection(); renderLayers(); render2D();
       }
@@ -1503,16 +1960,21 @@
     e.preventDefault();                               // stop page scroll
     if (cur === -1) { selectByIndex(0); return; }     // nothing selected → select first, don't move yet
     var stepMm = e.shiftKey ? 0.25 : 1;               // Shift = fine 0.25 mm, else 1 mm
+    // free/image auto-fit to the content, so elements aren't bound to the plate box.
+    var freeShape = doc.body.shape === "free" || doc.body.shape === "image";
+    var nbLo = freeShape ? -1e4 : 0;
+    var nbX = freeShape ? 1e4 : doc.body.widthMm;
+    var nbY = freeShape ? 1e4 : doc.body.heightMm;
     if (state.selectionIds.length > 1) {              // nudge the whole multi-selection together
       selectedEls().forEach(function (el) {
-        el.cxMm = clamp(el.cxMm + dx * stepMm, 0, doc.body.widthMm);
-        el.cyMm = clamp(el.cyMm + dy * stepMm, 0, doc.body.heightMm);
+        el.cxMm = clamp(el.cxMm + dx * stepMm, nbLo, nbX);
+        el.cyMm = clamp(el.cyMm + dy * stepMm, nbLo, nbY);
       });
       render2D(); scheduleRebuild3D();
     } else {
       withSelected(function (el) {
-        el.cxMm = clamp(el.cxMm + dx * stepMm, 0, doc.body.widthMm);
-        el.cyMm = clamp(el.cyMm + dy * stepMm, 0, doc.body.heightMm);
+        el.cxMm = clamp(el.cxMm + dx * stepMm, nbLo, nbX);
+        el.cyMm = clamp(el.cyMm + dy * stepMm, nbLo, nbY);
       });
     }
     refreshAdvancedForSelection();                    // keep advCx/advCy inputs in sync
@@ -1549,7 +2011,7 @@
 
   // ---- 2D/3D/split preview mode ----
   const PREVIEW_MODE_KEY = "ukibori.previewMode";
-  function getPartsFn() { return { parts: window.buildParts(visibleDoc()) }; }
+  function getPartsFn() { return { parts: window.buildParts(visibleDoc(), { explodeMm: sbExplodeMm }) }; }
 
   // setPreviewMode: unified handler for 2D, 3D, and split modes.
   // Order: set layout class + visibility first so clientWidth is the split half-width
@@ -1638,7 +2100,7 @@
   document.getElementById("exportMf").addEventListener("click", function () {
     try {
       setExportStatus("Exportiere …");
-      const parts = window.buildParts(visibleDoc());
+      const parts = window.buildParts(visibleDoc(), { layout: "bed" });
       const blob = window.build3MF(parts);
       downloadBlob(blob, exportFileName() + ".3mf");
       setExportStatus("Fertig.");
@@ -1650,12 +2112,37 @@
   document.getElementById("exportStl").addEventListener("click", function () {
     try {
       setExportStatus("Exportiere …");
-      const parts = window.buildParts(visibleDoc());
+      const parts = window.buildParts(visibleDoc(), { layout: "bed" });
       const facets = parts.flatMap(function (p) { return p.facets; });
       const u8 = window.facetsToBinarySTL(facets);
       const blob = new Blob([u8], { type: "application/octet-stream" });
       downloadBlob(blob, exportFileName() + ".stl");
       setExportStatus("Fertig.");
+    } catch (e) {
+      setExportStatus("Fehler: " + e.message);
+    }
+  });
+
+  // Pausen-Spickzettel: exact pause layers for manual color swaps (no AMS).
+  document.getElementById("exportPause").addEventListener("click", function () {
+    try {
+      const doc = visibleDoc();
+      if (doc.shadowbox && doc.shadowbox.enabled) {
+        setExportStatus("Im Schaukasten-Modus nicht verfügbar — jede Platte wird einzeln und einfarbig gedruckt.");
+        return;
+      }
+      setExportStatus("Berechne …");
+      const parts = window.buildParts(doc);
+      const sheet = window.buildPauseSheet(parts, doc.body.layerHeightMm);
+      if (sheet.swaps.length <= 1 && !sheet.mixed.length) {
+        setExportStatus("Nur eine Farbe — keine Pausen nötig.");
+        return;
+      }
+      const text = window.formatPauseSheet(sheet, { name: exportFileName(), layerHeightMm: doc.body.layerHeightMm });
+      downloadBlob(new Blob([text], { type: "text/plain;charset=utf-8" }), exportFileName() + "-pausen.txt");
+      setExportStatus(sheet.mixed.length
+        ? "Fertig — Achtung: enthält Zonen, die nur mit AMS druckbar sind (siehe Zettel)."
+        : "Fertig.");
     } catch (e) {
       setExportStatus("Fehler: " + e.message);
     }
@@ -1857,7 +2344,11 @@
     setHidden("borderField", shape !== "free");
     setHidden("frameField", isImage); // rect/circle/free all support the Rand-Rahmen
     setHidden("cornerField", shape !== "rect");
-    setHidden("simpleSizeSection", isImage);
+    setHidden("edgeField", shape !== "rect" && shape !== "circle"); // Zierkante needs the analytic outline
+    setHidden("lineField", shape !== "rect" && shape !== "circle"); // Zierlinie too
+    // Free-form auto-fits the plate to the drawn content (see docDomain), so the
+    // workpiece size is irrelevant there — hide it like the Bild object does.
+    setHidden("simpleSizeSection", isImage || shape === "free");
     // A Bild object has no plate → mount (Befestigung) and plate-centered "Ausrichten" are
     // meaningless. Force mount off (so 2D marker, hit-test, and 3D geometry all agree) and hide
     // both control groups. Non-image shapes leave the mount untouched.
@@ -1867,6 +2358,7 @@
     }
     setHidden("simpleMountSection", isImage);
     setHidden("simpleCenterSection", isImage);
+    syncShadowboxControls();
     render2D();
     scheduleRebuild3D();
   }
@@ -1895,6 +2387,63 @@
   bindNum("cornerMm", 0, function (v) {
     doc.body.cornerRadiusMm = v; render2D(); scheduleRebuild3D();
   });
+
+  // Zierkante (rect/circle): style select + size/period fields
+  function syncEdgeFields() {
+    var e = doc.body.edge || { style: "none", sizeMm: 2, periodMm: 8 };
+    var st = document.getElementById("edgeStyle");
+    if (st) st.value = e.style || "none";
+    var params = document.getElementById("edgeParams");
+    if (params) params.hidden = !e.style || e.style === "none";
+    var sz = document.getElementById("edgeSizeMm");
+    if (sz) sz.value = e.sizeMm;
+    var pd = document.getElementById("edgePeriodMm");
+    if (pd) pd.value = e.periodMm;
+  }
+  (function () {
+    var st = document.getElementById("edgeStyle");
+    if (st) st.addEventListener("change", function () {
+      if (!doc.body.edge) doc.body.edge = window.defaultEdge();
+      doc.body.edge.style = st.value;
+      syncEdgeFields(); render2D(); scheduleRebuild3D();
+    });
+    bindNum("edgeSizeMm", 0.1, function (v) {
+      if (!doc.body.edge) doc.body.edge = window.defaultEdge();
+      doc.body.edge.sizeMm = v; render2D(); scheduleRebuild3D();
+    });
+    bindNum("edgePeriodMm", 0.5, function (v) {
+      if (!doc.body.edge) doc.body.edge = window.defaultEdge();
+      doc.body.edge.periodMm = v; render2D(); scheduleRebuild3D();
+    });
+  }());
+
+  // Zierlinie (rect/circle): contour-following groove/ridge
+  function syncLineFields() {
+    var l = doc.body.line || window.defaultLine();
+    var md = document.getElementById("lineMode");
+    if (md) md.value = l.mode || "none";
+    var params = document.getElementById("lineParams");
+    if (params) params.hidden = !l.mode || l.mode === "none";
+    var set = function (id, v) { var n = document.getElementById(id); if (n) n.value = v; };
+    set("lineInset", l.insetMm); set("lineWidth", l.widthMm);
+    set("lineDepth", l.depthMm); set("lineCount", l.count);
+    set("lineColor", l.color || "#000000");
+    var col = document.getElementById("lineColor");
+    if (col) col.hidden = l.mode !== "raised"; // groove floor keeps the plate color
+  }
+  (function () {
+    var ensure = function () { if (!doc.body.line) doc.body.line = window.defaultLine(); return doc.body.line; };
+    var md = document.getElementById("lineMode");
+    if (md) md.addEventListener("change", function () {
+      ensure().mode = md.value;
+      syncLineFields(); render2D(); scheduleRebuild3D();
+    });
+    bindNum("lineInset", 0, function (v) { ensure().insetMm = v; render2D(); scheduleRebuild3D(); });
+    bindNum("lineWidth", 0.1, function (v) { ensure().widthMm = v; render2D(); scheduleRebuild3D(); });
+    bindNum("lineDepth", 0.1, function (v) { ensure().depthMm = v; render2D(); scheduleRebuild3D(); });
+    bindNum("lineCount", 1, function (v) { ensure().count = Math.max(1, Math.min(3, Math.round(v))); render2D(); scheduleRebuild3D(); });
+    bindColor("lineColor", function (v) { ensure().color = v; render2D(); scheduleRebuild3D(); });
+  }());
 
   // Border (shown only for Free)
   bindNum("borderMm", 0, function (v) {
@@ -2141,7 +2690,10 @@
     // Border
     document.getElementById("borderMm").value = doc.body.borderMm != null ? doc.body.borderMm : 2;
     // Eckenradius (rectangle)
-    document.getElementById("cornerMm").value = doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 4;
+    document.getElementById("cornerMm").value = doc.body.cornerRadiusMm != null ? doc.body.cornerRadiusMm : 6.5;
+    // Zierkante + Zierlinie
+    syncEdgeFields();
+    syncLineFields();
     // Rahmen (Rand-Rahmen)
     var fr = doc.body.frame;
     document.getElementById("frameMm").value = fr && fr.widthMm != null ? fr.widthMm : 0;
@@ -2582,6 +3134,20 @@
     // Font controls (Schriftart + Fett + Upload): text elements only.
     var advFontField = document.getElementById("advFontField");
     if (advFontField) advFontField.hidden = !isText;
+    var advArcField = document.getElementById("advArcField");
+    if (advArcField) advArcField.hidden = !isText;
+    var advArcNode = document.getElementById("advArc");
+    if (advArcNode) {
+      advArcNode.value = isText ? (el.arcDeg || 0) : 0;
+      // a Pfadtext overrides the arc — grey the arc input out while one is set
+      advArcNode.disabled = !!(isText && el.textPath && el.textPath.length > 1);
+    }
+    var tpField = document.getElementById("advTextPathField");
+    if (tpField) tpField.hidden = !isText;
+    var tpClear = document.getElementById("textPathClearBtn");
+    if (tpClear) tpClear.hidden = !(isText && el.textPath && el.textPath.length > 1);
+    var tpHint = document.getElementById("textPathHint");
+    if (tpHint) tpHint.hidden = !(isText && textPathDraw === el.id);
     if (isText) {
       populateFontSelect(document.getElementById("advFontFamily"), el.fontFamily || "system-ui");
       var boldNode = document.getElementById("advFontBold");
@@ -2596,6 +3162,18 @@
     var shapeCircle = document.getElementById("advShapeCircle");
     if (shapeRect) shapeRect.classList.toggle("seg-active", !!(isShape && el.shape !== "circle"));
     if (shapeCircle) shapeCircle.classList.toggle("seg-active", !!(isShape && el.shape === "circle"));
+    // Element-Zierkante (shape elements): seed style + params, toggle param row.
+    if (isShape) {
+      var elEdge = el.edge || { style: "none", sizeMm: 1.5, periodMm: 6 };
+      var edgeSel = document.getElementById("advEdgeStyle");
+      if (edgeSel) edgeSel.value = elEdge.style || "none";
+      var edgeParams = document.getElementById("advEdgeParams");
+      if (edgeParams) edgeParams.hidden = !elEdge.style || elEdge.style === "none";
+      var edgeSz = document.getElementById("advEdgeSize");
+      if (edgeSz) edgeSz.value = elEdge.sizeMm;
+      var edgePd = document.getElementById("advEdgePeriod");
+      if (edgePd) edgePd.value = elEdge.periodMm;
+    }
 
     // Relief height (depth.heightMm): shown for Einfarbig (solid/text) and Farbebenen→Gestuft.
     // With "Höhe je Farbe" (doc.autoLayerHeights) on, the field is the per-element OVERRIDE for
@@ -2641,6 +3219,28 @@
     renderPaletteSwatches(el);
     // Doc-level AMS filament palette (Ebenen group).
     renderAmsPaletteField();
+
+    // Schaukasten: plate assignment row — only when shadowbox is enabled and an element is selected.
+    var sbRow = document.getElementById("sbLayerRow");
+    var sbOn = doc.shadowbox && doc.shadowbox.enabled;
+    if (sbRow) {
+      sbRow.hidden = !(sbOn && el);
+      if (sbOn && el) {
+        var effectiveMode = el.sbMode || (el.sbOverhang ? "rim" : "plate");
+        var isFloat = effectiveMode === "float";
+        sbPopulateLayerSelect(isFloat);
+        var sbN = Math.max(3, Math.min(10, doc.shadowbox.layers));
+        // For float mode, clamp to n-2 (last valid non-hinten index).
+        var sbMaxK = isFloat ? sbN - 2 : sbN - 1;
+        var sbK = el.sbLayer == null ? sbN - 1 : Math.max(0, Math.min(sbN - 1, el.sbLayer));
+        if (sbK > sbMaxK) sbK = sbMaxK;
+        document.getElementById("sbLayerSel").value = String(sbK);
+        // Sync seg buttons.
+        document.getElementById("sbModePlate").classList.toggle("seg-active", effectiveMode === "plate");
+        document.getElementById("sbModeRim").classList.toggle("seg-active", effectiveMode === "rim");
+        document.getElementById("sbModeFloat").classList.toggle("seg-active", effectiveMode === "float");
+      }
+    }
   }
 
   // AMS-Filament-Palette (Ebenen group, doc scope): visible whenever the shared
@@ -2771,6 +3371,98 @@
   bindElementField("advFontBold", "change", function (el, node) {
     if (el.type !== "text") return false;
     el.fontWeight = node.checked ? "bold" : "normal";
+  });
+
+  // -- Arc text (Bogen°, text elements): 0 = straight, ± bends up/down --
+  bindElementField("advArc", "input", function (el, node) {
+    if (el.type !== "text") return false;
+    var v = parseFloat(node.value);
+    el.arcDeg = isNaN(v) ? 0 : Math.max(-350, Math.min(350, v));
+  });
+
+  // -- Pfadtext: record / clear the freehand path of a text element --
+  (function () {
+    var draw = document.getElementById("textPathDrawBtn");
+    if (draw) draw.addEventListener("click", function () {
+      var el = selectedEl();
+      if (!el || el.type !== "text") return;
+      textPathDraw = el.id;
+      refreshAdvancedForSelection();
+    });
+  }());
+  bindElementField("textPathClearBtn", "click", function (el) {
+    if (el.type !== "text") return false;
+    el.textPath = null;
+    textPathDraw = null;
+    refreshAdvancedForSelection();
+    renderLayers();
+  });
+
+  // -- Element-Zierkante (shape elements) --
+  bindElementField("advEdgeStyle", "change", function (el, node) {
+    if (el.type !== "shape") return false;
+    if (!el.edge) el.edge = { style: "none", sizeMm: 1.5, periodMm: 6 };
+    el.edge.style = node.value;
+    var params = document.getElementById("advEdgeParams");
+    if (params) params.hidden = node.value === "none";
+    renderLayers();
+  });
+  bindElementField("advEdgeSize", "input", function (el, node) {
+    if (el.type !== "shape" || !el.edge) return false;
+    var v = parseFloat(node.value);
+    if (isNaN(v) || v <= 0) return false;
+    el.edge.sizeMm = v;
+  });
+  bindElementField("advEdgePeriod", "input", function (el, node) {
+    if (el.type !== "shape" || !el.edge) return false;
+    var v = parseFloat(node.value);
+    if (isNaN(v) || v <= 0) return false;
+    el.edge.periodMm = v;
+  });
+
+  // -- Schaukasten: plate assignment (Ebene) + mode seg --
+  // excludeBack: when true, omit the last (hinten) option (float mode).
+  // Rebuilds whenever the option count OR excludeBack shape changes.
+  function sbPopulateLayerSelect(excludeBack) {
+    var sel = document.getElementById("sbLayerSel");
+    if (!sel) return;
+    var sb = doc.shadowbox;
+    var n = sb ? Math.max(3, Math.min(10, sb.layers)) : 6;
+    var shown = excludeBack ? n - 1 : n;
+    // Detect shape via a data attribute so we rebuild when excludeBack flips.
+    var prevShape = sel.getAttribute("data-excl") || "0";
+    var curShape = excludeBack ? "1" : "0";
+    if (sel.options.length !== shown || prevShape !== curShape) {
+      sel.innerHTML = "";
+      sel.setAttribute("data-excl", curShape);
+      for (var k = 0; k < shown; k++) {
+        var opt = document.createElement("option");
+        opt.value = String(k);
+        opt.textContent = (k + 1) + (k === 0 ? " (vorne)" : k === n - 1 ? " (hinten)" : "");
+        sel.appendChild(opt);
+      }
+    }
+  }
+  bindElementField("sbLayerSel", "change", function (el) {
+    var sb = doc.shadowbox, n = sb ? Math.max(3, Math.min(10, sb.layers)) : 6;
+    var v = parseInt(document.getElementById("sbLayerSel").value, 10);
+    el.sbLayer = (isNaN(v) || v >= n - 1) ? null : v; // back plate stored as null
+  });
+  bindElementField("sbModePlate", "click", function (el) {
+    el.sbMode = "plate"; el.sbOverhang = false;
+    refreshAdvancedForSelection();
+  });
+  bindElementField("sbModeRim", "click", function (el) {
+    el.sbMode = "rim"; el.sbOverhang = false;
+    refreshAdvancedForSelection();
+  });
+  bindElementField("sbModeFloat", "click", function (el) {
+    el.sbMode = "float"; el.sbOverhang = false;
+    if (el.sbLayer == null) {
+      var sb = doc.shadowbox, n = sb ? Math.max(3, Math.min(10, sb.layers)) : 6;
+      el.sbLayer = n - 2;
+    }
+    refreshAdvancedForSelection();
   });
 
   // -- Shape kind (Rechteck / Kreis, shape elements) --
@@ -2938,7 +3630,7 @@
     }
   }());
 
-  // ---- Löschen (Toolbar + Entf/Backspace auf der Arbeitsfläche) ----
+  // ---- Delete (toolbar + Entf/Backspace on the canvas) ----
   function deleteSelected() {
     const ids = state.selectionIds.slice();
     if (!ids.length) return;
@@ -2947,7 +3639,7 @@
     refreshAdvancedForSelection(); renderLayers(); render2D(); scheduleRebuild3D();
   }
 
-  // ---- Duplizieren (Ebenen-Zeile, Strg/Cmd+D, Bühnen-Toolbar) ----
+  // ---- Duplicate (layer row, Ctrl/Cmd+D, stage toolbar) ----
   function duplicateElement(el) {
     if (!el) return;
     // Deep-copy the persisted fields; runtime caches are dropped and makeElementV2
@@ -3016,9 +3708,26 @@
   function scatterOpen() {
     var el = selectedEl();
     if (!el || state.selectionIds.length !== 1) return;
-    scatter = { sourceId: el.id, region: null, seed: (Date.now() >>> 0), previewIds: [] };
+    scatter = { sourceId: el.id, region: null, path: null, mode: "region", seed: (Date.now() >>> 0), previewIds: [] };
     var p = document.getElementById("scatterPanel"); if (p) p.hidden = false;
+    scatterSyncMode();
     scatterGenerate();
+  }
+
+  // Reflect scatter.mode in the panel: seg buttons, per-mode rows, hint text.
+  function scatterSyncMode() {
+    var isPath = !!(scatter && scatter.mode === "path");
+    var br = document.getElementById("scModeRegion"), bp = document.getElementById("scModePath");
+    if (br) br.classList.toggle("seg-active", !isPath);
+    if (bp) bp.classList.toggle("seg-active", isPath);
+    var alignRow = document.getElementById("scAlignRow");
+    if (alignRow) alignRow.hidden = !isPath;
+    var avoidRow = document.getElementById("scAvoidRow");
+    if (avoidRow) avoidRow.hidden = isPath; // even spacing needs no overlap avoidance
+    var hint = document.getElementById("scHint");
+    if (hint) hint.textContent = isPath
+      ? "Zeichne einen Pfad auf der Fläche — die Kopien folgen ihm gleichmäßig."
+      : "Ziehe auf der Fläche einen Bereich auf (sonst ganze Platte).";
   }
   function scatterClose(commit) {
     var p = document.getElementById("scatterPanel"); if (p) p.hidden = true;
@@ -3038,6 +3747,7 @@
       rotMin: num("scRotMin", 0), rotMax: num("scRotMax", 360),
       scaleMin: num("scScaleMin", 0.6), scaleMax: num("scScaleMax", 1.4),
       avoidOverlap: !!(document.getElementById("scAvoid") && document.getElementById("scAvoid").checked),
+      alignToPath: !!(document.getElementById("scAlign") && document.getElementById("scAlign").checked),
     };
   }
   function scatterGenerate() {
@@ -3045,8 +3755,14 @@
     scatterClearPreview();
     var src = doc.elements.find(function (e) { return e.id === scatter.sourceId; });
     if (!src) return;
-    var region = scatter.region || { x0: 0, y0: 0, x1: doc.body.widthMm, y1: doc.body.heightMm };
-    var transforms = window.scatterCopies({ wMm: src.wMm, hMm: src.hMm }, region, scatterParams(), scatter.seed);
+    var transforms;
+    if (scatter.mode === "path") {
+      if (!scatter.path || scatter.path.length < 2) { render2D(); scheduleRebuild3D(); return; }
+      transforms = window.scatterAlongPath({ wMm: src.wMm, hMm: src.hMm }, scatter.path, scatterParams(), scatter.seed);
+    } else {
+      var region = scatter.region || { x0: 0, y0: 0, x1: doc.body.widthMm, y1: doc.body.heightMm };
+      transforms = window.scatterCopies({ wMm: src.wMm, hMm: src.hMm }, region, scatterParams(), scatter.seed);
+    }
     var ids = [];
     transforms.forEach(function (t) {
       var drop = { _img: 1, _display: 1, _displayKey: 1, _hidden: 1, id: 1 };
@@ -3076,8 +3792,33 @@
       var n = document.getElementById(id); if (n) n.addEventListener("input", function () { if (scatter) scatterGenerate(); });
     });
     var av = document.getElementById("scAvoid"); if (av) av.addEventListener("change", function () { if (scatter) scatterGenerate(); });
+    var al = document.getElementById("scAlign"); if (al) al.addEventListener("change", function () { if (scatter) scatterGenerate(); });
+    // Mode toggle: Bereich (random in a region) vs Pfad (evenly along a drawn path).
+    function setScatterMode(mode) {
+      if (!scatter || scatter.mode === mode) return;
+      scatter.mode = mode;
+      var rMin = document.getElementById("scRotMin"), rMax = document.getElementById("scRotMax");
+      if (mode === "path") {
+        // Tangent alignment beats full random rotation: park the rotation range
+        // while in path mode (restored on switching back to Bereich), so the
+        // copies actually follow the drawn path.
+        if (rMin && rMax) {
+          scatter.rotBackup = { min: rMin.value, max: rMax.value };
+          if (parseFloat(rMin.value) === 0 && parseFloat(rMax.value) === 360) rMax.value = 0;
+        }
+        scatterClearPreview();
+      } else if (scatter.rotBackup && rMin && rMax) {
+        rMin.value = scatter.rotBackup.min;
+        rMax.value = scatter.rotBackup.max;
+        scatter.rotBackup = null;
+      }
+      scatterSyncMode();
+      scatterGenerate();
+    }
+    wire("scModeRegion", function () { setScatterMode("region"); });
+    wire("scModePath", function () { setScatterMode("path"); });
   }());
-  // ---- Relief-Höhe: "Auto" entfernt den manuellen Override ----
+  // ---- Relief height: the "Auto" button removes the manual override ----
   (function () {
     var b = document.getElementById("reliefAutoBtn");
     if (b) b.addEventListener("click", function () {
@@ -3091,10 +3832,10 @@
     });
   }());
 
-  // ---- Undo-Grenze für Nutzer-initiierte Dokument-Wechsel (Neu/Beispiel/Öffnen).
-  // Pusht den AKTUELLEN Stand sofort (der debounced Snapshot hängt sonst noch
-  // <500ms in der Luft) bzw. nach dem Wechsel den neuen — auch im Mute-Fenster
-  // direkt nach einem Undo, das nur die debounced Re-Snapshots unterdrücken soll.
+  // ---- Undo boundary for user-initiated document swaps ("Neu" / Beispiel / "Öffnen").
+  // Pushes the CURRENT state immediately (the debounced snapshot may still be
+  // pending <500ms) resp. the new state right after the swap — even inside the
+  // mute window after an undo, which should only suppress debounced re-snapshots.
   function undoBoundary(clearRedo) {
     clearTimeout(_undo.timer);
     var cur;
@@ -3106,7 +3847,7 @@
     if (clearRedo) _undo.redo = [];
   }
 
-  // ---- Beispiel laden: die eingebettete Ukibori-Münze (js/example-project.js) ----
+  // ---- Load example: the embedded Ukibori coin (js/example-project.js) ----
   // Embedded rather than fetched so it also works over file:// and offline.
   function loadExampleAction() {
     if (!window.EXAMPLE_PROJECT) {
@@ -3125,14 +3866,14 @@
     }
   }
 
-  // ---- Neu: leeres Projekt (Undo bringt das alte zurück) ----
+  // ---- "Neu": fresh empty project (undo brings the old one back) ----
   (function () {
     var btn = document.getElementById("newBtn");
     if (!btn) return;
     btn.addEventListener("click", function () {
       var nameField = document.getElementById("exportName");
-      // Nachfragen, sobald echter Inhalt verloren ginge — auch reine
-      // Werkstück-/Paletten-Änderungen ohne Elemente oder ein getippter Name.
+      // Confirm whenever real content would be lost — including plate/palette
+      // changes without any elements, or a typed export name.
       var dirty;
       try { dirty = window.serializeProject(doc) !== window.serializeProject(window.defaultDoc()); } catch (e) { dirty = true; }
       if (nameField && nameField.value.trim()) dirty = true;
@@ -3144,7 +3885,7 @@
     });
   }());
 
-  // ---- Bühnen-Hero: Klick öffnet den Bild-Dialog, Drops landen direkt ----
+  // ---- Stage hero: click opens the image dialog, drops land directly ----
   (function () {
     var hero = document.getElementById("stageHero");
     if (!hero) return;
@@ -3156,7 +3897,7 @@
     if (ex) ex.addEventListener("click", function (e) {
       e.stopPropagation(); // not a card click — don't open the image dialog
       loadExampleAction();
-      // Falls die Tour gerade diesen Knopf anleuchtet: weiter zum nächsten Schritt.
+      // If the tour is currently spotlighting this button, advance to the next step.
       if (window.coachmarks && window.coachmarks.refresh) window.coachmarks.refresh();
     });
   }());
@@ -3260,24 +4001,131 @@
     var cv2 = document.getElementById("centerV"); if (cv2) cv2.addEventListener("click", centerV);
   }());
 
+  // ---- Schaukasten (shadowbox) doc controls ----
+  function sbState() { return doc.shadowbox; }
+
+  function syncShadowboxControls() {
+    const sb = sbState();
+    if (!sb) return;
+    const supported = doc.body.shape === "rect" || doc.body.shape === "circle";
+    document.getElementById("sbEnabled").checked = !!sb.enabled;
+    document.getElementById("sbEnabled").disabled = !supported;
+    document.getElementById("sbShapeHint").hidden = supported;
+    document.getElementById("sbParams").hidden = !sb.enabled || !supported;
+    document.getElementById("sbLayers").value = sb.layers;
+    document.getElementById("sbInset").value = sb.insetPerLayerMm;
+    const auto = sb.opening.source !== "drawn";
+    document.getElementById("sbOpeningAuto").classList.toggle("seg-active", auto);
+    document.getElementById("sbOpeningDrawn").classList.toggle("seg-active", !auto);
+    document.getElementById("sbAutoParams").hidden = !auto;
+    document.getElementById("sbDrawnParams").hidden = auto;
+    document.getElementById("sbMargin").value = sb.opening.marginMm;
+    document.getElementById("sbPeriod").value = sb.opening.periodMm;
+    document.getElementById("sbWaviness").value = sb.opening.waviness;
+    document.getElementById("sbColorFront").value = sb.colorFront;
+    document.getElementById("sbColorBack").value = sb.colorBack;
+    document.getElementById("sbStand").checked = !!sb.stand.enabled;
+    document.getElementById("sbStandHeight").value = sb.stand.heightMm;
+    var sbStandRadiusEl = document.getElementById("sbStandRadius");
+    if (sbStandRadiusEl) sbStandRadiusEl.value = sb.stand.cornerRadiusMm != null ? sb.stand.cornerRadiusMm : 0;
+    var sbPinsEl = document.getElementById("sbPins");
+    if (sbPinsEl) sbPinsEl.checked = sb.pins ? sb.pins.enabled !== false : true;
+    var sbExplodeEl = document.getElementById("sbExplode");
+    if (sbExplodeEl) sbExplodeEl.value = sbExplodeMm;
+  }
+
+  function sbChanged() {
+    syncShadowboxControls();
+    refreshAdvancedForSelection();
+    render2D();
+    scheduleRebuild3D();
+  }
+
+  function initShadowboxControls() {
+    const on = (id, evt, fn) => document.getElementById(id).addEventListener(evt, fn);
+    on("sbEnabled", "change", function () { sbState().enabled = this.checked; sbChanged(); });
+    on("sbLayers", "change", function () {
+      const v = parseInt(this.value, 10);
+      if (!isNaN(v)) { sbState().layers = Math.max(3, Math.min(10, v)); sbChanged(); }
+    });
+    on("sbInset", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v > 0) { sbState().insetPerLayerMm = v; sbChanged(); }
+    });
+    on("sbOpeningAuto", "click", function () {
+      sbState().opening.source = "auto";
+      sbOpeningDraw = false;                          // switching to Auto cancels an armed draw
+      document.getElementById("sbDrawHint").hidden = true;
+      sbChanged();
+    });
+    on("sbOpeningDrawn", "click", function () { sbState().opening.source = "drawn"; sbChanged(); });
+    on("sbDrawBtn", "click", function () {
+      sbOpeningDraw = true;
+      document.getElementById("sbDrawHint").hidden = false;
+    });
+    on("sbMargin", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v >= 0.5) { sbState().opening.marginMm = v; sbChanged(); }
+    });
+    on("sbPeriod", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v >= 4) { sbState().opening.periodMm = v; sbChanged(); }
+    });
+    on("sbWaviness", "input", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v)) { sbState().opening.waviness = v; sbChanged(); }
+    });
+    on("sbReroll", "click", function () { sbState().opening.seed = (sbState().opening.seed | 0) + 1; sbChanged(); });
+    on("sbColorFront", "input", function () { sbState().colorFront = this.value.toUpperCase(); sbChanged(); });
+    on("sbColorBack", "input", function () { sbState().colorBack = this.value.toUpperCase(); sbChanged(); });
+    on("sbStand", "change", function () { sbState().stand.enabled = this.checked; sbChanged(); });
+    on("sbStandHeight", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v >= 8) { sbState().stand.heightMm = v; sbChanged(); }
+    });
+    on("sbStandRadius", "change", function () {
+      const v = parseFloat(this.value);
+      if (!isNaN(v) && v >= 0) { sbState().stand.cornerRadiusMm = v; sbChanged(); }
+    });
+    on("sbPins", "change", function () {
+      var sb = sbState();
+      if (!sb) return;
+      if (sb.pins == null) sb.pins = { enabled: true, diameterMm: 3, clearanceMm: 0.35 };
+      sb.pins.enabled = this.checked;
+      sbChanged();
+    });
+    on("sbExplode", "input", function () {
+      sbExplodeMm = parseFloat(this.value) || 0;
+      scheduleRebuild3D();
+    });
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && sbOpeningDraw) {
+        sbOpeningDraw = false;
+        document.getElementById("sbDrawHint").hidden = true;
+      }
+    });
+  }
+  initShadowboxControls();
+
   // -- Init Advanced panel doc-level values (also called by resetDocTo) --
   function initAdvancedUI() {
     var t = document.getElementById("advThickness");
-    if (t) t.value = doc.body.thicknessMm != null ? doc.body.thicknessMm : 3;
+    if (t) t.value = doc.body.thicknessMm != null ? doc.body.thicknessMm : 2;
     var bt = document.getElementById("advBaseThickness");
     if (bt) bt.value = doc.body.baseThicknessMm != null ? doc.body.baseThicknessMm : 0;
     var lh = document.getElementById("advLayerHeight");
-    if (lh) lh.value = doc.body.layerHeightMm != null ? doc.body.layerHeightMm : 0.2;
+    if (lh) lh.value = doc.body.layerHeightMm != null ? doc.body.layerHeightMm : 0.4;
     var res = document.getElementById("advResolution");
     if (res) res.value = doc.resolution != null ? doc.resolution : 1024;
     var cs = document.getElementById("advColorStep");
-    if (cs) cs.value = doc.colorStepLayers != null ? doc.colorStepLayers : 2;
+    if (cs) cs.value = doc.colorStepLayers != null ? doc.colorStepLayers : 4;
     var bc = document.getElementById("advBaseColor");
     if (bc) bc.value = doc.body.baseColor || "#000000";
     // Plate controls (canonical ids; seg states + field visibility come from
     // applyShape/applyMount, called from initSimpleUI).
     refreshAdvancedForSelection();
     renderAdvancedLayers();
+    syncShadowboxControls();
   }
   initAdvancedUI();
 
