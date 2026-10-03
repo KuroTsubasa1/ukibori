@@ -204,16 +204,18 @@
     assertClose(byColor["#101010"].mx, T, 1e-4, "base-colored floor flush with the plate top");
   });
 
-  test("auto-heights engraved: tight carve budget compresses the stack but keeps floors DISTINCT", async () => {
+  test("auto-heights engraved: tight carve budget keeps whole-layer, DISTINCT floors (base yields)", async () => {
     const img = await imgSolid(20, 20);
     const d = autoDoc();
-    d.body.baseThicknessMm = 2.4; // floor=0.4, minBase=2.4 → maxRecess=0.2 → step'=0.1 (< layerH!)
+    // floor=0.4, minBase=2.4 leaves 1 layer of recess for 2 levels → the base gives up one
+    // layer (→ 2.2mm) so each level stays one whole printed layer (never a 0.1mm sub-step).
+    d.body.baseThicknessMm = 2.4;
     d.elements = [solidEl(img, "#FF0000", 15, "engraved"), solidEl(img, "#00FF00", 45, "engraved")];
     const floors = buildParts(d).filter(p => p.name.indexOf("farbe-") === 0);
     const byColor = {}; floors.forEach(p => { byColor[hexOf(p.color)] = zbounds(p.facets).mn; });
-    const bu = (dd) => T - Math.min(dd, 0.2) - floor; // local budget: maxRecess = 3 - 0.4 - 2.4 = 0.2
-    assertClose(byColor["#FF0000"], bu(0.1), 1e-4, "rank 0 at compressed 0.1mm (no layerH clamp)");
-    assertClose(byColor["#00FF00"], bu(0.2), 1e-4, "rank 1 at 0.2mm — floors stay distinct");
+    const bu = (dd) => T - Math.min(dd, 0.4) - floor; // local budget: maxRecess = 3 - 0.4 - 2.2 = 0.4
+    assertClose(byColor["#FF0000"], bu(0.2), 1e-4, "rank 0 at one layer (0.2mm)");
+    assertClose(byColor["#00FF00"], bu(0.4), 1e-4, "rank 1 at two layers — floors stay distinct");
   });
 
   test("auto-heights engraved: override recesses by its value, clamped to >= layerH", async () => {
@@ -341,7 +343,7 @@
     const img = await imgSolid(20, 20);
     const d = autoDoc();
     d.topLayerColor = "#FFFFFF";
-    d.body.baseThicknessMm = 2.4; // TIGHT budget: maxRecess=0.2 → compression divisor (3, incl. deck) is live
+    d.body.baseThicknessMm = 2.4; // TIGHT budget: 3 levels (incl. deck) → base yields to 2.0mm, 1 layer per level
     d.elements = [solidEl(img, "#FF0000", 12, "engraved"), solidEl(img, "#00FF00", 45, "engraved")];
     const parts = buildParts(d);
     const pb = parts.filter(p => p.name.indexOf("grundplatte-band-") === 0)
@@ -350,11 +352,11 @@
     assertEqual(pb[0].hex, "#FFFFFF", "top band = Deckschicht");
     assertEqual(pb[1].hex, "#101010", "base band directly below the deck");
     assertClose(pb[0].zb.mx, T, 1e-4, "deck band at the plate top");
-    assertClose(pb[0].zb.mn, T - Math.min(step, (T - 2.4) / 4), 1e-4, "band thickness compressed to the budget");
-    const mr = 0.2, s = Math.min(step, mr / 3); // deck occupies rank 0 → divisor is 3, NOT 2
+    assertClose(pb[0].zb.mn, T - layerH, 1e-4, "band thickness = one whole layer (the stack step)");
+    const s = layerH, mr = T - floor - 2.0; // deck occupies rank 0 → 3 levels, NOT 2
     const bu2 = (dd) => T - Math.min(dd, mr) - floor;
     const byColor = {}; parts.filter(p => p.name.indexOf("farbe-") === 0).forEach(p => { byColor[hexOf(p.color)] = zbounds(p.facets).mn; });
-    assertClose(byColor["#FF0000"], bu2(2 * s), 1e-4, "red carves through the deck (rank 1, compressed step)");
+    assertClose(byColor["#FF0000"], bu2(2 * s), 1e-4, "red carves through the deck (rank 1, one-layer step)");
     assertClose(byColor["#00FF00"], bu2(3 * s), 1e-4, "green at rank 2 — floors stay distinct");
   });
 
@@ -412,11 +414,17 @@
     assertEqual(pb[0].hex, "#FFCC00", "top band = Deckschicht");
     assertClose(pb[0].zb.mx, T, 1e-4, "deck band at the plate top");
     assertEqual(pb[1].hex, "#000000", "palette layer 1 below the deck");
-    const mr = 0.2, s = Math.min(step, mr / 3); // deck counts in the compression divisor
+    // Deck counts as a stack level (3 levels). The set 2.4mm base leaves only 1 layer of
+    // recess, so the stack takes 2 layers from the base (→ 2.0mm) and every level gets one
+    // whole printed layer — never a sub-layer step.
+    const s = layerH, mr = T - floor - 2.0;
     const bu2 = (dd) => T - Math.min(dd, mr) - floor;
-    const byColor = {}; parts.filter(p => p.name.indexOf("farbe-") === 0).forEach(p => { byColor[hexOf(p.color)] = zbounds(p.facets).mn; });
-    assertClose(byColor["#000000"], bu2(2 * s), 1e-4, "palette layer 1 carves through the deck");
-    assertClose(byColor["#F0F0F0"], bu2(3 * s), 1e-4, "palette layer 2 one compressed step deeper — distinct");
+    const byColor = {}; parts.filter(p => p.name.indexOf("farbe-") === 0).forEach(p => { byColor[hexOf(p.color)] = zbounds(p.facets); });
+    // Floor TOPS = visible surfaces; the nested (non-deepest) floor is one step thick so it
+    // ends exactly on the deeper floor instead of interpenetrating it.
+    assertClose(byColor["#000000"].mx, T - 2 * s, 1e-4, "palette layer 1 carves through the deck");
+    assertClose(byColor["#000000"].mn, T - 3 * s, 1e-4, "nested floor ends where the next one starts");
+    assertClose(byColor["#F0F0F0"].mn, bu2(3 * s), 1e-4, "palette layer 2 one whole layer deeper — distinct");
   });
 
   test("auto-heights engraved: deck ≠ base → deck ONE band on top, flush level one band down (user scenario)", async () => {
