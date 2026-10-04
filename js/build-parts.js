@@ -415,6 +415,72 @@
     return { floor, minBase, maxRecess };
   }
 
+  // Layer-grid stack layout: `levels` stacked color levels between the solid base and the
+  // plate top, with `reserveMm` kept free below the deepest level (the fallback's color-floor
+  // slab; 0 for the plate-band plan). Every boundary must land on the print-layer grid and
+  // every level must be at least one printed layer — otherwise the slicer mixes filaments in
+  // one layer and nested floors interpenetrate (the 5+ color clipping bug). So: snap the base
+  // down onto the grid, give each level whole layers (colorStepLayers when it fits, else
+  // fewer, min 1), and when even one layer per level doesn't fit, take the missing layers
+  // from the base (keeping >= 1 layer). fits=false: too thin for the stack even then.
+  function __gridStack(body, levels, stepLayers, reserveMm) {
+    const T = body.thicknessMm, layerH = body.layerHeightMm, eps = 1e-6;
+    const want = Math.max(1, stepLayers || 2);
+    const { minBase } = __engravedBudget(body);
+    const total = Math.floor((T - (reserveMm || 0)) / layerH + eps);
+    let baseLayers = Math.floor(minBase / layerH + eps);
+    if (total - baseLayers < levels) baseLayers = Math.max(1, total - levels);
+    const room = Math.max(0, total - baseLayers);
+    const sLayers = Math.max(1, Math.min(want, Math.floor(room / Math.max(1, levels))));
+    return { minBase: baseLayers * layerH, s: sLayers * layerH, fits: levels <= room };
+  }
+
+  // Engraved "Höhe je Farbe" stack depth: the auto order length, when at least one engraved
+  // Einfarbig element actually takes an auto height (a manual heightOverrideMm opts out;
+  // base-colored elements join when a deck exists — they carve through it). 0 = none.
+  function __autoEngravedLevels(doc) {
+    if (!doc.autoLayerHeights) return 0;
+    const order = __autoSolidOrder(doc, "engraved");
+    if (!order.length) return 0;
+    const baseHex = String(doc.body.baseColor || "").toUpperCase();
+    const deck = doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null;
+    const deckValid = !!(deck && deck !== baseHex);
+    const has = doc.elements.some((e) => {
+      if (!e || !e.depth || e.depth.mode !== "solid" || e._hidden || e.cutout) return false;
+      if (e.type === "image" && !e._img) return false;
+      if ((e.depth.direction || "raised") !== "engraved") return false;
+      if (e.depth.heightOverrideMm != null) return false;
+      const h = String(e.color || "").toUpperCase();
+      return order.indexOf(h) !== -1 || (deckValid && h === baseHex);
+    });
+    return has ? order.length : 0;
+  }
+
+  // Stack depth for the NO-plan fallback (amsSolidBase, ambiguous multi-element bands, or
+  // auto heights without plate bands): shared palette slots (+ deck) when any colorLayers
+  // bands element exists, the auto order, or the largest per-element color count
+  // (legacyCount — only the build knows it from composed pixels).
+  function __fallbackLevels(doc, legacyCount) {
+    const baseHex = String(doc.body.baseColor || "").toUpperCase();
+    const deck = doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null;
+    const ams = (Array.isArray(doc.amsPalette) && doc.amsPalette.length) ? doc.amsPalette : null;
+    // Engraved only: raised bands stacks build upward and never touch the engraved budget.
+    const anyBands = doc.elements.some(el => el && el.type === "image" && !el._hidden && el._img && el.depth &&
+      el.depth.mode === "colorLayers" && colorStyleOf(el) === "bands" && el.depth.direction === "engraved");
+    const amsLevels = (ams && anyBands) ? ams.length + ((deck && deck !== baseHex) ? 1 : 0) : 0;
+    return Math.max(__autoEngravedLevels(doc), amsLevels, legacyCount || 0);
+  }
+
+  // Engraved auto-height step when the color is NOT in the shared plan: the fallback stack's
+  // whole-layer step when one exists, else the classic budget compression (no stack at all,
+  // e.g. only overridden elements — kept for parity).
+  function __fallbackAutoStep(doc, stackStep, maxRecess) {
+    if (stackStep != null) return stackStep;
+    const len = __autoSolidOrder(doc, "engraved").length;
+    const step = Math.max(1, doc.colorStepLayers || 2) * doc.body.layerHeightMm;
+    return len > 0 ? Math.min(step, maxRecess / len) : step;
+  }
+
   // --- Auto layer heights (Höhe je Farbe) -----------------------------------
   // When doc.autoLayerHeights is on, an Einfarbig (solid-mode) element's height
   // comes from its COLOR, AMS-style: elements sharing a color share one height;
@@ -464,7 +530,9 @@
     return order;
   }
 
-  function __autoSolidHeight(doc, el, maxRecessMm, ignoreOverride) {
+  // engravedStepMm: the engraved per-level step (whole printed layers, from __gridStack /
+  // the shared plan). null = uncompressed colorStepLayers*layerH (raised).
+  function __autoSolidHeight(doc, el, engravedStepMm, ignoreOverride) {
     if (!doc.autoLayerHeights) return null;
     if (!el || !el.depth || el.depth.mode !== "solid") return null;
     const layerH = doc.body.layerHeightMm;
@@ -481,16 +549,12 @@
       // punch-through hole already exposes the plate one band below the deck.)
       const top = doc.topLayerColor ? String(doc.topLayerColor).toUpperCase() : null;
       if (!(top && top !== baseHex) || (el.depth.direction || "raised") !== "engraved") return 0;
-      const ord = __autoSolidOrder(doc, "engraved");
-      let s = Math.max(1, doc.colorStepLayers || 2) * layerH;
-      if (maxRecessMm != null && ord.length > 0) s = Math.min(s, maxRecessMm / ord.length);
-      return s;
+      return engravedStepMm != null ? engravedStepMm : Math.max(1, doc.colorStepLayers || 2) * layerH;
     }
     const order = __autoSolidOrder(doc, el.depth.direction || "raised");
     const rank = order.indexOf(hex);
     if (rank < 0) return null; // element itself prints nothing (hidden/cutout/undecoded)
-    let step = Math.max(1, doc.colorStepLayers || 2) * layerH;
-    if (maxRecessMm != null && order.length > 0) step = Math.min(step, maxRecessMm / order.length);
+    const step = engravedStepMm != null ? engravedStepMm : Math.max(1, doc.colorStepLayers || 2) * layerH;
     return (rank + 1) * step;
   }
 
@@ -525,10 +589,7 @@
   // a doc mixing a bands image with auto-height solids is an unchanged badge approximation.
   function __amsEngravedPlan(doc, preScan) {
     const body = doc.body;
-    const T = body.thicknessMm, layerH = body.layerHeightMm;
     const baseHex = String(body.baseColor || "").toUpperCase();
-    const { minBase } = __engravedBudget(body);
-    const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
     const lumHex = (hex) => { const c = window.hexToRgb(hex); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]; };
     // AMS shared palette: a color's layer index (and thus depth) is its position in the
     // global palette, so the same color lands at the same depth across every element.
@@ -553,33 +614,22 @@
     if (!bandHexes.length && doc.autoLayerHeights && !doc.amsSolidBase && bandsElemCount === 0) {
       const order = __autoSolidOrder(doc, "engraved");
       const deckValidE = !!(deckHexE && deckHexE !== baseHex);
-      const hasParticipant = order.length && doc.elements.some((e) => {
-        if (!e || !e.depth || e.depth.mode !== "solid" || e._hidden || e.cutout) return false;
-        if (e.type === "image" && !e._img) return false;
-        if ((e.depth.direction || "raised") !== "engraved") return false;
-        if (e.depth.heightOverrideMm != null) return false;
-        const h = String(e.color || "").toUpperCase();
-        return order.indexOf(h) !== -1 || (deckValidE && h === baseHex);
-      });
-      if (hasParticipant) bandHexes = deckValidE ? [order[0], baseHex].concat(order.slice(1)) : [baseHex].concat(order);
+      if (__autoEngravedLevels(doc) > 0) bandHexes = deckValidE ? [order[0], baseHex].concat(order.slice(1)) : [baseHex].concat(order);
     }
-    // Grid-snapped band thickness (spec §1): with avail = T - minBase, N = bandHexes.length,
-    // bandThick = layerH * max(1, floor(min(step, avail/N)/layerH)). Degenerate fallback
-    // (plate too thin to fit N whole layers, avail < N*layerH): unsnapped min(step, avail/N)
-    // so colors stay distinct. bandThick === 0 when there is no plan.
-    const availPlan = Math.max(0, T - minBase);
+    // Grid-snapped band thickness (spec §1, tightened): bandThick === 0 when there is no plan.
+    // Layout on the layer grid (__gridStack): base snapped down onto the grid, whole layers
+    // per band; when N bands don't fit even at one layer each, the base yields layers
+    // instead of dropping below a printed layer. The builder adopts planMinBase.
     const N_plan = bandHexes.length;
-    const bandThick = N_plan > 0
-      ? (availPlan < N_plan * layerH
-          ? Math.min(step, availPlan / N_plan)
-          : layerH * Math.max(1, Math.floor(Math.min(step, availPlan / N_plan) / layerH)))
-      : 0;
+    const lay = N_plan > 0 ? __gridStack(body, N_plan, doc.colorStepLayers, 0) : null;
+    const bandThick = lay ? lay.s : 0;
+    const planMinBase = lay ? lay.minBase : null;
     // recessOf(hex): a plan-aligned motif floor recess = index*bandThick (index into
     // bandHexes), so the floor's visible top T-index*bandThick equals band-hex's top.
     // Returns null when the color is not in the plan (fall back to compression).
     const planIndex = new Map(); bandHexes.forEach((h, i) => { if (!planIndex.has(h)) planIndex.set(h, i); });
     const recessOf = (hex) => planIndex.has(hex) ? planIndex.get(hex) * bandThick : null;
-    return { bandHexes, bandThick, recessOf };
+    return { bandHexes, bandThick, recessOf, minBase: planMinBase };
   }
 
   // Engraved base slab + risers + per-color recess floors, from a pre-composed grid.
@@ -601,12 +651,11 @@
     const tracedFacets = (member, thickness, z0) => window.orientOutward(
       window.traceMaskToFacets((c, r) => member(c, r) && footprint(c, r) > 0, cols, rows, pitch, thickness, z0));
 
-    const { floor, minBase, maxRecess } = __engravedBudget(doc.body);
+    // minBase/maxRecess are adopted from the layer-grid layout below (shared plan, or the
+    // no-plan fallback stack) when an AMS / Höhe-je-Farbe stack is present.
+    let { floor, minBase, maxRecess } = __engravedBudget(doc.body);
     const recessOf = (d) => Math.max(0, Math.min(d, maxRecess));
     const baseUnder = (d) => T - recessOf(d) - floor;
-    const groove = grooveBand
-      ? Math.min(doc.body.line.depthMm, Math.max(0, T - minBase - layerH))
-      : 0;
 
     const step = Math.max(1, doc.colorStepLayers || 2) * layerH;
 
@@ -666,7 +715,33 @@
     // The shared layer plan (bandHexes + grid-snapped bandThick + planRecess) is built by
     // the ONE source of truth __amsEngravedPlan, from the pre-scan above; the "Höhe je Farbe"
     // badge (window.autoSolidHeightMm) calls the same helper so preview == carve.
-    const { bandHexes, bandThick, recessOf: planRecess } = __amsEngravedPlan(doc, { bandHexSet, bandsElemCount });
+    const { bandHexes, bandThick, recessOf: planRecess, minBase: planMinBase } = __amsEngravedPlan(doc, { bandHexSet, bandsElemCount });
+    // No plan (amsSolidBase, ambiguous multi-element bands, auto heights without plate bands)
+    // but still a color stack → the same layer-grid layout for the classic floors, keeping a
+    // color-floor slab of room under the deepest level. legacyCount = largest per-element
+    // color count of palette-less bands elements (only known here, from composed pixels).
+    let fallbackStack = null;
+    if (planMinBase == null) {
+      let legacyCount = 0;
+      if (!ams) for (const ei of special) {
+        if (colorStyleOf(doc.elements[ei]) !== "bands") continue;
+        const seen = new Set();
+        for (let i = 0; i < cols * rows; i++) {
+          if (comp.owner[i] !== ei || comp.isBase[i] || comp.cutout[i] || inBand(i)) continue;
+          seen.add(__hex(comp.r[i], comp.g[i], comp.b[i]));
+        }
+        legacyCount = Math.max(legacyCount, seen.size);
+      }
+      const levels = __fallbackLevels(doc, legacyCount);
+      if (levels > 0) fallbackStack = __gridStack(doc.body, levels, doc.colorStepLayers, floor);
+    }
+    const adoptedBase = planMinBase != null ? planMinBase : (fallbackStack ? fallbackStack.minBase : null);
+    if (adoptedBase != null) { minBase = adoptedBase; maxRecess = Math.max(0, T - floor - minBase); }
+    // Engraved step for the classic (non-plan) floors: whole layers when a stack exists.
+    const stackStep = fallbackStack ? fallbackStack.s : null;
+    const groove = grooveBand
+      ? Math.min(doc.body.line.depthMm, Math.max(0, T - minBase - layerH))
+      : 0;
 
     // Per-element recess depth: solid/text recess by the element's relief height (depth.heightMm);
     // stepped colorLayers split that height evenly across their colors (topmost color = full
@@ -689,7 +764,8 @@
       }
       // Auto layer heights fallback: Einfarbig recess derived from the element's color,
       // stack compressed into the carve budget (maxRecess) like AMS bands.
-      const autoD = __autoSolidHeight(doc, el, maxRecess);
+      const engr = !!(el && el.depth && el.depth.direction === "engraved");
+      const autoD = __autoSolidHeight(doc, el, engr ? __fallbackAutoStep(doc, stackStep, maxRecess) : null);
       if (autoD != null) return autoD;
       const hm = (el && el.depth && el.depth.heightMm != null) ? el.depth.heightMm : layerH;
       const h = hm <= 0 ? 0 : Math.max(hm, layerH); // Relief-Höhe 0 = no recess (off)
@@ -724,9 +800,13 @@
       if (pr != null && Math.abs(pr - depthMm) <= 1e-9) return (T - depthMm) - z0; // top pinned to band top
       return floor;
     };
-    const addFloor = (member, hex, depthMm) => {
-      const z0 = floorZ0(hex, depthMm);
-      const facets = tracedFacets(member, floorThick(hex, depthMm, z0), z0);
+    // maxThick: nested AMS floors pass the gap to the next deeper floor, so each one ends
+    // exactly where that floor begins instead of interpenetrating it (top stays pinned).
+    const addFloor = (member, hex, depthMm, maxThick) => {
+      let z0 = floorZ0(hex, depthMm);
+      let thick = floorThick(hex, depthMm, z0);
+      if (maxThick != null && maxThick > 1e-9 && thick > maxThick) { z0 += thick - maxThick; thick = maxThick; }
+      const facets = tracedFacets(member, thick, z0);
       if (facets.length) colorParts.push({ name: "farbe-" + (++cn), color: window.hexToRgb(hex), facets });
     };
 
@@ -759,7 +839,8 @@
     // above and takes precedence via depthOfPos below. ams/deckHexE/deckShiftE/lumHex/
     // bandHexSet/bandsElemCount are already defined with the plan.
     const amsRank = ams ? ((hex) => { const i = ams.indexOf(hex); return i < 0 ? ams.length - 1 : i; }) : null;
-    const amsStep = ams ? Math.min(step, maxRecess / (ams.length + deckShiftE)) : step;
+    const amsStep = stackStep != null ? stackStep : (ams ? Math.min(step, maxRecess / (ams.length + deckShiftE)) : step);
+    const legacyStep = stackStep != null ? stackStep : step;
     for (const ei of special) {
       const el = doc.elements[ei];
       const style = colorStyleOf(el);
@@ -808,7 +889,7 @@
         const depthOfPos = (k) => {
           const pr = planRecess(sorted[k]);
           if (pr != null) return pr;
-          return ams ? (amsRank(sorted[k]) + 1 + deckShiftE) * amsStep : (k + 1) * step;
+          return ams ? (amsRank(sorted[k]) + 1 + deckShiftE) * amsStep : (k + 1) * legacyStep;
         };
         // cumUpTo[k] = union of pixels of the colors at sorted positions 0..k (layer index <= this).
         const cumUpTo = new Array(N);
@@ -819,9 +900,11 @@
           cumUpTo[k] = u;
         }
         // Deepest first: the highest-index present color has the largest region (all) + deepest floor.
+        // Shallower (nested) floors are capped at the gap to the next deeper floor.
         for (let k = N - 1; k >= 0; k--) {
           const region = cumUpTo[k];
-          addFloor((c, r) => region[idx(c, r)] === 1, sorted[k], depthOfPos(k));
+          const gap = k < N - 1 ? depthOfPos(k + 1) - depthOfPos(k) : null;
+          addFloor((c, r) => region[idx(c, r)] === 1, sorted[k], depthOfPos(k), gap);
         }
         // Base beneath a pixel reaches the deepest floor covering it = the deepest present
         // color. Store the floor's base-under HEIGHT (plan-aware) so the behind-fill below
@@ -2228,7 +2311,11 @@
       if (pr != null) return pr; // in the shared plan → preview matches the carved floor
     }
     // Fallback: classic per-element compression (engraved) or raised stack (raised).
-    return __autoSolidHeight(doc, el, isEngraved ? __engravedBudget(doc.body).maxRecess : null, true);
+    if (!isEngraved) return __autoSolidHeight(doc, el, null, true);
+    const levels = __fallbackLevels(doc, 0);
+    const budget = __engravedBudget(doc.body);
+    const fb = levels > 0 ? __gridStack(doc.body, levels, doc.colorStepLayers, budget.floor) : null;
+    return __autoSolidHeight(doc, el, __fallbackAutoStep(doc, fb ? fb.s : null, budget.maxRecess), true);
   };
   // Footprint = the defining image element's rotated rectangle (plate-free "Bild" object).
   // >0 inside the rectangle, in cell units. borderMm is ignored (the image IS the object).

@@ -363,11 +363,13 @@
     assertEqual(pb[1].hex, "#101010", "base band directly below the deck");
     assertClose(pb[0].zb.mx, T, 1e-4, "deck band at the plate top");
     // AMS layer alignment (2026-07-22): bandHexes = [deck, base, #FF0000, #00FF00] (N=4). avail =
-    // T-2.4 = 0.6 < N*layerH = 0.8, so bandThick uses the documented degenerate fallback
-    // min(step, avail/N) = 0.15 (colors still distinct, off-grid because the plate is too thin to
-    // fit 4 whole layers). Each motif floor TOP == its plate band top = T - index*bandThick.
-    const bandThick = Math.min(step, (T - 2.4) / 4);
-    assertClose(pb[0].zb.mn, T - bandThick, 1e-4, "deck band thickness = degenerate bandThick");
+    // T-2.4 = 0.6 < N*layerH = 0.8: instead of an off-grid sub-layer band (0.15mm), the base
+    // yields one layer (2.4 → 2.2mm) so every band stays one whole printed layer.
+    // Each motif floor TOP == its plate band top = T - index*bandThick.
+    const bandThick = layerH;
+    assertClose(pb[0].zb.mn, T - bandThick, 1e-4, "deck band thickness = one whole layer (base yields)");
+    const basePlate = parts.filter(p => p.name === "grundplatte").map(p => zbounds(p.facets));
+    assert(basePlate.some(b => Math.abs(b.mx - 2.2) < 1e-4), "solid base snapped to 2.2mm to make room");
     const topByColor = {}; parts.filter(p => p.name.indexOf("farbe-") === 0).forEach(p => { topByColor[hexOf(p.color)] = zbounds(p.facets).mx; });
     assertClose(topByColor["#FF0000"], T - 2 * bandThick, 1e-4, "red floor top == its band top (index 2, through the deck)");
     assertClose(topByColor["#00FF00"], T - 3 * bandThick, 1e-4, "green floor top == its band top (index 3, distinct)");
